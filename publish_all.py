@@ -25,6 +25,7 @@ PLATFORM_NAMES = {
     "tencent": "微信视频号",
     "baijiahao": "百家号",
     "tk": "TikTok",
+    "weibo": "微博",
 }
 
 # 平台标题长度限制
@@ -36,6 +37,7 @@ TITLE_LIMITS = {
     "tencent": 30,
     "baijiahao": 30,
     "tk": 150,
+    "weibo": 2000,
 }
 
 
@@ -148,6 +150,8 @@ async def publish_to_douyin(params: dict) -> dict:
                 desc=params["desc"],
                 publish_strategy=publish_strategy,
             )
+            await uploader.main()
+            return {"success": True, "message": "发布成功"}
         else:
             images = params["images"]
             if not images:
@@ -346,6 +350,58 @@ async def publish_to_baijiahao(params: dict) -> dict:
         return {"success": False, "message": str(e)}
 
 
+async def publish_to_weibo(params: dict) -> dict:
+    """发布到微博"""
+    from uploader.weibo_uploader.main import WeiboVideo, WeiboNote
+
+    account_file = resolve_path(params["account_file"])
+    title = truncate_title(params["title"], "weibo")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = WeiboVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+        else:
+            images = params["images"]
+            if not images:
+                return {"success": False, "message": "图文模式需要提供图片"}
+
+            image_paths = [resolve_path(img) for img in images]
+            for img_path in image_paths:
+                if not os.path.exists(img_path):
+                    return {"success": False, "message": f"图片文件不存在: {img_path}"}
+
+            uploader = WeiboNote(
+                image_paths=image_paths,
+                note=params["desc"],
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                title=title,
+                publish_strategy=publish_strategy,
+            )
+
+        await uploader.main()
+        return {"success": True, "message": "发布成功"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
 async def publish_to_platform(platform: str, params: dict) -> dict:
     """发布到指定平台"""
     if platform == "douyin":
@@ -362,6 +418,8 @@ async def publish_to_platform(platform: str, params: dict) -> dict:
         return await publish_to_baijiahao(params)
     elif platform == "tk":
         return {"success": False, "message": "TikTok平台暂未实现"}
+    elif platform == "weibo":
+        return await publish_to_weibo(params)
     else:
         return {"success": False, "message": f"未知平台: {platform}"}
 

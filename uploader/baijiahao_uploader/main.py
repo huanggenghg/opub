@@ -120,7 +120,12 @@ class BaiJiaHaoVideo(object):
 
     async def upload(self, playwright: Playwright) -> None:
         # 使用 Chromium 浏览器启动一个浏览器实例
-        browser = await playwright.chromium.launch(headless=self.headless, executable_path=self.local_executable_path, proxy=self.proxy_setting)
+        launch_options = {"headless": self.headless}
+        if self.local_executable_path:
+            launch_options["executable_path"] = self.local_executable_path
+        if self.proxy_setting:
+            launch_options["proxy"] = self.proxy_setting
+        browser = await playwright.chromium.launch(**launch_options)
         # 创建一个浏览器上下文，使用指定的 cookie 文件
         context = await browser.new_context(storage_state=f"{self.account_file}", user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.4324.150 Safari/537.36')
         # context = await set_init_script(context)
@@ -135,18 +140,76 @@ class BaiJiaHaoVideo(object):
         baijiahao_logger.info('正在打开主页...')
         await page.wait_for_url("https://baijiahao.baidu.com/builder/rc/edit?type=videoV2", timeout=60000)
 
-        # 点击 "上传视频" 按钮
-        await page.locator("div[class^='video-main-container'] input").set_input_files(self.file_path)
+        # 等待上传区域加载
+        baijiahao_logger.info('等待上传区域加载...')
+        await page.wait_for_timeout(2000)
 
-        # 等待页面跳转到指定的 URL
-        while True:
-            # 判断是是否进入视频发布页面，没进入，则自动等待到超时
+        # 检查 input 元素状态
+        input_count = await page.locator("input[type=file]").count()
+        baijiahao_logger.info(f'找到 {input_count} 个 file input 元素')
+
+        # 打印每个 input 的详细信息
+        for i in range(input_count):
+            input_elem = page.locator("input[type=file]").nth(i)
+            accept = await input_elem.get_attribute("accept")
+            multiple = await input_elem.get_attribute("multiple")
+            visible = await input_elem.is_visible()
+            baijiahao_logger.info(f'Input {i}: accept={accept}, multiple={multiple}, visible={visible}')
+
+        # 直接设置文件（不点击按钮，避免弹出系统文件选择对话框）
+        await page.locator("input[type=file]").set_input_files(self.file_path)
+        baijiahao_logger.info('视频文件已选择')
+
+        # 等待上传开始（页面会显示上传进度）
+        baijiahao_logger.info('等待上传开始...')
+        await asyncio.sleep(3)
+
+        # 检查上传是否已经开始
+        uploading = await page.locator('div .cover-overlay:has-text("上传中")').count()
+        upload_progress = await page.locator('div[class*="progress"]').count()
+        baijiahao_logger.info(f'上传中状态: {uploading}, 进度条: {upload_progress}')
+
+        # 等待页面跳转到视频发布页面（上传过程中会自动跳转）
+        max_wait_time = 120  # 最多等待120秒
+        start_time = time.time()
+        while time.time() - start_time < max_wait_time:
             try:
-                await page.wait_for_selector("div#formMain:visible")
-                break
-            except:
-                baijiahao_logger.info("正在等待进入视频发布页面...")
-                await asyncio.sleep(0.1)
+                # 检查 formMain 是否存在
+                form_main = await page.locator("div#formMain").count()
+                if form_main > 0:
+                    baijiahao_logger.info("已进入视频发布页面")
+                    break
+
+                # 检查上传状态
+                uploading = await page.locator('div .cover-overlay:has-text("上传中")').count()
+                upload_failed = await page.locator('div .cover-overlay:has-text("上传失败")').count()
+
+                if upload_failed:
+                    baijiahao_logger.error("上传失败")
+                    raise Exception("视频上传失败")
+
+                if uploading:
+                    baijiahao_logger.info("正在上传视频中...")
+                else:
+                    # 打印页面上的一些信息用于调试
+                    page_url = page.url
+                    baijiahao_logger.info(f"当前页面URL: {page_url}")
+
+                    # 检查是否有其他表单元素
+                    title_input = await page.locator('input[placeholder*="标题"]').count()
+                    desc_input = await page.locator('textarea').count()
+                    baijiahao_logger.info(f"标题输入框: {title_input}, 描述输入框: {desc_input}")
+
+                await asyncio.sleep(2)
+            except Exception as e:
+                baijiahao_logger.info(f"检查页面状态: {e}")
+                await asyncio.sleep(2)
+        else:
+            # 超时，打印页面HTML帮助调试
+            baijiahao_logger.error("等待页面跳转超时")
+            html_content = await page.content()
+            baijiahao_logger.info(f"页面内容长度: {len(html_content)}")
+            raise Exception("等待视频发布页面超时")
 
         # 填充标题和话题
         # 这里为了避免页面变化，故使用相对位置定位：作品标题父级右侧第一个元素的input子元素

@@ -1,0 +1,463 @@
+# -*- coding: utf-8 -*-
+"""
+多平台统一发布脚本
+一次配置，发布到多个平台
+"""
+import asyncio
+import configparser
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+
+# 添加项目根目录到 Python 路径
+BASE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE_DIR))
+
+from conf import BASE_DIR as PROJECT_BASE_DIR
+
+# 平台名称映射
+PLATFORM_NAMES = {
+    "douyin": "抖音",
+    "xiaohongshu": "小红书",
+    "kuaishou": "快手",
+    "bilibili": "B站",
+    "tencent": "微信视频号",
+    "baijiahao": "百家号",
+    "tk": "TikTok",
+}
+
+# 平台标题长度限制
+TITLE_LIMITS = {
+    "douyin": 30,
+    "xiaohongshu": 20,
+    "kuaishou": 30,
+    "bilibili": 80,
+    "tencent": 30,
+    "baijiahao": 30,
+    "tk": 150,
+}
+
+
+def read_config(config_file: str = "publish_config.ini") -> dict:
+    """读取配置文件"""
+    config_path = BASE_DIR / config_file
+    if not config_path.exists():
+        raise FileNotFoundError(f"配置文件不存在: {config_path}")
+
+    parser = configparser.ConfigParser()
+    parser.read(config_path, encoding="utf-8")
+
+    config = {
+        "common": dict(parser["common"]),
+        "platforms": dict(parser["platforms"]),
+    }
+    return config
+
+
+def parse_config(config: dict) -> dict:
+    """解析配置，处理字段格式"""
+    common = config["common"]
+    platforms = config["platforms"]
+
+    # 解析启用平台
+    enabled_platforms = [p.strip() for p in platforms.get("enabled", "").split(",") if p.strip()]
+
+    # 解析标签
+    tags = [t.strip() for t in common.get("tags", "").split(",") if t.strip()]
+
+    # 解析图片路径
+    images_str = common.get("images", "")
+    images = [img.strip() for img in images_str.split(",") if img.strip()]
+
+    # 解析发布时间
+    publish_strategy = common.get("publish_strategy", "immediate")
+    publish_time_str = common.get("publish_time", "").strip()
+    publish_time = None
+    if publish_strategy == "scheduled" and publish_time_str:
+        try:
+            publish_time = datetime.strptime(publish_time_str, "%Y-%m-%d %H:%M")
+        except ValueError:
+            print(f"⚠️ 发布时间格式错误: {publish_time_str}，将使用立即发布")
+            publish_strategy = "immediate"
+
+    # 解析描述内容，支持 \n 换行
+    desc = common.get("desc", "").replace("\\n", "\n")
+
+    # 解析图文转视频配置
+    convert_to_video = common.get("convert_to_video", "false").strip().lower() in ("true", "yes", "1")
+    video_duration = float(common.get("video_duration", "5").strip() or 5)
+
+    return {
+        "content_type": common.get("content_type", "video"),
+        "title": common.get("title", ""),
+        "desc": desc,
+        "tags": tags,
+        "video_file": common.get("video_file", ""),
+        "images": images,
+        "publish_strategy": publish_strategy,
+        "publish_time": publish_time,
+        "enabled_platforms": enabled_platforms,
+        "platforms": platforms,
+        "convert_to_video": convert_to_video,
+        "video_duration": video_duration,
+    }
+
+
+def truncate_title(title: str, platform: str) -> str:
+    """根据平台限制截断标题"""
+    limit = TITLE_LIMITS.get(platform, 50)
+    if len(title) > limit:
+        return title[:limit]
+    return title
+
+
+def resolve_path(file_path: str) -> str:
+    """解析相对路径为绝对路径"""
+    if not file_path:
+        return ""
+    path = Path(file_path)
+    if path.is_absolute():
+        return str(path)
+    return str(BASE_DIR / file_path)
+
+
+async def publish_to_douyin(params: dict) -> dict:
+    """发布到抖音"""
+    from uploader.douyin_uploader.main import DouYinVideo, DouYinNote
+
+    account_file = resolve_path(params["account_file"])
+    title = truncate_title(params["title"], "douyin")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = DouYinVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+        else:
+            images = params["images"]
+            if not images:
+                return {"success": False, "message": "图文模式需要提供图片"}
+
+            image_paths = [resolve_path(img) for img in images]
+            for img_path in image_paths:
+                if not os.path.exists(img_path):
+                    return {"success": False, "message": f"图片文件不存在: {img_path}"}
+
+            uploader = DouYinNote(
+                image_paths=image_paths,
+                note=params["desc"],
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                title=title,
+                publish_strategy=publish_strategy,
+            )
+            await uploader.douyin_upload_note()
+            return {"success": True, "message": "发布成功"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_xiaohongshu(params: dict) -> dict:
+    """发布到小红书"""
+    from uploader.xiaohongshu_uploader.main import XiaoHongShuVideo, XiaoHongShuNote
+
+    account_file = resolve_path(params["account_file"])
+    title = truncate_title(params["title"], "xiaohongshu")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = XiaoHongShuVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+        else:
+            images = params["images"]
+            if not images:
+                return {"success": False, "message": "图文模式需要提供图片"}
+
+            image_paths = [resolve_path(img) for img in images]
+            for img_path in image_paths:
+                if not os.path.exists(img_path):
+                    return {"success": False, "message": f"图片文件不存在: {img_path}"}
+
+            uploader = XiaoHongShuNote(
+                image_paths=image_paths,
+                note=params["desc"],
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                title=title,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+
+        await uploader.main()
+        return {"success": True, "message": "发布成功"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_kuaishou(params: dict) -> dict:
+    """发布到快手"""
+    from uploader.ks_uploader.main import KSVideo, KSNote
+
+    account_file = resolve_path(params["account_file"])
+    title = truncate_title(params["title"], "kuaishou")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = KSVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+        else:
+            images = params["images"]
+            if not images:
+                return {"success": False, "message": "图文模式需要提供图片"}
+
+            image_paths = [resolve_path(img) for img in images]
+            for img_path in image_paths:
+                if not os.path.exists(img_path):
+                    return {"success": False, "message": f"图片文件不存在: {img_path}"}
+
+            uploader = KSNote(
+                image_paths=image_paths,
+                note=params["desc"],
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                title=title,
+                publish_strategy=publish_strategy,
+            )
+
+        await uploader.main()
+        return {"success": True, "message": "发布成功"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_tencent(params: dict) -> dict:
+    """发布到微信视频号"""
+    from uploader.tencent_uploader.main import TencentVideo
+
+    account_file = resolve_path(params["account_file"])
+    title = truncate_title(params["title"], "tencent")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = TencentVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+        else:
+            return {"success": False, "message": "微信视频号不支持图文发布，请使用 convert_to_video=true 转为视频发布"}
+
+        await uploader.main()
+        return {"success": True, "message": "发布成功"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_baijiahao(params: dict) -> dict:
+    """发布到百家号"""
+    from uploader.baijiahao_uploader.main import BaiJiaHaoVideo
+
+    account_file = resolve_path(params["account_file"])
+    title = truncate_title(params["title"], "baijiahao")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = BaiJiaHaoVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+            )
+        else:
+            return {"success": False, "message": "百家号不支持图文发布，请使用 convert_to_video=true 转为视频发布"}
+
+        await uploader.main()
+        return {"success": True, "message": "发布成功"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_platform(platform: str, params: dict) -> dict:
+    """发布到指定平台"""
+    if platform == "douyin":
+        return await publish_to_douyin(params)
+    elif platform == "xiaohongshu":
+        return await publish_to_xiaohongshu(params)
+    elif platform == "kuaishou":
+        return await publish_to_kuaishou(params)
+    elif platform == "bilibili":
+        return {"success": False, "message": "B站平台暂未实现"}
+    elif platform == "tencent":
+        return await publish_to_tencent(params)
+    elif platform == "baijiahao":
+        return await publish_to_baijiahao(params)
+    elif platform == "tk":
+        return {"success": False, "message": "TikTok平台暂未实现"}
+    else:
+        return {"success": False, "message": f"未知平台: {platform}"}
+
+
+def print_header(params: dict):
+    """打印发布信息头部"""
+    content_type_name = "图文" if params["content_type"] == "note" else "视频"
+    print("\n========== 多平台发布 ==========")
+    print(f"内容类型: {content_type_name}")
+    if params["content_type"] == "note" and params["convert_to_video"]:
+        print("图文转视频: 是")
+    print(f"标题: {params['title']}")
+    if params["tags"]:
+        print(f"标签: {params['tags']}")
+    print(f"启用平台: {', '.join(params['enabled_platforms'])}")
+    print()
+
+
+def print_results(results: dict):
+    """打印发布结果汇总"""
+    print("\n========== 发布结果 ==========")
+    for platform, result in results.items():
+        platform_name = PLATFORM_NAMES.get(platform, platform)
+        status = "✅ 成功" if result["success"] else f"❌ 失败: {result['message']}"
+        print(f"{platform_name}: {status}")
+
+
+async def main():
+    """主函数"""
+    try:
+        config = read_config()
+    except FileNotFoundError as e:
+        print(f"❌ 错误: {e}")
+        return
+
+    params = parse_config(config)
+
+    if not params["enabled_platforms"]:
+        print("❌ 错误: 未配置启用平台")
+        return
+
+    if not params["title"]:
+        print("❌ 错误: 未配置标题")
+        return
+
+    # 处理图文转视频
+    if params["content_type"] == "note" and params["convert_to_video"]:
+        if not params["images"]:
+            print("❌ 错误: 图文转视频需要提供图片")
+            return
+
+        print("正在将图片转换为视频...")
+        try:
+            from utils.image_to_video import convert_images_to_video_for_publish
+
+            video_path = convert_images_to_video_for_publish(
+                image_paths=params["images"],
+                title=params["title"],
+                duration=params["video_duration"],
+            )
+            # 更新参数，切换为视频模式
+            params["content_type"] = "video"
+            params["video_file"] = video_path
+            print(f"[OK] 视频已生成: {video_path}\n")
+        except Exception as e:
+            print(f"[ERROR] 图片转视频失败: {e}")
+            return
+
+    print_header(params)
+
+    results = {}
+    total = len(params["enabled_platforms"])
+
+    for i, platform in enumerate(params["enabled_platforms"], 1):
+        platform_name = PLATFORM_NAMES.get(platform, platform)
+        print(f"[{i}/{total}] 发布到 {platform_name}...")
+
+        # 获取账号文件
+        account_key = f"{platform}_account"
+        account_file = params["platforms"].get(account_key, "")
+
+        platform_params = {
+            **params,
+            "account_file": account_file,
+        }
+
+        result = await publish_to_platform(platform, platform_params)
+        results[platform] = result
+
+        if result["success"]:
+            print(f"  ✅ 成功")
+        else:
+            print(f"  ❌ 失败: {result['message']}")
+
+    print_results(results)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

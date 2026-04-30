@@ -153,7 +153,7 @@ async def cookie_auth(account_file):
         if LOCAL_CHROME_PATH:
             browser = await playwright.chromium.launch(headless=True, executable_path=LOCAL_CHROME_PATH)
         else:
-            browser = await playwright.chromium.launch(headless=True, channel="chrome")
+            browser = await playwright.chromium.launch(headless=True)
         try:
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
@@ -220,7 +220,7 @@ async def xiaohongshu_cookie_gen(
     account_path.parent.mkdir(parents=True, exist_ok=True)
 
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=headless, channel="chrome")
+        browser = await playwright.chromium.launch(headless=headless)
         context = await browser.new_context()
         context = await set_init_script(context)
         qrcode_path = None
@@ -399,14 +399,16 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             desc = page.locator('p[data-placeholder*="输入正文描述"]')
             await desc.click()
 
-        await page.keyboard.type("#" + self.tags[0], delay=30)
-        await page.locator('#creator-editor-topic-container').wait_for(
-            state="visible",
-            timeout=3000
-        )
-        first_item = page.locator('#creator-editor-topic-container .item').first
-        await first_item.wait_for(state="visible", timeout=2000)
-        await first_item.click()
+        for tag in self.tags:
+            await page.keyboard.type("#" + tag, delay=30)
+            await page.locator('#creator-editor-topic-container').wait_for(
+                state="visible",
+                timeout=3000
+            )
+            first_item = page.locator('#creator-editor-topic-container .item').first
+            await first_item.wait_for(state="visible", timeout=2000)
+            await first_item.click()
+            await page.keyboard.press("Space")
 
     async def fill_meta(self, page: Page) -> None:
         await self.fill_title(page)
@@ -559,7 +561,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         xiaohongshu_logger.info(_msg("🧍", "小人先检查 cookie、视频文件、封面和发布时间"))
         await self.validate_upload_args()
         xiaohongshu_logger.info(_msg("🥳", "上传前检查通过"))
-        browser = await playwright.chromium.launch(headless=self.headless, channel="chrome")
+        browser = await playwright.chromium.launch(headless=self.headless)
         context = await browser.new_context(
             permissions=["geolocation"],
             storage_state=self.account_file,
@@ -677,7 +679,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         xiaohongshu_logger.info(_msg("🧍", "小人先检查 cookie、图片和发布时间"))
         await self.validate_upload_args()
         xiaohongshu_logger.info(_msg("🥳", "图文上传前检查通过"))
-        browser = await playwright.chromium.launch(headless=self.headless, channel="chrome")
+        browser = await playwright.chromium.launch(headless=self.headless)
         context = await browser.new_context(
             permissions=["geolocation"],
             storage_state=self.account_file,

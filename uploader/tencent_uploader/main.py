@@ -515,16 +515,16 @@ class TencentBaseUploader(BaseVideoUploader):
     async def fill_title_and_tags(self, page: Page) -> None:
         await page.locator("div.input-editor").click()
         await page.keyboard.type(self.title)
-        await page.keyboard.press("Enter")
-        for tag in self.tags:
-            await page.keyboard.type("#" + tag)
-            await page.keyboard.press("Space")
-        tencent_logger.info(_msg("🏷️", f"成功添加 hashtag: {len(self.tags)}"))
+        tencent_logger.info(_msg("🏷️", f"成功添加 title: {len(self.title)}"))
 
     async def fill_description(self, page: Page) -> None:
         await page.keyboard.press("Enter")
         await page.keyboard.type(self.desc)
         tencent_logger.info(_msg("🏷️", f"成功添加 desc: {len(self.desc)}"))
+        # 在描述后面追加标签
+        for tag in self.tags:
+            await page.keyboard.type(" #" + tag)
+        tencent_logger.info(_msg("🏷️", f"成功添加 hashtag: {len(self.tags)}"))
 
     async def apply_collection(self, page: Page) -> None:
         collection_elements = (

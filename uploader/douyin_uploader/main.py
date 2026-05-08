@@ -4,7 +4,9 @@ from datetime import datetime
 import asyncio
 import inspect
 import os
+import re
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 from patchright.async_api import Page
 from patchright.async_api import Playwright
@@ -19,6 +21,7 @@ from utils.login_qrcode import print_terminal_qrcode
 from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
 from utils.log import douyin_logger
+from utils.excel_writer import write_video_link
 
 DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 DOUYIN_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
@@ -26,6 +29,43 @@ DOUYIN_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 
 def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
+
+
+def extract_video_id_from_url(url: str) -> str | None:
+    """
+    从URL中提取视频ID (modal_id)
+
+    Args:
+        url: URL字符串
+
+    Returns:
+        str: 视频ID，如 "7637405747755732270"
+    """
+    # 方法1: 从URL参数中提取 modal_id
+    parsed = urlparse(url)
+    query_params = parse_qs(parsed.query)
+    if 'modal_id' in query_params:
+        return query_params['modal_id'][0]
+
+    # 方法2: 从URL路径中提取 /video/{id}
+    match = re.search(r'/video/(\d+)', url)
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def build_video_link(video_id: str) -> str:
+    """
+    根据视频ID构建视频链接
+
+    Args:
+        video_id: 视频ID
+
+    Returns:
+        str: 视频链接
+    """
+    return f"https://www.douyin.com/video/{video_id}"
 
 
 async def _emit_qrcode_callback(qrcode_callback, payload: dict):
@@ -550,6 +590,20 @@ class DouYinVideo(DouYinBaseUploader):
                     timeout=3000,
                 )
                 douyin_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
+
+                # 发布成功后获取视频链接并写入Excel
+                video_link = await self._get_video_link(page)
+                if video_link:
+                    douyin_logger.info(_msg("🔗", f"视频链接: {video_link}"))
+                    # 写入Excel
+                    excel_result = write_video_link(video_link=video_link)
+                    if excel_result["success"]:
+                        douyin_logger.success(_msg("📝", f"已写入Excel: {excel_result['filepath']}"))
+                    else:
+                        douyin_logger.warning(_msg("⚠️", f"写入Excel失败: {excel_result['message']}"))
+                else:
+                    douyin_logger.warning(_msg("⚠️", "未能获取视频链接"))
+
                 break
             except Exception:
                 await self.handle_auto_video_cover(page)
@@ -563,6 +617,41 @@ class DouYinVideo(DouYinBaseUploader):
         await asyncio.sleep(2)
         await context.close()
         await browser.close()
+
+    async def _get_video_link(self, page: Page) -> str | None:
+        """
+        发布成功后获取视频链接
+
+        Args:
+            page: Playwright页面对象
+
+        Returns:
+            str | None: 视频链接，如 "https://www.douyin.com/video/7637405747755732270"
+        """
+        try:
+            # 导航到用户首页获取最新发布的视频链接
+            douyin_logger.info(_msg("🧭", "正在导航到用户首页获取视频链接"))
+            await page.goto("https://www.douyin.com/user/self?from_tab_name=main", timeout=30000)
+            await page.wait_for_load_state("domcontentloaded")
+            await asyncio.sleep(2)
+
+            # 点击第一个视频
+            first_video = page.locator("div[data-e2e='user-post-list'] a:first-child").first
+            if await first_video.count():
+                await first_video.click()
+                await asyncio.sleep(2)
+
+                # 从URL提取视频ID
+                current_url = page.url
+                video_id = extract_video_id_from_url(current_url)
+
+                if video_id:
+                    return build_video_link(video_id)
+
+            return None
+        except Exception as e:
+            douyin_logger.warning(_msg("⚠️", f"获取视频链接失败: {e}"))
+            return None
 
     async def douyin_upload_video(self):
         async with async_playwright() as playwright:

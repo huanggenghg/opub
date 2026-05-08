@@ -5,7 +5,9 @@
 """
 import asyncio
 import configparser
+import json
 import os
+import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +17,9 @@ BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))
 
 from conf import BASE_DIR as PROJECT_BASE_DIR
+
+# 内容模板文件路径
+CONTENT_TEMPLATES_FILE = BASE_DIR / "templates" / "content_templates.json"
 
 # 平台名称映射
 PLATFORM_NAMES = {
@@ -39,6 +44,33 @@ TITLE_LIMITS = {
     "tk": 150,
     "weibo": 2000,
 }
+
+
+def load_content_templates() -> list:
+    """加载内容模板"""
+    if CONTENT_TEMPLATES_FILE.exists():
+        with open(CONTENT_TEMPLATES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("templates", [])
+    return []
+
+
+def fill_empty_content(title: str, desc: str) -> tuple:
+    """如果标题或描述为空，从模板随机填充"""
+    title_empty = not title or not title.strip()
+    desc_empty = not desc or not desc.strip()
+
+    if title_empty or desc_empty:
+        templates = load_content_templates()
+        if templates:
+            random_template = random.choice(templates)
+            if title_empty:
+                title = random_template.get("title", "")
+            if desc_empty:
+                desc = random_template.get("desc", "")
+            print(f"[AUTO] 标题/描述为空，已自动填充: {title}")
+
+    return title, desc
 
 
 def read_config(config_file: str = "publish_config.ini") -> dict:
@@ -86,13 +118,22 @@ def parse_config(config: dict) -> dict:
     # 解析描述内容，支持 \n 换行
     desc = common.get("desc", "").replace("\\n", "\n")
 
+    # 解析标题
+    title = common.get("title", "")
+
+    # 如果标题或描述为空，从模板随机填充
+    title, desc = fill_empty_content(title, desc)
+
     # 解析图文转视频配置
     convert_to_video = common.get("convert_to_video", "false").strip().lower() in ("true", "yes", "1")
     video_duration = float(common.get("video_duration", "5").strip() or 5)
 
+    # 解析起始视频序号（用于断点续传）
+    start_from = int(common.get("start_from", "1").strip() or 1)
+
     return {
         "content_type": common.get("content_type", "video"),
-        "title": common.get("title", ""),
+        "title": title,
         "desc": desc,
         "tags": tags,
         "video_file": common.get("video_file", ""),
@@ -103,7 +144,34 @@ def parse_config(config: dict) -> dict:
         "platforms": platforms,
         "convert_to_video": convert_to_video,
         "video_duration": video_duration,
+        "start_from": start_from,
     }
+
+
+def get_video_files(video_path: str) -> list:
+    """获取视频文件列表，支持文件夹或单个文件"""
+    if not video_path:
+        return []
+
+    path = resolve_path(video_path)
+
+    if os.path.isfile(path):
+        # 单个文件
+        return [path]
+
+    if os.path.isdir(path):
+        # 文件夹，获取所有视频文件
+        video_extensions = ['.mp4', '.mov', '.mkv', '.avi', '.flv', '.mpeg', '.ogg', '.vob', '.webm', '.wmv', '.rmvb']
+        video_files = []
+        for file in os.listdir(path):
+            file_lower = file.lower()
+            if any(file_lower.endswith(ext) for ext in video_extensions):
+                video_files.append(os.path.join(path, file))
+        # 按文件名排序
+        video_files.sort()
+        return video_files
+
+    return []
 
 
 def truncate_title(title: str, platform: str) -> str:
@@ -124,11 +192,42 @@ def resolve_path(file_path: str) -> str:
     return str(BASE_DIR / file_path)
 
 
+async def ensure_login(platform: str, account_file: str) -> bool:
+    """确保平台已登录，未登录则触发登录流程"""
+    account_file = resolve_path(account_file)
+
+    if platform == "douyin":
+        from uploader.douyin_uploader.main import douyin_setup
+        return await douyin_setup(account_file, handle=True)
+    elif platform == "xiaohongshu":
+        from uploader.xiaohongshu_uploader.main import xiaohongshu_setup
+        return await xiaohongshu_setup(account_file, handle=True)
+    elif platform == "kuaishou":
+        from uploader.ks_uploader.main import ks_setup
+        return await ks_setup(account_file, handle=True)
+    elif platform == "tencent":
+        from uploader.tencent_uploader.main import tencent_setup
+        return await tencent_setup(account_file, handle=True)
+    elif platform == "baijiahao":
+        from uploader.baijiahao_uploader.main import baijiahao_setup
+        return await baijiahao_setup(account_file, handle=True)
+    elif platform == "weibo":
+        from uploader.weibo_uploader.main import weibo_setup
+        return await weibo_setup(account_file, handle=True)
+    else:
+        return False
+
+
 async def publish_to_douyin(params: dict) -> dict:
     """发布到抖音"""
     from uploader.douyin_uploader.main import DouYinVideo, DouYinNote
 
     account_file = resolve_path(params["account_file"])
+
+    # 检查/触发登录
+    if not await ensure_login("douyin", account_file):
+        return {"success": False, "message": "抖音登录失败"}
+
     title = truncate_title(params["title"], "douyin")
     tags = params["tags"]
     publish_strategy = params["publish_strategy"]
@@ -182,6 +281,11 @@ async def publish_to_xiaohongshu(params: dict) -> dict:
     from uploader.xiaohongshu_uploader.main import XiaoHongShuVideo, XiaoHongShuNote
 
     account_file = resolve_path(params["account_file"])
+
+    # 检查/触发登录
+    if not await ensure_login("xiaohongshu", account_file):
+        return {"success": False, "message": "小红书登录失败"}
+
     title = truncate_title(params["title"], "xiaohongshu")
     tags = params["tags"]
     publish_strategy = params["publish_strategy"]
@@ -235,6 +339,11 @@ async def publish_to_kuaishou(params: dict) -> dict:
     from uploader.ks_uploader.main import KSVideo, KSNote
 
     account_file = resolve_path(params["account_file"])
+
+    # 检查/触发登录
+    if not await ensure_login("kuaishou", account_file):
+        return {"success": False, "message": "快手登录失败"}
+
     title = truncate_title(params["title"], "kuaishou")
     tags = params["tags"]
     publish_strategy = params["publish_strategy"]
@@ -287,6 +396,11 @@ async def publish_to_tencent(params: dict) -> dict:
     from uploader.tencent_uploader.main import TencentVideo
 
     account_file = resolve_path(params["account_file"])
+
+    # 检查/触发登录
+    if not await ensure_login("tencent", account_file):
+        return {"success": False, "message": "微信视频号登录失败"}
+
     title = truncate_title(params["title"], "tencent")
     tags = params["tags"]
     publish_strategy = params["publish_strategy"]
@@ -322,6 +436,11 @@ async def publish_to_baijiahao(params: dict) -> dict:
     from uploader.baijiahao_uploader.main import BaiJiaHaoVideo
 
     account_file = resolve_path(params["account_file"])
+
+    # 检查/触发登录
+    if not await ensure_login("baijiahao", account_file):
+        return {"success": False, "message": "百家号登录失败"}
+
     title = truncate_title(params["title"], "baijiahao")
     tags = params["tags"]
     publish_strategy = params["publish_strategy"]
@@ -355,6 +474,11 @@ async def publish_to_weibo(params: dict) -> dict:
     from uploader.weibo_uploader.main import WeiboVideo, WeiboNote
 
     account_file = resolve_path(params["account_file"])
+
+    # 检查/触发登录
+    if not await ensure_login("weibo", account_file):
+        return {"success": False, "message": "微博登录失败"}
+
     title = truncate_title(params["title"], "weibo")
     tags = params["tags"]
     publish_strategy = params["publish_strategy"]
@@ -488,31 +612,83 @@ async def main():
             print(f"[ERROR] 图片转视频失败: {e}")
             return
 
-    print_header(params)
+    # 获取视频文件列表
+    video_files = get_video_files(params["video_file"])
+    if not video_files:
+        print("❌ 错误: 未找到视频文件")
+        return
 
-    results = {}
-    total = len(params["enabled_platforms"])
+    print(f"找到 {len(video_files)} 个视频文件:")
+    for vf in video_files:
+        print(f"  - {os.path.basename(vf)}")
+    print()
 
-    for i, platform in enumerate(params["enabled_platforms"], 1):
-        platform_name = PLATFORM_NAMES.get(platform, platform)
-        print(f"[{i}/{total}] 发布到 {platform_name}...")
+    # 遍历每个视频文件进行发布
+    all_results = {}
+    start_from = params.get("start_from", 1)
+    if start_from > 1:
+        print(f"\n[SKIP] 从第 {start_from} 个视频开始发布（跳过前 {start_from - 1} 个）\n")
 
-        # 获取账号文件
-        account_key = f"{platform}_account"
-        account_file = params["platforms"].get(account_key, "")
+    for video_idx, video_file in enumerate(video_files, 1):
+        # 跳过已发布的视频
+        if video_idx < start_from:
+            continue
 
-        platform_params = {
+        print(f"\n========== 视频 [{video_idx}/{len(video_files)}] ==========")
+        print(f"文件: {os.path.basename(video_file)}")
+
+        # 为每个视频随机生成新的标题和描述
+        title, desc = fill_empty_content("", "")
+
+        # 更新参数
+        video_params = {
             **params,
-            "account_file": account_file,
+            "video_file": video_file,
+            "title": title,
+            "desc": desc,
         }
 
-        result = await publish_to_platform(platform, platform_params)
-        results[platform] = result
+        print_header(video_params)
 
-        if result["success"]:
-            print(f"  ✅ 成功")
-        else:
-            print(f"  ❌ 失败: {result['message']}")
+        results = {}
+        total = len(video_params["enabled_platforms"])
+
+        for i, platform in enumerate(video_params["enabled_platforms"], 1):
+            platform_name = PLATFORM_NAMES.get(platform, platform)
+            print(f"[{i}/{total}] 发布到 {platform_name}...")
+
+            # 获取账号文件
+            account_key = f"{platform}_account"
+            account_file = video_params["platforms"].get(account_key, "")
+
+            platform_params = {
+                **video_params,
+                "account_file": account_file,
+            }
+
+            result = await publish_to_platform(platform, platform_params)
+            results[platform] = result
+
+            if result["success"]:
+                print(f"  ✅ 成功")
+            else:
+                print(f"  ❌ 失败: {result['message']}")
+
+        print_results(results)
+        all_results[video_file] = results
+
+    # 打印总体汇总
+    print("\n========== 总体发布汇总 ==========")
+    success_count = 0
+    fail_count = 0
+    for video_file, results in all_results.items():
+        for platform, result in results.items():
+            if result["success"]:
+                success_count += 1
+            else:
+                fail_count += 1
+    print(f"成功: {success_count} 次")
+    print(f"失败: {fail_count} 次")
 
     print_results(results)
 

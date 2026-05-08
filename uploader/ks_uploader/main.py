@@ -21,6 +21,7 @@ from utils.login_qrcode import print_terminal_qrcode
 from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
 from utils.log import kuaishou_logger
+from utils.excel_writer import write_video_link
 
 KUAISHOU_UPLOAD_URL = "https://cp.kuaishou.com/article/publish/video"
 KUAISHOU_MANAGE_URL = "https://cp.kuaishou.com/article/manage/video?status=0&from=publish"
@@ -655,6 +656,17 @@ class KSVideo(KSBaseUploader):
             # 获取分享链接（内部会轮询等待审核通过）
             share_link_result = await get_share_link(page, context)
 
+            # 写入Excel
+            if share_link_result["success"] and share_link_result["share_link"]:
+                share_link = share_link_result["share_link"]
+                kuaishou_logger.info(_msg("🔗", f"分享链接: {share_link}"))
+
+                excel_result = write_video_link(video_link=share_link)
+                if excel_result["success"]:
+                    kuaishou_logger.success(_msg("📝", f"已写入Excel: {excel_result['filepath']}"))
+                else:
+                    kuaishou_logger.warning(_msg("⚠️", f"写入Excel失败: {excel_result['message']}"))
+
         finally:
             if upload_success:
                 await context.storage_state(path=self.account_file)
@@ -836,6 +848,17 @@ class KSNote(KSBaseUploader):
 
             # 获取分享链接（内部会轮询等待审核通过）
             share_link_result = await get_share_link(page, context)
+
+            # 写入Excel
+            if share_link_result["success"] and share_link_result["share_link"]:
+                share_link = share_link_result["share_link"]
+                kuaishou_logger.info(_msg("🔗", f"分享链接: {share_link}"))
+
+                excel_result = write_video_link(video_link=share_link)
+                if excel_result["success"]:
+                    kuaishou_logger.success(_msg("📝", f"已写入Excel: {excel_result['filepath']}"))
+                else:
+                    kuaishou_logger.warning(_msg("⚠️", f"写入Excel失败: {excel_result['message']}"))
 
         finally:
             if upload_success:

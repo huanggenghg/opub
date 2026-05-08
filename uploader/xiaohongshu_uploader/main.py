@@ -21,6 +21,7 @@ from utils.login_qrcode import print_terminal_qrcode
 from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
 from utils.log import xiaohongshu_logger
+from utils.excel_writer import write_video_link
 
 XHS_LOGIN_URL = "https://xiaohongshu.com/login"
 XHS_PUBLISH_VIDEO_URL = "https://creator.xiaohongshu.com/publish/publish?source=official&target=video"
@@ -712,9 +713,19 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             # 发布成功后获取分享链接
             share_result = await get_share_link(page)
             if share_result["success"]:
+                share_link = share_result["share_link"]
+                xiaohongshu_logger.info(_msg("🔗", f"分享链接: {share_link}"))
+
+                # 写入Excel
+                excel_result = write_video_link(video_link=share_link)
+                if excel_result["success"]:
+                    xiaohongshu_logger.success(_msg("📝", f"已写入Excel: {excel_result['filepath']}"))
+                else:
+                    xiaohongshu_logger.warning(_msg("⚠️", f"写入Excel失败: {excel_result['message']}"))
+
                 result = {
                     "success": True,
-                    "share_link": share_result["share_link"],
+                    "share_link": share_link,
                     "note_id": share_result["note_id"],
                     "message": "发布成功并获取到分享链接"
                 }
@@ -858,9 +869,19 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             # 发布成功后获取分享链接
             share_result = await get_share_link(page)
             if share_result["success"]:
+                share_link = share_result["share_link"]
+                xiaohongshu_logger.info(_msg("🔗", f"分享链接: {share_link}"))
+
+                # 写入Excel
+                excel_result = write_video_link(video_link=share_link)
+                if excel_result["success"]:
+                    xiaohongshu_logger.success(_msg("📝", f"已写入Excel: {excel_result['filepath']}"))
+                else:
+                    xiaohongshu_logger.warning(_msg("⚠️", f"写入Excel失败: {excel_result['message']}"))
+
                 result = {
                     "success": True,
-                    "share_link": share_result["share_link"],
+                    "share_link": share_link,
                     "note_id": share_result["note_id"],
                     "message": "发布成功并获取到分享链接"
                 }

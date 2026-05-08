@@ -328,8 +328,17 @@ async def publish_to_xiaohongshu(params: dict) -> dict:
                 publish_strategy=publish_strategy,
             )
 
-        await uploader.main()
-        return {"success": True, "message": "发布成功"}
+        result = await uploader.main()
+        share_link = result.get("share_link", "") if result else ""
+        note_id = result.get("note_id", "") if result else ""
+
+        response = {"success": True, "message": "发布成功"}
+        if share_link:
+            response["share_link"] = share_link
+        if note_id:
+            response["note_id"] = note_id
+
+        return response
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -385,8 +394,17 @@ async def publish_to_kuaishou(params: dict) -> dict:
                 publish_strategy=publish_strategy,
             )
 
-        await uploader.main()
-        return {"success": True, "message": "发布成功"}
+        result = await uploader.main()
+        share_link = result.get("share_link", "") if result else ""
+        video_id = result.get("video_id", "") if result else ""
+
+        response = {"success": True, "message": "发布成功"}
+        if share_link:
+            response["share_link"] = share_link
+        if video_id:
+            response["video_id"] = video_id
+
+        return response
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -637,8 +655,8 @@ async def main():
         print(f"\n========== 视频 [{video_idx}/{len(video_files)}] ==========")
         print(f"文件: {os.path.basename(video_file)}")
 
-        # 为每个视频随机生成新的标题和描述
-        title, desc = fill_empty_content("", "")
+        # 使用配置文件中的标题和描述，如果为空则从模板随机填充
+        title, desc = fill_empty_content(params["title"], params["desc"])
 
         # 更新参数
         video_params = {

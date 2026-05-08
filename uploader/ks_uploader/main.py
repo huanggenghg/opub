@@ -23,13 +23,15 @@ from utils.login_qrcode import save_data_url_image
 from utils.log import kuaishou_logger
 
 KUAISHOU_UPLOAD_URL = "https://cp.kuaishou.com/article/publish/video"
-KUAISHOU_MANAGE_URL = "https://cp.kuaishou.com/article/manage/video?status=2&from=publish"
+KUAISHOU_MANAGE_URL = "https://cp.kuaishou.com/article/manage/video?status=0&from=publish"
+KUAISHOU_AUDIT_URL = "https://cp.kuaishou.com/article/manage/video?status=2&from=publish"
 KUAISHOU_LOGIN_URL = "https://passport.kuaishou.com/pc/account/login/?sid=kuaishou.web.cp.api&callback=https%3A%2F%2Fcp.kuaishou.com%2Frest%2Finfra%2Fsts%3FfollowUrl%3Dhttps%253A%252F%252Fcp.kuaishou.com%252Farticle%252Fpublish%252Fvideo%26setRootDomain%3Dtrue"
 KUAISHOU_UPLOAD_URL_PATTERN = "**/article/publish/video**"
-KUAISHOU_MANAGE_URL_PATTERN = "**/article/manage/video?status=2&from=publish**"
+KUAISHOU_MANAGE_URL_PATTERN = "**/article/manage/video**"
 KUAISHOU_COOKIE_INVALID_SELECTOR = "div.names div.container div.name:text('机构服务')"
 KUAISHOU_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 KUAISHOU_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+KUAISHOU_VIDEO_ITEM_SELECTOR = "div.video-item__cover"
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -271,6 +273,127 @@ async def get_ks_cookie(
     return result
 
 
+async def get_share_link(page: Page, context) -> dict:
+    """获取最新发布视频的分享链接
+
+    通过轮询检查审核中列表(status=2)是否为空，判断视频是否审核通过。
+    审核通过后跳转到已发布列表(status=0)，点击第一个视频获取分享链接。
+
+    Args:
+        page: 当前页面对象
+        context: 浏览器上下文对象
+
+    Returns:
+        dict: {"success": bool, "share_link": str, "video_id": str}
+    """
+    try:
+        kuaishou_logger.info(_msg("🔗", "小人准备获取视频分享链接"))
+
+        # 步骤1: 轮询检查审核中列表(status=2)是否为空
+        kuaishou_logger.info(_msg("🔍", "小人检查视频审核状态..."))
+        await page.goto(KUAISHOU_AUDIT_URL, timeout=30000)
+
+        max_retries = 30  # 最多等待30次，每次2秒，共60秒
+        retry_count = 0
+
+        while retry_count < max_retries:
+            await asyncio.sleep(2)
+
+            # 检查审核中列表是否为空
+            video_count = await page.locator(KUAISHOU_VIDEO_ITEM_SELECTOR).count()
+            kuaishou_logger.info(_msg("⏳", f"审核中列表有 {video_count} 个视频"))
+
+            if video_count == 0:
+                kuaishou_logger.success(_msg("✅", "审核中列表为空，视频已审核通过"))
+                break
+
+            retry_count += 1
+            # 刷新页面获取最新状态
+            if retry_count < max_retries:
+                await page.reload()
+                await asyncio.sleep(1)
+
+        if retry_count >= max_retries:
+            kuaishou_logger.warning(_msg("⚠️", "等待审核超时，尝试直接获取分享链接"))
+
+        # 步骤2: 跳转到已发布列表(status=0)
+        kuaishou_logger.info(_msg("🧭", "小人跳转到已发布列表"))
+        await page.goto(KUAISHOU_MANAGE_URL, timeout=30000)
+        await asyncio.sleep(2)
+
+        # 步骤3: 点击第一个视频获取分享链接
+        video_item = page.locator(KUAISHOU_VIDEO_ITEM_SELECTOR).first
+        await video_item.wait_for(state="visible", timeout=15000)
+        kuaishou_logger.info(_msg("👀", "小人找到第一个视频项"))
+
+        item_count = await page.locator(KUAISHOU_VIDEO_ITEM_SELECTOR).count()
+        kuaishou_logger.info(_msg("🔍", f"页面上共有 {item_count} 个视频项"))
+
+        # 使用 wait_for_event 等待新页面打开
+        try:
+            async with context.expect_page(timeout=10000) as new_page_info:
+                await video_item.click()
+                kuaishou_logger.info(_msg("👆", "小人点击了第一个视频"))
+
+            new_page = await new_page_info.value
+            await new_page.wait_for_load_state("domcontentloaded", timeout=10000)
+            new_url = new_page.url
+
+            # 新标签页的URL就是分享链接
+            kuaishou_logger.success(_msg("🥳", f"小人拿到分享链接: {new_url}"))
+
+            # 从URL中提取video_id
+            video_id = ""
+            if "short-video" in new_url:
+                import re
+                match = re.search(r"short-video/([a-zA-Z0-9]+)", new_url)
+                if match:
+                    video_id = match.group(1)
+
+            # 关闭新标签页，回到管理页面
+            await new_page.close()
+            kuaishou_logger.info(_msg("🧹", "小人关闭了详情页"))
+
+            return {"success": True, "share_link": new_url, "video_id": video_id}
+
+        except Exception as page_error:
+            kuaishou_logger.warning(_msg("⚠️", f"点击后未打开新标签页: {page_error}"))
+
+            # 尝试刷新页面后重试
+            kuaishou_logger.info(_msg("🔄", "刷新页面后重试..."))
+            await page.reload()
+            await asyncio.sleep(3)
+
+            video_item = page.locator(KUAISHOU_VIDEO_ITEM_SELECTOR).first
+            await video_item.wait_for(state="visible", timeout=15000)
+
+            async with context.expect_page(timeout=10000) as new_page_info:
+                await video_item.click()
+                kuaishou_logger.info(_msg("👆", "小人再次点击第一个视频"))
+
+            new_page = await new_page_info.value
+            await new_page.wait_for_load_state("domcontentloaded", timeout=10000)
+            new_url = new_page.url
+
+            kuaishou_logger.success(_msg("🥳", f"小人拿到分享链接: {new_url}"))
+
+            video_id = ""
+            if "short-video" in new_url:
+                import re
+                match = re.search(r"short-video/([a-zA-Z0-9]+)", new_url)
+                if match:
+                    video_id = match.group(1)
+
+            await new_page.close()
+            kuaishou_logger.info(_msg("🧹", "小人关闭了详情页"))
+
+            return {"success": True, "share_link": new_url, "video_id": video_id}
+
+    except Exception as exc:
+        kuaishou_logger.warning(_msg("😵", f"获取分享链接失败: {exc}"))
+        return {"success": False, "share_link": "", "video_id": ""}
+
+
 class KSBaseUploader(BaseVideoUploader):
     def __init__(
         self,
@@ -414,7 +537,12 @@ class KSVideo(KSBaseUploader):
         await modal.wait_for(state="hidden", timeout=30000)
         kuaishou_logger.success(_msg("🥳", "封面已经设置完成"))
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright) -> dict:
+        """上传视频到快手
+
+        Returns:
+            dict: {"success": bool, "share_link": str, "video_id": str}
+        """
         kuaishou_logger.info(_msg("🧍", "小人先检查 cookie、视频文件、封面和发布时间"))
         await self.validate_upload_args()
         kuaishou_logger.info(_msg("🥳", "上传前检查通过"))
@@ -433,6 +561,7 @@ class KSVideo(KSBaseUploader):
         context = await set_init_script(context)
 
         upload_success = False
+        share_link_result = {"success": False, "share_link": "", "video_id": ""}
         try:
             page = await context.new_page()
             await page.goto(KUAISHOU_UPLOAD_URL)
@@ -522,6 +651,10 @@ class KSVideo(KSBaseUploader):
                     await asyncio.sleep(1)
 
             upload_success = True
+
+            # 获取分享链接（内部会轮询等待审核通过）
+            share_link_result = await get_share_link(page, context)
+
         finally:
             if upload_success:
                 await context.storage_state(path=self.account_file)
@@ -530,9 +663,16 @@ class KSVideo(KSBaseUploader):
             await context.close()
             await browser.close()
 
-    async def main(self):
+        return share_link_result
+
+    async def main(self) -> dict:
+        """主入口方法
+
+        Returns:
+            dict: {"success": bool, "share_link": str, "video_id": str}
+        """
         async with async_playwright() as playwright:
-            await self.upload(playwright)
+            return await self.upload(playwright)
 
 
 class KSNote(KSBaseUploader):
@@ -660,7 +800,12 @@ class KSNote(KSBaseUploader):
                     await page.screenshot(full_page=True)
                 await asyncio.sleep(1)
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright) -> dict:
+        """上传图文到快手
+
+        Returns:
+            dict: {"success": bool, "share_link": str, "video_id": str}
+        """
         kuaishou_logger.info(_msg("🧍", "小人先检查 cookie、图片和发布时间"))
         await self.validate_upload_args()
         kuaishou_logger.info(_msg("🥳", "图文上传前检查通过"))
@@ -679,6 +824,7 @@ class KSNote(KSBaseUploader):
         context = await set_init_script(context)
 
         upload_success = False
+        share_link_result = {"success": False, "share_link": "", "video_id": ""}
         try:
             page = await context.new_page()
             await page.goto(KUAISHOU_UPLOAD_URL)
@@ -687,6 +833,10 @@ class KSNote(KSBaseUploader):
 
             await self.upload_note_content(page)
             upload_success = True
+
+            # 获取分享链接（内部会轮询等待审核通过）
+            share_link_result = await get_share_link(page, context)
+
         finally:
             if upload_success:
                 await context.storage_state(path=self.account_file)
@@ -695,6 +845,13 @@ class KSNote(KSBaseUploader):
             await context.close()
             await browser.close()
 
-    async def main(self):
+        return share_link_result
+
+    async def main(self) -> dict:
+        """主入口方法
+
+        Returns:
+            dict: {"success": bool, "share_link": str, "video_id": str}
+        """
         async with async_playwright() as playwright:
-            await self.upload(playwright)
+            return await self.upload(playwright)

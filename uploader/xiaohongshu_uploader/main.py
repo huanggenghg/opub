@@ -712,7 +712,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
 
             # 发布成功后获取分享链接
             share_result = await get_share_link(page)
-            if share_result["success"]:
+            if share_result["success"] and share_result.get("share_link"):
                 share_link = share_result["share_link"]
                 xiaohongshu_logger.info(_msg("🔗", f"分享链接: {share_link}"))
 
@@ -868,7 +868,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
 
             # 发布成功后获取分享链接
             share_result = await get_share_link(page)
-            if share_result["success"]:
+            if share_result["success"] and share_result.get("share_link"):
                 share_link = share_result["share_link"]
                 xiaohongshu_logger.info(_msg("🔗", f"分享链接: {share_link}"))
 

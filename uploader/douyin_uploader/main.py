@@ -124,7 +124,7 @@ async def douyin_setup(account_file, handle=False, return_detail=False, qrcode_c
 
 async def _extract_douyin_qrcode_src(page: Page) -> str:
     scan_login_tab = page.get_by_text("扫码登录", exact=True).first
-    await scan_login_tab.wait_for(timeout=30000)
+    await scan_login_tab.wait_for(timeout=60000)  # 增加到60秒，页面加载慢
 
     qrcode_img = (
         scan_login_tab

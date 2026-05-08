@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -21,14 +22,15 @@ from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
 from utils.log import xiaohongshu_logger
 
-XHS_LOGIN_URL = "https://creator.xiaohongshu.com/login"
-XHS_PUBLISH_VIDEO_URL = "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video"
-XHS_PUBLISH_NOTE_URL = "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image"
+XHS_LOGIN_URL = "https://xiaohongshu.com/login"
+XHS_PUBLISH_VIDEO_URL = "https://creator.xiaohongshu.com/publish/publish?source=official&target=video"
+XHS_PUBLISH_NOTE_URL = "https://creator.xiaohongshu.com/publish/publish?source=official&target=image"
 XHS_PUBLISH_SUCCESS_URL_PATTERN = "**/publish/success?**"
 XHS_LOGIN_BOX_SELECTOR = "div[class*='login-box']"
 XHS_LOGIN_SWITCH_SELECTOR = "img.css-wemwzq"
 XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+XHS_USER_PROFILE_URL = "https://www.xiaohongshu.com/user/profile/678a98cc000000000d00891b"
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -63,24 +65,34 @@ def _build_login_result(
 
 
 async def _open_xhs_qrcode_panel(page: Page) -> None:
-    login_box = page.locator(XHS_LOGIN_BOX_SELECTOR).first
+    # 主站登录页面的选择器
+    login_box = page.locator(".login-container").first
     await login_box.wait_for(state="visible", timeout=30000)
 
+    # 检查是否已经是扫码模式
     scan_text = login_box.locator("div:has-text('扫一扫')").first
     if await scan_text.count():
         return
 
-    switch_img = login_box.locator(XHS_LOGIN_SWITCH_SELECTOR).first
-    await switch_img.wait_for(state="visible", timeout=10000)
-    await switch_img.click()
-    await login_box.locator("div:has-text('扫一扫')").first.wait_for(state="visible", timeout=10000)
+    # 尝试切换到扫码模式
+    switch_img = login_box.locator("img.css-wemwzq").first
+    if await switch_img.count():
+        await switch_img.wait_for(state="visible", timeout=10000)
+        await switch_img.click()
+        await login_box.locator("div:has-text('扫一扫')").first.wait_for(state="visible", timeout=10000)
 
 
 async def _find_xhs_qrcode_locator(page: Page):
     await _open_xhs_qrcode_panel(page)
 
-    qrcode_img = page.locator('.login-box-container').get_by_text("APP扫一扫登录").filter(visible=True).locator("xpath=..//following-sibling::div//img").nth(0)
+    # 主站登录页面的二维码选择器
+    qrcode_img = page.locator('.login-container').locator('img[class*="qrcode"]').first
 
+    if await qrcode_img.count():
+        return qrcode_img
+
+    # 备用选择器
+    qrcode_img = page.locator('.login-container img').first
     if await qrcode_img.count():
         return qrcode_img
 
@@ -132,10 +144,12 @@ async def _save_xhs_qrcode(
 
 
 async def _is_xhs_login_completed(page: Page) -> bool:
-    if page.url.startswith(XHS_LOGIN_URL):
+    # 检查是否还在登录页
+    if "login" in page.url:
         return False
 
-    login_box = page.locator(XHS_LOGIN_BOX_SELECTOR).first
+    # 检查登录框是否消失
+    login_box = page.locator(".login-container").first
     if not await login_box.count():
         return True
 
@@ -158,14 +172,15 @@ async def cookie_auth(account_file):
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
             page = await context.new_page()
-            await page.goto(XHS_PUBLISH_VIDEO_URL)
+            # 用主站验证cookie有效性
+            await page.goto("https://www.xiaohongshu.com/explore")
             await page.wait_for_timeout(3000)
 
-            if page.url.startswith(XHS_LOGIN_URL):
+            if "login" in page.url:
                 xiaohongshu_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
                 return False
 
-            login_box = page.locator(XHS_LOGIN_BOX_SELECTOR).first
+            login_box = page.locator(".login-container").first
             if await login_box.count():
                 try:
                     if await login_box.is_visible():
@@ -181,6 +196,114 @@ async def cookie_auth(account_file):
             return False
         finally:
             await browser.close()
+
+
+async def get_share_link(page: Page) -> dict:
+    """
+    获取最新发布笔记的分享链接
+
+    流程：
+    1. 打开用户首页
+    2. 点击第一个笔记进入详情页
+    3. 点击分享按钮
+    4. 点击链接图标
+    5. 从剪贴板获取链接
+
+    Returns:
+        dict: {"success": bool, "share_link": str, "note_id": str, "message": str}
+    """
+    try:
+        # 1. 导航到用户首页
+        xiaohongshu_logger.info(_msg("🧭", "正在导航到用户首页获取分享链接"))
+        await page.goto(XHS_USER_PROFILE_URL, timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+        await asyncio.sleep(3)
+
+        # 2. 找到并点击第一个笔记
+        xiaohongshu_logger.info(_msg("🔍", "正在查找第一个笔记"))
+
+        first_note = page.locator("section.note-item").first
+        if await first_note.count() == 0:
+            xiaohongshu_logger.warning(_msg("⚠️", "未找到笔记元素"))
+            return {"success": False, "share_link": "", "note_id": "", "message": "未找到笔记元素"}
+
+        # 点击第一个笔记进入详情页
+        await first_note.click()
+        xiaohongshu_logger.info(_msg("👆", "已点击第一个笔记"))
+        await asyncio.sleep(3)
+
+        current_url = page.url
+        xiaohongshu_logger.info(_msg("🔍", f"当前URL: {current_url}"))
+
+        # 3. 点击分享按钮
+        xiaohongshu_logger.info(_msg("🔍", "正在查找分享按钮"))
+
+        await asyncio.sleep(2)
+
+        share_button = page.locator('button.reds-button-new.share-icon').first
+
+        if await share_button.count() == 0:
+            xiaohongshu_logger.warning(_msg("⚠️", "未找到分享按钮"))
+            return {"success": False, "share_link": "", "note_id": "", "message": "未找到分享按钮"}
+
+        # 用 JavaScript 点击（绕过 viewport 检查）
+        await share_button.evaluate('el => el.click()')
+        xiaohongshu_logger.info(_msg("👆", "已点击分享按钮"))
+        await asyncio.sleep(2)
+
+        # 4. 点击链接图标
+        xiaohongshu_logger.info(_msg("🔍", "正在查找链接图标"))
+
+        link_container = page.locator('.share-icon-container').first
+
+        if await link_container.count() == 0:
+            xiaohongshu_logger.warning(_msg("⚠️", "未找到链接图标"))
+            return {"success": False, "share_link": "", "note_id": "", "message": "未找到链接图标"}
+
+        # 点击链接图标
+        await link_container.click()
+        xiaohongshu_logger.info(_msg("👆", "已点击链接图标"))
+        await asyncio.sleep(1)
+
+        # 5. 从剪贴板获取链接
+        xiaohongshu_logger.info(_msg("📋", "正在从剪贴板获取链接"))
+
+        try:
+            clipboard_text = await page.evaluate('navigator.clipboard.readText()')
+
+            if clipboard_text:
+                # 从剪贴板文本中提取URL（格式：标题 😆 口令 😆 URL）
+                share_link = clipboard_text
+                note_id = ""
+
+                # 尝试提取URL
+                url_match = re.search(r'https://[^\s]+', clipboard_text)
+                if url_match:
+                    share_link = url_match.group(0)
+                    # 提取笔记ID
+                    match = re.search(r'/item/([a-f0-9]+)', share_link)
+                    if match:
+                        note_id = match.group(1)
+
+                xiaohongshu_logger.success(_msg("✅", f"获取到分享链接: {share_link}"))
+
+                return {
+                    "success": True,
+                    "share_link": share_link,
+                    "note_id": note_id,
+                    "message": "成功获取分享链接"
+                }
+            else:
+                xiaohongshu_logger.warning(_msg("⚠️", "剪贴板内容为空"))
+                return {"success": False, "share_link": "", "note_id": "", "message": "剪贴板内容为空"}
+
+        except Exception as e:
+            xiaohongshu_logger.error(_msg("❌", f"读取剪贴板失败: {e}"))
+            return {"success": False, "share_link": "", "note_id": "", "message": f"读取剪贴板失败: {e}"}
+
+    except Exception as e:
+        xiaohongshu_logger.error(_msg("❌", f"获取分享链接失败: {e}"))
+        return {"success": False, "share_link": "", "note_id": "", "message": str(e)}
 
 
 async def xiaohongshu_setup(
@@ -236,6 +359,11 @@ async def xiaohongshu_cookie_gen(
             for _ in range(max_checks):
                 if await _is_xhs_login_completed(page):
                     await asyncio.sleep(2)
+                    # 访问主站，确保 cookie 能用于 www.xiaohongshu.com
+                    xiaohongshu_logger.info(_msg("🧭", "正在访问主站同步登录状态"))
+                    await page.goto("https://www.xiaohongshu.com/", timeout=30000)
+                    await page.wait_for_load_state("domcontentloaded")
+                    await asyncio.sleep(1)
                     await context.storage_state(path=account_file)
                     if await cookie_auth(account_file):
                         xiaohongshu_logger.success(_msg("🥳", "小红书扫码登录成功，小人开心收工"))
@@ -557,32 +685,60 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                     await page.screenshot(full_page=True)
                 await asyncio.sleep(0.5)
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright) -> dict:
+        """
+        上传视频并返回结果
+
+        Returns:
+            dict: {"success": bool, "share_link": str, "note_id": str, "message": str}
+        """
         xiaohongshu_logger.info(_msg("🧍", "小人先检查 cookie、视频文件、封面和发布时间"))
         await self.validate_upload_args()
         xiaohongshu_logger.info(_msg("🥳", "上传前检查通过"))
         browser = await playwright.chromium.launch(headless=self.headless)
         context = await browser.new_context(
-            permissions=["geolocation"],
+            permissions=["geolocation", "clipboard-read", "clipboard-write"],
             storage_state=self.account_file,
         )
         context = await set_init_script(context)
 
+        result = {"success": False, "share_link": "", "note_id": "", "message": ""}
         try:
             page = await context.new_page()
             await self.upload_video_content(page)
             await context.storage_state(path=self.account_file)
             xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
+
+            # 发布成功后获取分享链接
+            share_result = await get_share_link(page)
+            if share_result["success"]:
+                result = {
+                    "success": True,
+                    "share_link": share_result["share_link"],
+                    "note_id": share_result["note_id"],
+                    "message": "发布成功并获取到分享链接"
+                }
+            else:
+                result = {
+                    "success": True,  # 发布本身是成功的
+                    "share_link": "",
+                    "note_id": "",
+                    "message": f"发布成功，但获取分享链接失败: {share_result['message']}"
+                }
+        except Exception as e:
+            result = {"success": False, "share_link": "", "note_id": "", "message": str(e)}
         finally:
             await context.close()
             await browser.close()
 
-    async def xiaohongshu_upload_video(self):
-        async with async_playwright() as playwright:
-            await self.upload(playwright)
+        return result
 
-    async def main(self):
-        await self.xiaohongshu_upload_video()
+    async def xiaohongshu_upload_video(self) -> dict:
+        async with async_playwright() as playwright:
+            return await self.upload(playwright)
+
+    async def main(self) -> dict:
+        return await self.xiaohongshu_upload_video()
 
 
 class XiaoHongShuNote(XiaoHongShuBaseUploader):
@@ -675,29 +831,57 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                     await page.screenshot(full_page=True)
                 await asyncio.sleep(0.5)
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright) -> dict:
+        """
+        上传图文并返回结果
+
+        Returns:
+            dict: {"success": bool, "share_link": str, "note_id": str, "message": str}
+        """
         xiaohongshu_logger.info(_msg("🧍", "小人先检查 cookie、图片和发布时间"))
         await self.validate_upload_args()
         xiaohongshu_logger.info(_msg("🥳", "图文上传前检查通过"))
         browser = await playwright.chromium.launch(headless=self.headless)
         context = await browser.new_context(
-            permissions=["geolocation"],
+            permissions=["geolocation", "clipboard-read", "clipboard-write"],
             storage_state=self.account_file,
         )
         context = await set_init_script(context)
 
+        result = {"success": False, "share_link": "", "note_id": "", "message": ""}
         try:
             page = await context.new_page()
             await self.upload_note_content(page)
             await context.storage_state(path=self.account_file)
             xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
+
+            # 发布成功后获取分享链接
+            share_result = await get_share_link(page)
+            if share_result["success"]:
+                result = {
+                    "success": True,
+                    "share_link": share_result["share_link"],
+                    "note_id": share_result["note_id"],
+                    "message": "发布成功并获取到分享链接"
+                }
+            else:
+                result = {
+                    "success": True,  # 发布本身是成功的
+                    "share_link": "",
+                    "note_id": "",
+                    "message": f"发布成功，但获取分享链接失败: {share_result['message']}"
+                }
+        except Exception as e:
+            result = {"success": False, "share_link": "", "note_id": "", "message": str(e)}
         finally:
             await context.close()
             await browser.close()
 
-    async def xiaohongshu_upload_note(self):
-        async with async_playwright() as playwright:
-            await self.upload(playwright)
+        return result
 
-    async def main(self):
-        await self.xiaohongshu_upload_note()
+    async def xiaohongshu_upload_note(self) -> dict:
+        async with async_playwright() as playwright:
+            return await self.upload(playwright)
+
+    async def main(self) -> dict:
+        return await self.xiaohongshu_upload_note()

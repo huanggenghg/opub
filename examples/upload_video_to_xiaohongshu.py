@@ -122,7 +122,8 @@ def upload_video_to_xiaohongshu():
         publish_strategy=publish_strategy,
         thumbnail_path=str(thumbnail) if thumbnail else None,
     )
-    asyncio.run(app.xiaohongshu_upload_video())
+    result = asyncio.run(app.xiaohongshu_upload_video())
+    print(f"\n上传结果: {result}")
 
 
 def upload_note_to_xiaohongshu():
@@ -177,7 +178,8 @@ def upload_note_to_xiaohongshu():
         publish_strategy=publish_strategy,
         title=note_title,
     )
-    asyncio.run(app.xiaohongshu_upload_note())
+    result = asyncio.run(app.xiaohongshu_upload_note())
+    print(f"\n上传结果: {result}")
 
 
 if __name__ == "__main__":

@@ -330,7 +330,7 @@ async def upload_kuaishou_note(request: KuaishouNoteUploadRequest) -> Path:
     return account_file
 
 
-async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest) -> Path:
+async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest) -> dict:
     account_file = resolve_account_file("xiaohongshu", request.account_name)
     is_ready = await xiaohongshu_setup(str(account_file), handle=False)
     if not is_ready:
@@ -350,11 +350,11 @@ async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest) -> Pa
         debug=request.debug,
         headless=request.headless,
     )
-    await app.main()
-    return account_file
+    result = await app.main()
+    return result
 
 
-async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest) -> Path:
+async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest) -> dict:
     account_file = resolve_account_file("xiaohongshu", request.account_name)
     is_ready = await xiaohongshu_setup(str(account_file), handle=False)
     if not is_ready:
@@ -374,8 +374,8 @@ async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest) -> Path
         debug=request.debug,
         headless=request.headless,
     )
-    await app.main()
-    return account_file
+    result = await app.main()
+    return result
 
 
 async def upload_bilibili_video(request: BilibiliVideoUploadRequest) -> Path:

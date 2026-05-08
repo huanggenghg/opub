@@ -133,16 +133,15 @@ class BaiJiaHaoVideo(object):
 
         # 创建一个新的页面
         page = await context.new_page()
-        # 访问指定的 URL
-        await page.goto("https://baijiahao.baidu.com/builder/rc/edit?type=videoV2", timeout=60000)
+        # 直接访问带 is_from_cms=1 参数的 URL
+        target_url = "https://baijiahao.baidu.com/builder/rc/edit?type=videoV2&is_from_cms=1"
+        await page.goto(target_url, timeout=60000)
         baijiahao_logger.info(f"正在上传-------{self.title}.mp4")
-        # 等待页面跳转到指定的 URL，没进入，则自动等待到超时
-        baijiahao_logger.info('正在打开主页...')
-        await page.wait_for_url("https://baijiahao.baidu.com/builder/rc/edit?type=videoV2", timeout=60000)
+        baijiahao_logger.info(f'已打开页面: {page.url}')
 
         # 等待上传区域加载
         baijiahao_logger.info('等待上传区域加载...')
-        await page.wait_for_timeout(2000)
+        await page.wait_for_timeout(3000)
 
         # 检查 input 元素状态
         input_count = await page.locator("input[type=file]").count()
@@ -156,7 +155,7 @@ class BaiJiaHaoVideo(object):
             visible = await input_elem.is_visible()
             baijiahao_logger.info(f'Input {i}: accept={accept}, multiple={multiple}, visible={visible}')
 
-        # 直接设置文件（不点击按钮，避免弹出系统文件选择对话框）
+        # 设置文件
         await page.locator("input[type=file]").set_input_files(self.file_path)
         baijiahao_logger.info('视频文件已选择')
 

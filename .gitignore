@@ -190,3 +190,5 @@ videoFile
 
 /uploader/bilibili_uploader/qrcode.png
 videos/
+output/
+templates/

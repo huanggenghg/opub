@@ -118,15 +118,19 @@ def extract_frames(video_file: str, num_frames: int = 3) -> str:
         帧文件夹路径（包含提取的帧图像）
     """
     import cv2
+    import numpy as np
 
     # 使用项目内的临时目录，便于管理和读取
     from conf import BASE_DIR
-    frames_base_dir = os.path.join(BASE_DIR, 'temp_frames')
+    frames_base_dir = os.path.join(str(BASE_DIR), 'temp_frames')
     os.makedirs(frames_base_dir, exist_ok=True)
 
-    # 为每个视频创建唯一的子目录
+    # 为每个视频创建唯一的子目录（使用 hash 避免中文路径问题）
+    import hashlib
+    video_hash = hashlib.md5(video_file.encode('utf-8')).hexdigest()[:8]
     video_name = os.path.basename(video_file).rsplit('.', 1)[0]
-    temp_dir = os.path.join(frames_base_dir, video_name)
+    # 使用 hash 作为目录名，避免中文路径问题
+    temp_dir = os.path.join(frames_base_dir, f"{video_hash}_{video_name[:20] if len(video_name) > 20 else video_name}")
     os.makedirs(temp_dir, exist_ok=True)
 
     cap = cv2.VideoCapture(video_file)
@@ -158,7 +162,8 @@ def extract_frames(video_file: str, num_frames: int = 3) -> str:
             ret, frame = cap.read()
             if ret:
                 frame_path = os.path.join(temp_dir, f"frame_{idx}.png")
-                cv2.imwrite(frame_path, frame)
+                # 使用 imencode 处理中文路径
+                cv2.imencode('.png', frame)[1].tofile(frame_path)
 
         return temp_dir
     finally:

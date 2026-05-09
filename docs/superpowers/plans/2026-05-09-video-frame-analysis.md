@@ -19,16 +19,16 @@
 
 ---
 
-### Task 1: 重构 video_analyzer.py - 删除占位符并修改帧提取函数
+### Task 1: 重构 video_analyzer.py - 删除占位符并修改帧提取函数 ✅
 
 **Files:**
 - Modify: `utils/video_analyzer.py`
 
-- [ ] **Step 1: 删除 analyze_video_content 占位符函数**
+- [x] **Step 1: 删除 analyze_video_content 占位符函数**
 
 删除 `utils/video_analyzer.py` 中的 `analyze_video_content()` 函数（第 169-192 行）。
 
-- [ ] **Step 2: 修改 extract_frames 函数返回帧文件夹路径**
+- [x] **Step 2: 修改 extract_frames 函数返回帧文件夹路径**
 
 将 `extract_frames()` 函数修改为返回帧文件夹路径，而非帧文件列表：
 
@@ -92,7 +92,7 @@ def extract_frames(video_file: str, num_frames: int = 3) -> str:
         cap.release()
 ```
 
-- [ ] **Step 3: 新增 extract_all_frames_parallel 并发提取函数**
+- [x] **Step 3: 新增 extract_all_frames_parallel 并发提取函数**
 
 在 `extract_frames()` 函数之后添加：
 
@@ -136,7 +136,7 @@ def extract_all_frames_parallel(
     return results
 ```
 
-- [ ] **Step 4: 新增 get_frame_files 辅助函数**
+- [x] **Step 4: 新增 get_frame_files 辅助函数**
 
 在 `extract_all_frames_parallel()` 之后添加：
 
@@ -163,11 +163,11 @@ def get_frame_files(frames_dir: str) -> list[str]:
     return frame_files
 ```
 
-- [ ] **Step 5: 删除旧的 generate_video_configs 函数**
+- [x] **Step 5: 删除旧的 generate_video_configs 函数**
 
 删除 `generate_video_configs()` 函数（第 195-270 行），因为该函数包含占位符调用逻辑，将在 sau_cli.py 中重新实现。
 
-- [ ] **Step 6: 新增 cleanup_frames_dir 清理函数**
+- [x] **Step 6: 新增 cleanup_frames_dir 清理函数**
 
 在文件末尾添加：
 
@@ -184,7 +184,7 @@ def cleanup_frames_dir(frames_dir: str) -> None:
         shutil.rmtree(frames_dir, ignore_errors=True)
 ```
 
-- [ ] **Step 7: 更新文件顶部的导出列表**
+- [x] **Step 7: 更新文件顶部的导出列表**
 
 确保文件顶部有正确的导入：
 
@@ -192,7 +192,7 @@ def cleanup_frames_dir(frames_dir: str) -> None:
 from typing import Callable, Optional
 ```
 
-- [ ] **Step 8: 提交代码**
+- [x] **Step 8: 提交代码**
 
 ```bash
 git add utils/video_analyzer.py
@@ -201,12 +201,12 @@ git commit -m "refactor: 重构 video_analyzer.py，移除占位符，新增并�
 
 ---
 
-### Task 2: 重构 sau_cli.py - 分两阶段执行 generate 命令
+### Task 2: 重构 sau_cli.py - 分两阶段执行 generate 命令 ✅
 
 **Files:**
 - Modify: `sau_cli.py:553-586` (dispatch 函数中的 generate 处理)
 
-- [ ] **Step 1: 修改 dispatch 函数中的 generate 处理逻辑**
+- [x] **Step 1: 修改 dispatch 函数中的 generate 处理逻辑**
 
 将 `sau_cli.py` 中 `dispatch()` 函数的 generate 处理部分（约第 553-586 行）替换为：
 
@@ -335,7 +335,7 @@ git commit -m "refactor: 重构 video_analyzer.py，移除占位符，新增并�
         return 0
 ```
 
-- [ ] **Step 2: 提交代码**
+- [x] **Step 2: 提交代码**
 
 ```bash
 git add sau_cli.py
@@ -344,16 +344,16 @@ git commit -m "refactor: 重构 sau generate 命令，分两阶段执行"
 
 ---
 
-### Task 3: 测试 generate 命令
+### Task 3: 测试 generate 命令 ✅
 
 **Files:**
 - Test: `sau generate` 命令
 
-- [ ] **Step 1: 准备测试视频目录**
+- [x] **Step 1: 准备测试视频目录**
 
 确保 `videos/` 目录下有测试视频文件。
 
-- [ ] **Step 2: 运行 generate 命令测试**
+- [x] **Step 2: 运行 generate 命令测试**
 
 ```bash
 sau generate --dir videos/
@@ -365,7 +365,7 @@ sau generate --dir videos/
 - 阶段2: 串行分析，提示需要分析的帧图像路径
 - 显示生成结果统计
 
-- [ ] **Step 3: 验证生成的配置文件**
+- [x] **Step 3: 验证生成的配置文件**
 
 ```bash
 ls videos/*.json
@@ -373,7 +373,7 @@ ls videos/*.json
 
 预期：每个视频都有对应的 .json 配置文件
 
-- [ ] **Step 4: 验证临时文件夹已清理**
+- [x] **Step 4: 验证临时文件夹已清理**
 
 ```bash
 ls temp_frames/

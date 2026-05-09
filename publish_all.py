@@ -77,8 +77,10 @@ def get_video_content(video_file: str, default_title: str, default_desc: str) ->
     """
     获取视频的标题和描述
 
-    直接从模板文件随机选择，不使用视频同名 JSON 配置文件
-    每个视频都会重新随机选择一个模板
+    优先级：
+    1. 视频同名的 JSON 配置文件（最高优先）
+    2. 模板随机填充
+    3. 配置文件默认值
 
     Args:
         video_file: 视频文件路径
@@ -88,7 +90,18 @@ def get_video_content(video_file: str, default_title: str, default_desc: str) ->
     Returns:
         (title, desc) 元组
     """
-    # 直接从模板随机选择（每次调用都会重新随机）
+    # 1. 最高优先：视频同名 JSON 配置文件
+    from utils.video_analyzer import load_video_config
+
+    config = load_video_config(video_file)
+    if config:
+        title = config.get("title", "")
+        desc = config.get("desc", "")
+        if title or desc:
+            print(f"[AUTO] 使用视频配置文件: {os.path.basename(video_file).rsplit('.', 1)[0]}.json")
+            return title, desc
+
+    # 2. 次优先：模板随机填充
     templates = load_content_templates()
     if templates:
         random_template = random.choice(templates)
@@ -97,7 +110,7 @@ def get_video_content(video_file: str, default_title: str, default_desc: str) ->
         print(f"[AUTO] 使用模板填充标题和描述: {title}")
         return title, desc
 
-    # 如果模板为空，使用默认值
+    # 3. 最低优先：配置文件默认值
     return default_title, default_desc
 
 

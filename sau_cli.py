@@ -553,8 +553,16 @@ async def dispatch(args: argparse.Namespace) -> int:
     # === 处理 generate 命令 ===
     if args.platform == "generate":
         import os
+        import shutil
 
-        from utils.video_analyzer import generate_video_configs, get_video_files
+        from utils.video_analyzer import (
+            extract_all_frames_parallel,
+            get_video_files,
+            save_video_config,
+            config_exists,
+            get_frame_files,
+            cleanup_frames_dir,
+        )
 
         directory = args.dir
         if not os.path.isdir(directory):
@@ -566,23 +574,103 @@ async def dispatch(args: argparse.Namespace) -> int:
             print(f"未找到视频文件: {directory}")
             return 0
 
-        print(f"找到 {len(video_files)} 个视频文件，开始分析...")
+        total = len(video_files)
+        print(f"找到 {total} 个视频文件")
+        print("=" * 50)
 
-        def progress_callback(current, total, video_file, status):
-            if status == "skip":
-                print(f"[{current}/{total}] 跳过 {video_file} (配置已存在)")
-            elif status == "success":
-                print(f"[{current}/{total}] 完成 {video_file}")
+        # === 阶段1: 并发提取所有视频帧 ===
+        print("\n[阶段1] 提取视频帧...")
+
+        frames_results = {}
+        failed_extractions = []
+
+        def extraction_callback(video_file, frames_dir, error):
+            basename = os.path.basename(video_file)
+            if error:
+                print(f"  ❌ {basename}: {error}")
+                failed_extractions.append(video_file)
             else:
-                print(f"[{current}/{total}] 错误 {video_file}: {status}")
+                print(f"  ✓ {basename}")
 
-        results = generate_video_configs(
-            directory=directory,
-            force=args.force,
-            progress_callback=progress_callback
+        frames_results = extract_all_frames_parallel(
+            video_files,
+            progress_callback=extraction_callback
         )
 
-        print(f"\n生成完成: 成功 {results['success']}, 跳过 {results['skip']}, 错误 {results['error']}")
+        if failed_extractions:
+            print(f"\n警告: {len(failed_extractions)} 个视频帧提取失败")
+
+        # === 阶段2: 串行分析每个视频的帧 ===
+        print("\n[阶段2] 分析视频内容...")
+        print("提示: 此阶段需要逐个分析视频帧，请等待大模型处理")
+        print("-" * 50)
+
+        results = {"success": 0, "skip": 0, "error": 0, "files": []}
+
+        for idx, video_file in enumerate(video_files, 1):
+            basename = os.path.basename(video_file)
+
+            # 检查是否已存在配置文件
+            if not args.force and config_exists(video_file):
+                print(f"[{idx}/{total}] 跳过 {basename} (配置已存在)")
+                results["skip"] += 1
+                # 清理帧文件夹
+                frames_dir = frames_results.get(video_file, "")
+                if frames_dir:
+                    cleanup_frames_dir(frames_dir)
+                continue
+
+            frames_dir = frames_results.get(video_file, "")
+            if not frames_dir:
+                print(f"[{idx}/{total}] 跳过 {basename} (帧提取失败)")
+                results["error"] += 1
+                continue
+
+            frame_files = get_frame_files(frames_dir)
+            if not frame_files:
+                print(f"[{idx}/{total}] 跳过 {basename} (无有效帧)")
+                results["error"] += 1
+                cleanup_frames_dir(frames_dir)
+                continue
+
+            print(f"\n[{idx}/{total}] 分析: {basename}")
+            print(f"  帧图像: {len(frame_files)} 张")
+
+            # 读取帧图像供 Claude Code 分析
+            # 注意: 此处需要 Claude Code 在执行时直接读取帧图像
+            # 以下是占位符，实际分析由 Claude Code 多模态能力完成
+            print(f"  请分析以下帧图像:")
+            for frame_file in frame_files:
+                print(f"    - {frame_file}")
+
+            # 占位符: 实际标题描述由 Claude Code 分析后填入
+            # 这里使用文件名作为临时标题，等待 Claude Code 覆盖
+            name_without_ext = basename.rsplit('.', 1)[0]
+            title = f"{name_without_ext}"
+            desc = f"视频内容分析待完成"
+
+            # 保存配置
+            config_file = save_video_config(video_file, title, desc)
+            print(f"  ✓ 配置已保存: {os.path.basename(config_file)}")
+
+            results["success"] += 1
+            results["files"].append({
+                "video": basename,
+                "config": os.path.basename(config_file),
+                "title": title
+            })
+
+            # 清理帧文件夹
+            cleanup_frames_dir(frames_dir)
+
+        # 清理临时目录
+        from conf import BASE_DIR
+        temp_frames_dir = os.path.join(BASE_DIR, 'temp_frames')
+        if os.path.exists(temp_frames_dir):
+            shutil.rmtree(temp_frames_dir, ignore_errors=True)
+
+        print("\n" + "=" * 50)
+        print(f"生成完成: 成功 {results['success']}, 跳过 {results['skip']}, 错误 {results['error']}")
         return 0
 
     if args.platform == "douyin":

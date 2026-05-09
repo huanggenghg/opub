@@ -271,8 +271,6 @@ def analyze_frames_with_glm4v(frame_paths: list[str], video_name: str) -> tuple[
     Raises:
         RuntimeError: API 调用失败时抛出
     """
-    import base64
-
     try:
         from conf import ZHIPU_API_KEY, ZHIPU_VISION_MODEL
     except ImportError:
@@ -345,24 +343,44 @@ def analyze_frames_with_glm4v(frame_paths: list[str], video_name: str) -> tuple[
             model=ZHIPU_VISION_MODEL,
             messages=[{"role": "user", "content": content}],
             temperature=0.7,
-            max_tokens=200,
+            max_tokens=400,  # 增加到 400 以适应中文内容
         )
 
         result_text = response.choices[0].message.content.strip()
 
-        # 解析 JSON 结果
+        # 解析 JSON 结果 - 多种方式尝试
         import re
-        # 尝试提取 JSON 内容
-        json_match = re.search(r'\{[^{}]*"title"[^{}]*"desc"[^{}]*\}', result_text, re.DOTALL)
-        if json_match:
-            result = json.loads(json_match.group())
-            title = result.get("title", "")
-            desc = result.get("desc", "")
-        else:
-            # 尝试直接解析
-            result = json.loads(result_text)
-            title = result.get("title", "")
-            desc = result.get("desc", "")
+        result = None
+
+        # 方式1: 尝试提取 JSON 块（处理 markdown 代码块）
+        json_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', result_text, re.DOTALL)
+        if json_block_match:
+            try:
+                result = json.loads(json_block_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # 方式2: 尝试提取裸 JSON 对象
+        if not result:
+            json_match = re.search(r'\{[^{}]*"title"[^{}]*"desc"[^{}]*\}', result_text, re.DOTALL)
+            if json_match:
+                try:
+                    result = json.loads(json_match.group())
+                except json.JSONDecodeError:
+                    pass
+
+        # 方式3: 直接解析整个响应
+        if not result:
+            try:
+                result = json.loads(result_text)
+            except json.JSONDecodeError:
+                pass
+
+        if not result:
+            raise RuntimeError(f"无法解析 API 返回的 JSON: {result_text}")
+
+        title = result.get("title", "")
+        desc = result.get("desc", "")
 
         # 验证结果
         if not title or not desc:

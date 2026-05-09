@@ -32,5 +32,5 @@ DEBUG_MODE = True
 # API Key 获取: https://bigmodel.cn/user/apikey
 ZHIPU_API_KEY = ""  # 智谱 AI API Key
 
-# 视觉模型名称（可选: glm-4v, glm-4v-plus）
+# 视觉模型名称（glm-4v-flash 免费，其他: glm-4v, glm-4v-plus）
 ZHIPU_VISION_MODEL = "glm-4v-flash"

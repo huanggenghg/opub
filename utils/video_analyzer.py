@@ -114,13 +114,19 @@ def extract_frames(video_file: str, num_frames: int = 3) -> list[str]:
         num_frames: 提取帧数（默认提取开头、中间、结尾三帧）
 
     Returns:
-        帧图像文件路径列表（临时文件）
+        帧图像文件路径列表
     """
     import cv2
-    import tempfile
 
-    # 创建临时目录存放帧图像
-    temp_dir = tempfile.mkdtemp(prefix='video_frames_')
+    # 使用项目内的临时目录，便于管理和读取
+    from conf import BASE_DIR
+    frames_dir = os.path.join(BASE_DIR, 'temp_frames')
+    os.makedirs(frames_dir, exist_ok=True)
+
+    # 为每个视频创建唯一的子目录
+    video_name = os.path.basename(video_file).rsplit('.', 1)[0]
+    temp_dir = os.path.join(frames_dir, video_name)
+    os.makedirs(temp_dir, exist_ok=True)
 
     cap = cv2.VideoCapture(video_file)
     try:

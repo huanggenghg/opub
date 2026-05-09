@@ -73,6 +73,78 @@ def fill_empty_content(title: str, desc: str) -> tuple:
     return title, desc
 
 
+def generate_single_video_config(video_file: str) -> tuple:
+    """
+    为单个视频生成配置（提取帧并分析）
+
+    Args:
+        video_file: 视频文件路径
+
+    Returns:
+        (title, desc) 元组，失败返回 (None, None)
+    """
+    from utils.video_analyzer import extract_frames, save_video_config, analyze_video_content
+    import shutil
+
+    frame_paths = []
+    try:
+        print(f"  [生成] 提取视频关键帧...")
+        frame_paths = extract_frames(video_file, num_frames=3)
+
+        if not frame_paths:
+            print(f"  [生成] 提取帧失败")
+            return None, None
+
+        print(f"  [生成] 分析视频内容...")
+        title, desc = analyze_video_content(video_file, frame_paths)
+
+        # 保存配置文件
+        config_file = save_video_config(video_file, title, desc)
+        print(f"  [生成] 已保存配置: {os.path.basename(config_file)}")
+
+        return title, desc
+
+    except Exception as e:
+        print(f"  [生成] 失败: {e}")
+        return None, None
+    finally:
+        # 清理临时帧文件
+        for frame_path in frame_paths:
+            if os.path.exists(frame_path):
+                os.remove(frame_path)
+        temp_dir = os.path.dirname(frame_paths[0]) if frame_paths else ""
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def get_video_content(video_file: str, default_title: str, default_desc: str) -> tuple:
+    """
+    获取视频的标题和描述
+
+    直接从模板文件随机选择，不使用视频同名 JSON 配置文件
+    每个视频都会重新随机选择一个模板
+
+    Args:
+        video_file: 视频文件路径
+        default_title: 默认标题（来自 publish_config.ini）
+        default_desc: 默认描述（来自 publish_config.ini）
+
+    Returns:
+        (title, desc) 元组
+    """
+    # 直接从模板随机选择（每次调用都会重新随机）
+    templates = load_content_templates()
+    if templates:
+        random_template = random.choice(templates)
+        title = random_template.get("title", "")
+        desc = random_template.get("desc", "")
+        print(f"[AUTO] 使用模板填充标题和描述: {title}")
+        return title, desc
+
+    # 如果模板为空，使用默认值
+    return default_title, default_desc
+
+
 def read_config(config_file: str = "publish_config.ini") -> dict:
     """读取配置文件"""
     config_path = BASE_DIR / config_file
@@ -655,8 +727,8 @@ async def main():
         print(f"\n========== 视频 [{video_idx}/{len(video_files)}] ==========")
         print(f"文件: {os.path.basename(video_file)}")
 
-        # 使用配置文件中的标题和描述，如果为空则从模板随机填充
-        title, desc = fill_empty_content(params["title"], params["desc"])
+        # 使用视频配置文件或默认配置/模板填充
+        title, desc = get_video_content(video_file, params["title"], params["desc"])
 
         # 更新参数
         video_params = {

@@ -240,3 +240,137 @@ def cleanup_frames_dir(frames_dir: str) -> None:
     """
     if frames_dir and os.path.exists(frames_dir):
         shutil.rmtree(frames_dir, ignore_errors=True)
+
+
+def encode_image_to_base64(image_path: str) -> str:
+    """
+    将图片编码为 base64 字符串
+
+    Args:
+        image_path: 图片文件路径
+
+    Returns:
+        base64 编码的字符串
+    """
+    import base64
+    with open(image_path, 'rb') as f:
+        return base64.b64encode(f.read()).decode('utf-8')
+
+
+def analyze_frames_with_glm4v(frame_paths: list[str], video_name: str) -> tuple[str, str]:
+    """
+    使用智谱 GLM-4V 视觉模型分析视频帧，生成标题和描述
+
+    Args:
+        frame_paths: 帧图像路径列表
+        video_name: 视频文件名
+
+    Returns:
+        (title, desc) 元组
+
+    Raises:
+        RuntimeError: API 调用失败时抛出
+    """
+    import base64
+
+    try:
+        from conf import ZHIPU_API_KEY, ZHIPU_VISION_MODEL
+    except ImportError:
+        raise RuntimeError("未找到配置文件 conf.py，请确保配置文件存在")
+
+    if not ZHIPU_API_KEY:
+        raise RuntimeError("未配置 ZHIPU_API_KEY，请在 conf.py 中设置智谱 AI API Key")
+
+    # 构建消息内容
+    content = []
+
+    # 添加文字提示 - 以创作者视角生成生动文案
+    prompt = f"""你是一位资深短视频创作者，擅长在抖音、小红书等平台创作爆款内容。
+现在请分析视频画面，以创作者的视角为这个视频写标题和描述。
+
+视频文件名：{video_name}
+
+【创作原则】
+1. 标题要抓眼球但不做标题党，用真实内容打动人
+2. 描述要有代入感，像朋友在聊天分享，不是官方介绍
+3. 用口语化表达，避免书面语和官方腔调
+4. 可以适当用emoji增加亲和力，但不要滥用
+5. 突出视频最吸引人的点：是搞笑？是干货？是情感共鸣？
+
+【风格参考】
+好的标题示例：
+- "这招绝了！一分钟学会..."（干货类）
+- "笑死，我家猫竟然..."（搞笑类）
+- "终于搞懂了，原来这么简单"（教程类）
+- "这个真的好用，强烈推荐"（产品类）
+
+好的描述示例：
+- "试了好几次才成功，分享给你们～"
+- "第一次发现这个功能，太方便了！"
+- "看完记得点赞收藏，下次用得上"
+
+【禁止事项】
+- 不要用"本视频"、"该视频"等官方表达
+- 不要用"展示了"、"呈现了"等书面语
+- 不要用"精彩内容"、"值得观看"等空洞描述
+- 不要过度夸张或虚假宣传
+
+请根据画面内容，判断视频类型，然后创作标题和描述。
+按以下 JSON 格式返回，不要包含其他内容：
+{{"title": "标题内容", "desc": "描述内容"}}"""
+
+    content.append({"type": "text", "text": prompt})
+
+    # 添加帧图像（最多 3 张）
+    for frame_path in frame_paths[:3]:
+        if os.path.exists(frame_path):
+            image_base64 = encode_image_to_base64(frame_path)
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{image_base64}"
+                }
+            })
+
+    # 调用智谱 AI API
+    try:
+        from zhipuai import ZhipuAI
+    except ImportError:
+        raise RuntimeError("未安装 zhipuai 库，请运行: pip install zhipuai")
+
+    client = ZhipuAI(api_key=ZHIPU_API_KEY)
+
+    try:
+        response = client.chat.completions.create(
+            model=ZHIPU_VISION_MODEL,
+            messages=[{"role": "user", "content": content}],
+            temperature=0.7,
+            max_tokens=200,
+        )
+
+        result_text = response.choices[0].message.content.strip()
+
+        # 解析 JSON 结果
+        import re
+        # 尝试提取 JSON 内容
+        json_match = re.search(r'\{[^{}]*"title"[^{}]*"desc"[^{}]*\}', result_text, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+            title = result.get("title", "")
+            desc = result.get("desc", "")
+        else:
+            # 尝试直接解析
+            result = json.loads(result_text)
+            title = result.get("title", "")
+            desc = result.get("desc", "")
+
+        # 验证结果
+        if not title or not desc:
+            raise ValueError("API 返回结果缺少 title 或 desc 字段")
+
+        return title, desc
+
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"解析 API 返回结果失败: {e}\n原始响应: {result_text}")
+    except Exception as e:
+        raise RuntimeError(f"调用智谱 AI API 失败: {e}")

@@ -556,6 +556,7 @@ async def dispatch(args: argparse.Namespace) -> int:
         import shutil
 
         from utils.video_analyzer import (
+            analyze_frames_with_glm4v,
             extract_all_frames_parallel,
             get_video_files,
             save_video_config,
@@ -602,7 +603,7 @@ async def dispatch(args: argparse.Namespace) -> int:
 
         # === 阶段2: 串行分析每个视频的帧 ===
         print("\n[阶段2] 分析视频内容...")
-        print("提示: 此阶段需要逐个分析视频帧，请等待大模型处理")
+        print("提示: 此阶段使用智谱 GLM-4V 模型分析视频帧")
         print("-" * 50)
 
         results = {"success": 0, "skip": 0, "error": 0, "files": []}
@@ -636,29 +637,29 @@ async def dispatch(args: argparse.Namespace) -> int:
             print(f"\n[{idx}/{total}] 分析: {basename}")
             print(f"  帧图像: {len(frame_files)} 张")
 
-            # 读取帧图像供 Claude Code 分析
-            # 注意: 此处需要 Claude Code 在执行时直接读取帧图像
-            # 以下是占位符，实际分析由 Claude Code 多模态能力完成
-            print(f"  请分析以下帧图像:")
-            for frame_file in frame_files:
-                print(f"    - {frame_file}")
+            try:
+                # 调用 GLM-4V 分析
+                title, desc = analyze_frames_with_glm4v(frame_files, basename)
 
-            # 占位符: 实际标题描述由 Claude Code 分析后填入
-            # 这里使用文件名作为临时标题，等待 Claude Code 覆盖
-            name_without_ext = basename.rsplit('.', 1)[0]
-            title = f"{name_without_ext}"
-            desc = f"视频内容分析待完成"
+                # 保存配置
+                config_file = save_video_config(video_file, title, desc)
+                print(f"  ✓ 标题: {title}")
+                print(f"  ✓ 描述: {desc[:50]}{'...' if len(desc) > 50 else ''}")
+                print(f"  ✓ 配置: {os.path.basename(config_file)}")
 
-            # 保存配置
-            config_file = save_video_config(video_file, title, desc)
-            print(f"  ✓ 配置已保存: {os.path.basename(config_file)}")
+                results["success"] += 1
+                results["files"].append({
+                    "video": basename,
+                    "config": os.path.basename(config_file),
+                    "title": title
+                })
 
-            results["success"] += 1
-            results["files"].append({
-                "video": basename,
-                "config": os.path.basename(config_file),
-                "title": title
-            })
+            except RuntimeError as e:
+                print(f"  ❌ 错误: {e}")
+                results["error"] += 1
+            except Exception as e:
+                print(f"  ❌ 未知错误: {e}")
+                results["error"] += 1
 
             # 清理帧文件夹
             cleanup_frames_dir(frames_dir)

@@ -192,3 +192,5 @@ videoFile
 videos/
 output/
 templates/
+# Temporary frame images
+temp_frames/

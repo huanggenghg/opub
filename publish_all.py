@@ -73,50 +73,6 @@ def fill_empty_content(title: str, desc: str) -> tuple:
     return title, desc
 
 
-def generate_single_video_config(video_file: str) -> tuple:
-    """
-    为单个视频生成配置（提取帧并分析）
-
-    Args:
-        video_file: 视频文件路径
-
-    Returns:
-        (title, desc) 元组，失败返回 (None, None)
-    """
-    from utils.video_analyzer import extract_frames, save_video_config, analyze_video_content
-    import shutil
-
-    frame_paths = []
-    try:
-        print(f"  [生成] 提取视频关键帧...")
-        frame_paths = extract_frames(video_file, num_frames=3)
-
-        if not frame_paths:
-            print(f"  [生成] 提取帧失败")
-            return None, None
-
-        print(f"  [生成] 分析视频内容...")
-        title, desc = analyze_video_content(video_file, frame_paths)
-
-        # 保存配置文件
-        config_file = save_video_config(video_file, title, desc)
-        print(f"  [生成] 已保存配置: {os.path.basename(config_file)}")
-
-        return title, desc
-
-    except Exception as e:
-        print(f"  [生成] 失败: {e}")
-        return None, None
-    finally:
-        # 清理临时帧文件
-        for frame_path in frame_paths:
-            if os.path.exists(frame_path):
-                os.remove(frame_path)
-        temp_dir = os.path.dirname(frame_paths[0]) if frame_paths else ""
-        if temp_dir and os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir, ignore_errors=True)
-
-
 def get_video_content(video_file: str, default_title: str, default_desc: str) -> tuple:
     """
     获取视频的标题和描述

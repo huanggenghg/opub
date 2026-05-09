@@ -73,26 +73,28 @@ def fill_empty_content(title: str, desc: str) -> tuple:
     return title, desc
 
 
-def get_video_content(video_file: str, default_title: str, default_desc: str) -> tuple:
+def get_video_content(video_file: str, default_title: str, default_desc: str, auto_generate: bool = True) -> tuple:
     """
     获取视频的标题和描述
 
     优先级：
     1. 视频同名的 JSON 配置文件（最高优先）
-    2. 模板随机填充
-    3. 配置文件默认值
+    2. 自动生成配置（如果启用且无配置文件）
+    3. 模板随机填充
+    4. 配置文件默认值
 
     Args:
         video_file: 视频文件路径
         default_title: 默认标题（来自 publish_config.ini）
         default_desc: 默认描述（来自 publish_config.ini）
+        auto_generate: 是否自动生成配置（默认 True）
 
     Returns:
         (title, desc) 元组
     """
-    # 1. 最高优先：视频同名 JSON 配置文件
-    from utils.video_analyzer import load_video_config
+    from utils.video_analyzer import load_video_config, config_exists
 
+    # 1. 最高优先：视频同名 JSON 配置文件
     config = load_video_config(video_file)
     if config:
         title = config.get("title", "")
@@ -101,7 +103,45 @@ def get_video_content(video_file: str, default_title: str, default_desc: str) ->
             print(f"[AUTO] 使用视频配置文件: {os.path.basename(video_file).rsplit('.', 1)[0]}.json")
             return title, desc
 
-    # 2. 次优先：模板随机填充
+    # 2. 自动生成配置（如果启用且无配置文件）
+    if auto_generate and not config_exists(video_file):
+        print(f"[AUTO] 视频无配置文件，正在自动生成...")
+        try:
+            from utils.video_analyzer import (
+                analyze_frames_with_glm4v,
+                extract_frames,
+                save_video_config,
+                get_frame_files,
+                cleanup_frames_dir,
+            )
+
+            # 提取帧
+            frames_dir = extract_frames(video_file, num_frames=3)
+            frame_files = get_frame_files(frames_dir)
+
+            if frame_files:
+                # 调用 GLM-4V 分析
+                video_name = os.path.basename(video_file)
+                title, desc = analyze_frames_with_glm4v(frame_files, video_name)
+
+                # 保存配置文件
+                save_video_config(video_file, title, desc)
+                print(f"[AUTO] 配置已生成: {title}")
+
+                # 清理临时文件
+                cleanup_frames_dir(frames_dir)
+
+                return title, desc
+            else:
+                print(f"[AUTO] 帧提取失败，使用模板填充")
+
+            # 清理临时文件
+            cleanup_frames_dir(frames_dir)
+
+        except Exception as e:
+            print(f"[AUTO] 自动生成失败: {e}，使用模板填充")
+
+    # 3. 次优先：模板随机填充
     templates = load_content_templates()
     if templates:
         random_template = random.choice(templates)
@@ -110,7 +150,7 @@ def get_video_content(video_file: str, default_title: str, default_desc: str) ->
         print(f"[AUTO] 使用模板填充标题和描述: {title}")
         return title, desc
 
-    # 3. 最低优先：配置文件默认值
+    # 4. 最低优先：配置文件默认值
     return default_title, default_desc
 
 

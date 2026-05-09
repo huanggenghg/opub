@@ -6,8 +6,7 @@
 import json
 import os
 from datetime import datetime
-from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 # 视频文件扩展名
 VIDEO_EXTENSIONS = ['.mp4', '.mov', '.mkv', '.avi', '.flv', '.mpeg', '.ogg', '.vob', '.webm', '.wmv', '.rmvb']
@@ -124,40 +123,41 @@ def extract_frames(video_file: str, num_frames: int = 3) -> list[str]:
     temp_dir = tempfile.mkdtemp(prefix='video_frames_')
 
     cap = cv2.VideoCapture(video_file)
-    if not cap.isOpened():
-        raise RuntimeError(f"无法打开视频文件: {video_file}")
+    try:
+        if not cap.isOpened():
+            raise RuntimeError(f"无法打开视频文件: {video_file}")
 
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if total_frames <= 0:
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames <= 0:
+            raise RuntimeError(f"视频文件无有效帧: {video_file}")
+
+        # 计算提取帧的位置
+        if total_frames <= num_frames:
+            positions = list(range(total_frames))
+        else:
+            # 提取开头、中间、结尾帧
+            positions = [
+                0,  # 开头
+                total_frames // 2,  # 中间
+                total_frames - 1  # 结尾
+            ]
+            # 如果需要更多帧，均匀分布
+            if num_frames > 3:
+                step = total_frames // num_frames
+                positions = [i * step for i in range(num_frames)]
+
+        frame_paths = []
+        for idx, pos in enumerate(positions[:num_frames]):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+            ret, frame = cap.read()
+            if ret:
+                frame_path = os.path.join(temp_dir, f"frame_{idx}.png")
+                cv2.imwrite(frame_path, frame)
+                frame_paths.append(frame_path)
+
+        return frame_paths
+    finally:
         cap.release()
-        raise RuntimeError(f"视频文件无有效帧: {video_file}")
-
-    # 计算提取帧的位置
-    if total_frames <= num_frames:
-        positions = list(range(total_frames))
-    else:
-        # 提取开头、中间、结尾帧
-        positions = [
-            0,  # 开头
-            total_frames // 2,  # 中间
-            total_frames - 1  # 结尾
-        ]
-        # 如果需要更多帧，均匀分布
-        if num_frames > 3:
-            step = total_frames // num_frames
-            positions = [i * step for i in range(num_frames)]
-
-    frame_paths = []
-    for idx, pos in enumerate(positions[:num_frames]):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
-        ret, frame = cap.read()
-        if ret:
-            frame_path = os.path.join(temp_dir, f"frame_{idx}.png")
-            cv2.imwrite(frame_path, frame)
-            frame_paths.append(frame_path)
-
-    cap.release()
-    return frame_paths
 
 
 def analyze_video_content(video_file: str, frame_paths: list[str]) -> tuple[str, str]:
@@ -189,7 +189,7 @@ def analyze_video_content(video_file: str, frame_paths: list[str]) -> tuple[str,
 def generate_video_configs(
     directory: str,
     force: bool = False,
-    progress_callback: Optional[callable] = None
+    progress_callback: Optional[Callable] = None
 ) -> dict:
     """
     批量生成视频配置文件
@@ -225,6 +225,7 @@ def generate_video_configs(
                 progress_callback(idx, total, basename, "skip")
             continue
 
+        frame_paths = []
         try:
             # 提取关键帧
             frame_paths = extract_frames(video_file, num_frames=3)
@@ -244,7 +245,13 @@ def generate_video_configs(
             if progress_callback:
                 progress_callback(idx, total, basename, "success")
 
-            # 清理临时帧文件
+        except Exception as e:
+            results["error"] += 1
+            results["errors"].append({"video": basename, "error": str(e)})
+            if progress_callback:
+                progress_callback(idx, total, basename, f"error: {str(e)}")
+        finally:
+            # 清理临时帧文件和目录
             import shutil
             for frame_path in frame_paths:
                 if os.path.exists(frame_path):
@@ -253,11 +260,5 @@ def generate_video_configs(
             temp_dir = os.path.dirname(frame_paths[0]) if frame_paths else ""
             if temp_dir and os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir, ignore_errors=True)
-
-        except Exception as e:
-            results["error"] += 1
-            results["errors"].append({"video": basename, "error": str(e)})
-            if progress_callback:
-                progress_callback(idx, total, basename, f"error: {str(e)}")
 
     return results

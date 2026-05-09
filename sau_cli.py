@@ -440,6 +440,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     platform_parsers = parser.add_subparsers(dest="platform", required=True)
 
+    # === generate 子命令 ===
+    generate_parser = platform_parsers.add_parser("generate", help="Generate video title/description from content analysis")
+    generate_parser.add_argument("--dir", required=True, help="Video directory path")
+    generate_parser.add_argument("--force", action="store_true", help="Force overwrite existing config files")
+
     douyin_parser = platform_parsers.add_parser("douyin", help="Douyin operations")
     douyin_actions = douyin_parser.add_subparsers(dest="action", required=True)
 
@@ -545,6 +550,41 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def dispatch(args: argparse.Namespace) -> int:
+    # === 处理 generate 命令 ===
+    if args.platform == "generate":
+        import os
+
+        from utils.video_analyzer import generate_video_configs, get_video_files
+
+        directory = args.dir
+        if not os.path.isdir(directory):
+            print(f"错误: 目录不存在: {directory}", file=sys.stderr)
+            return 1
+
+        video_files = get_video_files(directory)
+        if not video_files:
+            print(f"未找到视频文件: {directory}")
+            return 0
+
+        print(f"找到 {len(video_files)} 个视频文件，开始分析...")
+
+        def progress_callback(current, total, video_file, status):
+            if status == "skip":
+                print(f"[{current}/{total}] 跳过 {video_file} (配置已存在)")
+            elif status == "success":
+                print(f"[{current}/{total}] 完成 {video_file}")
+            else:
+                print(f"[{current}/{total}] 错误 {video_file}: {status}")
+
+        results = generate_video_configs(
+            directory=directory,
+            force=args.force,
+            progress_callback=progress_callback
+        )
+
+        print(f"\n生成完成: 成功 {results['success']}, 跳过 {results['skip']}, 错误 {results['error']}")
+        return 0
+
     if args.platform == "douyin":
         if args.action == "login":
             result = await login_douyin_account(args.account, headless=args.headless)

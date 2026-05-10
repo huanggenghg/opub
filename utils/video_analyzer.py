@@ -161,9 +161,9 @@ def extract_frames(video_file: str, num_frames: int = 3) -> str:
             cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
             ret, frame = cap.read()
             if ret:
-                frame_path = os.path.join(temp_dir, f"frame_{idx}.png")
-                # 使用 imencode 处理中文路径
-                cv2.imencode('.png', frame)[1].tofile(frame_path)
+                frame_path = os.path.join(temp_dir, f"frame_{idx}.jpg")
+                # 使用 JPEG 格式压缩，减少 API 调用时的数据量
+                cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tofile(frame_path)
 
         return temp_dir
     finally:
@@ -224,7 +224,7 @@ def get_frame_files(frames_dir: str) -> list[str]:
 
     frame_files = []
     for file in os.listdir(frames_dir):
-        if file.startswith("frame_") and file.endswith(".png"):
+        if file.startswith("frame_") and (file.endswith(".jpg") or file.endswith(".png")):
             frame_files.append(os.path.join(frames_dir, file))
 
     frame_files.sort()

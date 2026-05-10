@@ -202,8 +202,8 @@ def parse_config(config: dict) -> dict:
     # 解析标题
     title = common.get("title", "")
 
-    # 如果标题或描述为空，从模板随机填充
-    title, desc = fill_empty_content(title, desc)
+    # 注意：标题/描述为空时，在视频处理流程中由 get_video_content() 统一处理
+    # 不在此处填充，支持自动生成配置功能
 
     # 解析图文转视频配置
     convert_to_video = common.get("convert_to_video", "false").strip().lower() in ("true", "yes", "1")
@@ -684,9 +684,8 @@ async def main():
         print("❌ 错误: 未配置启用平台")
         return
 
-    if not params["title"]:
-        print("❌ 错误: 未配置标题")
-        return
+    # 注意：标题为空时，会在视频处理流程中自动生成或使用模板填充
+    # 不在此处检查标题，让 get_video_content() 处理
 
     # 处理图文转视频
     if params["content_type"] == "note" and params["convert_to_video"]:

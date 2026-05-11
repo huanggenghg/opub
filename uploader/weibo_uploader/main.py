@@ -18,7 +18,7 @@ from utils.log import weibo_logger
 
 WEIBO_MAIN_URL = "https://weibo.com/"  # 微博主站，发布入口在首页
 WEIBO_LOGIN_URL = "https://passport.weibo.com/sso/signin?entry=miniblog&source=miniblog&disp=popup&url=https%3A%2F%2Fweibo.com%2Fu%2F6569482075&from=weibopro"  # 登录页面
-WEIBO_PUBLISH_URL = "https://weibo.com/"  # 发布入口在首页
+WEIBO_UPLOAD_CHANNEL_URL = "https://weibo.com/upload/channel"  # 视频上传页面
 WEIBO_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 WEIBO_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 
@@ -357,76 +357,164 @@ class WeiboVideo(WeiboBaseUploader):
     async def upload_video_content(self, page: Page) -> None:
         """上传视频内容"""
         weibo_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
-        weibo_logger.info(_msg("🧭", "正在访问微博首页..."))
+        weibo_logger.info(_msg("🧭", "正在访问微博视频上传页面..."))
 
-        await page.goto(WEIBO_PUBLISH_URL)
+        await page.goto(WEIBO_UPLOAD_CHANNEL_URL)
         await page.wait_for_timeout(3000)
 
-        # 在首页找到发布面板，点击"视频"按钮
-        weibo_logger.info(_msg("🔍", "查找发布面板中的视频入口..."))
+        # 点击"上传视频"按钮触发 file chooser
+        weibo_logger.info(_msg("🔍", "查找上传视频按钮..."))
+        upload_btn = page.locator('button[id^="video_button_upload"], button._btn1_109u9_8').first
+        await upload_btn.wait_for(state="visible", timeout=10000)
 
-        # 点击视频按钮
-        video_btn = page.locator('div[class*="publish"] >> text="视频"').first
-        if await video_btn.count():
-            await video_btn.click()
+        # 通过 file_chooser 方式选择文件
+        async with page.expect_file_chooser(timeout=30000) as fc_info:
+            await upload_btn.click()
+            weibo_logger.info(_msg("✅", "已点击上传视频按钮"))
+
+        file_chooser = await fc_info.value
+        await file_chooser.set_files(self.file_path)
+        weibo_logger.info(_msg("📤", "视频文件已选择，开始上传..."))
+
+        # 等待编辑表单出现（上传开始后会显示标题/类型等表单）
+        # 先等待上传进度条出现，确认上传真正开始
+        weibo_logger.info(_msg("⏳", "等待视频上传开始..."))
+        for i in range(30):
+            upload_started = await page.evaluate("""() => {
+                const bar = document.querySelector('._pro_109u9_49');
+                if (bar) {
+                    const match = (bar.style.transform || '').match(/scaleX\\(([\\d.]+)\\)/);
+                    if (match && parseFloat(match[1]) > 0) return true;
+                }
+                // 也要检查是否秒传完成
+                const bodyText = document.body.innerText || '';
+                if (bodyText.includes('上传完成')) return true;
+                if (bodyText.includes('视频已上传成功')) return 'auto';
+                return false;
+            }""")
+            if upload_started == 'auto':
+                weibo_logger.success(_msg("🥳", "视频秒传成功，已自动发布"))
+                return
+            if upload_started:
+                weibo_logger.info(_msg("✅", "视频上传已开始"))
+                break
             await page.wait_for_timeout(2000)
-            weibo_logger.info(_msg("✅", "已点击视频按钮"))
         else:
-            weibo_logger.warning(_msg("⚠️", "未找到视频按钮，尝试直接上传"))
+            raise RuntimeError("视频上传未开始，可能上传请求被拒绝")
 
-        # 查找视频上传入口
-        video_upload_selectors = [
-            'input[type="file"][accept*="video"]',
-            'input[type="file"][accept*=".mp4"]',
-            'input[type="file"]',
-        ]
+        # 填写表单
+        title_input = page.locator('input[placeholder*="填写标题"]').first
+        if not await title_input.is_visible():
+            raise RuntimeError("上传开始后未找到标题输入框")
 
-        upload_input = None
-        for selector in video_upload_selectors:
-            count = await page.locator(selector).count()
-            weibo_logger.info(_msg("🔍", f"选择器 {selector}: 找到 {count} 个"))
-            if count:
-                upload_input = page.locator(selector).first
-                break
+        # 填写标题
+        weibo_logger.info(_msg("✍️", "正在填写视频标题..."))
+        await title_input.fill(self.title)
+        weibo_logger.success(_msg("✅", f"标题已填写: {self.title}"))
 
-        if not upload_input:
-            raise RuntimeError("未找到视频上传入口")
+        # 填写描述（如有）
+        if self.desc:
+            desc_input = page.locator('textarea[placeholder*="新鲜事"], textarea[placeholder*="描述"]').first
+            if await desc_input.count() and await desc_input.is_visible():
+                await desc_input.fill(self.desc)
+                weibo_logger.success(_msg("✅", "描述已填写"))
 
-        await upload_input.set_input_files(self.file_path)
-        weibo_logger.info(_msg("📤", "视频文件已选择，等待上传..."))
+        # 填写话题标签
+        if self.tags:
+            tags_text = " ".join([f"#{tag}#" for tag in self.tags])
+            desc_input = page.locator('textarea[placeholder*="新鲜事"], textarea[placeholder*="描述"]').first
+            if await desc_input.count() and await desc_input.is_visible():
+                current_desc = await desc_input.input_value()
+                await desc_input.fill(f"{current_desc}\n{tags_text}" if current_desc else tags_text)
+            weibo_logger.success(_msg("✅", f"标签已填写: {tags_text}"))
 
-        # 等待上传完成
-        max_wait = 300  # 最多等待5分钟
-        for i in range(max_wait // 5):
-            await page.wait_for_timeout(5000)
+        # 选择视频类型（必选：原创/二创/转载，默认选"原创"）
+        # 必须模拟真人点击，不能用 JS 直接操作 DOM，否则会被检测为自动化脚本
+        weibo_logger.info(_msg("📝", "正在选择视频类型..."))
 
-            # 检查上传状态
-            if await page.locator('text="上传成功", text="上传完成", text="100%"').count():
-                weibo_logger.success(_msg("🥳", "视频上传完成"))
-                break
+        # 先关闭可能存在的 toast 弹窗（遮挡点击）
+        toast = page.locator('[class*="woo-toast"]').first
+        if await toast.count() and await toast.is_visible():
+            weibo_logger.info(_msg("🔴", "检测到 toast 弹窗，尝试关闭"))
+            try:
+                close_btn = toast.locator('[class*="close"], [class*="Close"], button').first
+                if await close_btn.count():
+                    await close_btn.click()
+                    await page.wait_for_timeout(500)
+            except Exception:
+                pass
 
-            if await page.locator('text="上传失败"').count():
-                raise RuntimeError("视频上传失败")
-
-            weibo_logger.info(_msg("⏳", f"视频上传中... ({i+1}/{max_wait//5})"))
-
-        # 填写内容
-        content = f"{self.title}\n{self.desc}" if self.desc else self.title
-        await self.fill_content(page, content, self.tags)
+        # 用 Playwright 原生点击模拟真人操作
+        # 点击包含"原创"文字的 label 元素
+        try:
+            original_label = page.locator('label.woo-radio-main:has-text("原创")').first
+            await original_label.wait_for(state="visible", timeout=5000)
+            await original_label.click()
+            await page.wait_for_timeout(500)
+            weibo_logger.success(_msg("✅", "已选择类型: 原创"))
+        except Exception as e:
+            weibo_logger.warning(_msg("⚠️", f"点击原创 label 失败: {e}，尝试点击文字区域..."))
+            try:
+                # 备选：点击"原创"文字所在的 span
+                original_text = page.locator('span.woo-radio-text:has-text("原创")').first
+                await original_text.click()
+                await page.wait_for_timeout(500)
+                weibo_logger.success(_msg("✅", "已选择类型: 原创（通过文字点击）"))
+            except Exception as e2:
+                weibo_logger.error(_msg("❌", f"选择类型失败: {e2}"))
 
         # 设置定时发布
         if self.publish_strategy == WEIBO_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time(page, self.publish_date)
 
-        # 点击发送按钮
+        # 等待上传完成（如果还在上传中）
+        weibo_logger.info(_msg("⏳", "等待视频上传完成..."))
+        for i in range(120):
+            # 检查是否已上传完成或已自动发布
+            upload_done = await page.evaluate("""() => {
+                const bodyText = document.body.innerText || '';
+                if (bodyText.includes('上传完成')) return 'done';
+                if (bodyText.includes('视频已上传成功')) return 'auto_published';
+                const bar = document.querySelector('._pro_109u9_49');
+                if (bar) {
+                    const match = (bar.style.transform || '').match(/scaleX\\(([\\d.]+)\\)/);
+                    if (match) return Math.round(parseFloat(match[1]) * 100);
+                }
+                return null;
+            }""")
+            if upload_done == 'auto_published':
+                weibo_logger.success(_msg("🥳", "视频已上传成功，自动发布"))
+                return
+            if upload_done == 'done':
+                weibo_logger.success(_msg("🥳", "视频上传完成"))
+                break
+            if upload_done is not None:
+                weibo_logger.info(_msg("⏳", f"视频上传中... {upload_done}%"))
+            await page.wait_for_timeout(5000)
+
+        # 点击发布按钮
         weibo_logger.info(_msg("🚀", "正在发布..."))
-        send_btn = page.locator('div[class*="publish"] >> text="发送"').first
-        if await send_btn.count():
-            await send_btn.click()
-            await page.wait_for_timeout(3000)
-            weibo_logger.success(_msg("🥳", "视频发布成功"))
-        else:
-            weibo_logger.warning(_msg("⚠️", "未找到发送按钮"))
+        publish_btn = page.locator('button:has-text("发布"):not([disabled])').first
+        try:
+            await publish_btn.wait_for(state="visible", timeout=10000)
+            await publish_btn.click()
+
+            # 等待发布成功提示出现：页面会显示"视频已上传成功"
+            weibo_logger.info(_msg("⏳", "等待发布结果..."))
+            for i in range(15):  # 等待最多15秒
+                body_text = await page.evaluate("() => document.body.innerText || ''")
+                if "视频已上传成功" in body_text:
+                    weibo_logger.success(_msg("🥳", "视频发布成功"))
+                    return
+                # 同时检查失败标志
+                if "上传失败" in body_text or "发布失败" in body_text:
+                    raise RuntimeError("微博提示发布失败")
+                await page.wait_for_timeout(1000)
+
+            # 超时未检测到成功提示，需要手动确认
+            weibo_logger.warning(_msg("⚠️", "未检测到明确的发布成功提示，请手动确认发布状态"))
+        except Exception as e:
+            weibo_logger.warning(_msg("⚠️", f"发布异常: {e}，可能已自动发布"))
 
     async def upload(self, playwright: Playwright) -> None:
         weibo_logger.info(_msg("🧍", "检查 cookie 和视频文件..."))
@@ -439,6 +527,40 @@ class WeiboVideo(WeiboBaseUploader):
 
         try:
             page = await context.new_page()
+
+            # 监听页面错误和弹窗
+            page_errors = []
+
+            def on_pageerror(error):
+                msg = f"页面JS错误: {error}"
+                page_errors.append(msg)
+                weibo_logger.error(_msg("🔴", msg))
+
+            def on_dialog(dialog):
+                msg = f"页面弹窗[{dialog.type}]: {dialog.message}"
+                page_errors.append(msg)
+                weibo_logger.error(_msg("🔴", msg))
+                dialog.accept()
+
+            def on_response(response):
+                # 捕获失败的 API 请求
+                if response.status >= 400:
+                    url = response.url
+                    if 'weibo' in url or 'sina' in url:
+                        weibo_logger.error(_msg("🔴", f"API错误 [{response.status}] {url[:200]}"))
+
+            def on_console(msg):
+                # 捕获控制台错误和警告
+                if msg.type in ('error', 'warning'):
+                    text = msg.text or ''
+                    if any(kw in text for kw in ['参数', 'error', 'Error', '失败', '非法', 'invalid', 'axios']):
+                        weibo_logger.error(_msg("🔴", f"控制台[{msg.type}]: {text[:300]}"))
+
+            page.on("pageerror", on_pageerror)
+            page.on("dialog", on_dialog)
+            page.on("response", on_response)
+            page.on("console", on_console)
+
             await self.upload_video_content(page)
             await context.storage_state(path=self.account_file)
             weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
@@ -496,7 +618,7 @@ class WeiboNote(WeiboBaseUploader):
         weibo_logger.info(_msg("🏃", f"开始上传图文，共 {len(self.image_paths)} 张图片"))
         weibo_logger.info(_msg("🧭", "正在访问微博创作者中心..."))
 
-        await page.goto(WEIBO_PUBLISH_URL)
+        await page.goto(WEIBO_MAIN_URL)
         await page.wait_for_timeout(2000)
 
         # 查找图片上传入口

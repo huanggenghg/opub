@@ -571,6 +571,7 @@ async def publish_to_baijiahao(params: dict) -> dict:
 async def publish_to_weibo(params: dict) -> dict:
     """发布到微博"""
     from uploader.weibo_uploader.main import WeiboVideo, WeiboNote
+    from utils.excel_writer import write_video_link
 
     account_file = resolve_path(params["account_file"])
 
@@ -619,8 +620,23 @@ async def publish_to_weibo(params: dict) -> dict:
                 publish_strategy=publish_strategy,
             )
 
-        await uploader.main()
-        return {"success": True, "message": "发布成功"}
+        result = await uploader.main()
+        video_link = result.get("video_link", "") if result else ""
+
+        response = {"success": True, "message": "发布成功"}
+        if video_link:
+            response["video_link"] = video_link
+            # 写入 Excel
+            try:
+                write_result = write_video_link(video_link)
+                if write_result["success"]:
+                    print(f"  📝 视频链接已写入 Excel: {video_link}")
+                else:
+                    print(f"  ⚠️ 写入 Excel 失败: {write_result['message']}")
+            except Exception as e:
+                print(f"  ⚠️ 写入 Excel 异常: {e}")
+
+        return response
     except Exception as e:
         return {"success": False, "message": str(e)}
 

@@ -354,7 +354,7 @@ class WeiboVideo(WeiboBaseUploader):
 
         self.file_path = str(self.validate_video_file(self.file_path))
 
-    async def upload_video_content(self, page: Page) -> None:
+    async def upload_video_content(self, page: Page) -> str | None:
         """上传视频内容"""
         weibo_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
         weibo_logger.info(_msg("🧭", "正在访问微博视频上传页面..."))
@@ -484,7 +484,7 @@ class WeiboVideo(WeiboBaseUploader):
             }""")
             if upload_done == 'auto_published':
                 weibo_logger.success(_msg("🥳", "视频已上传成功，自动发布"))
-                return
+                return None  # 自动发布时无法获取视频链接
             if upload_done == 'done':
                 weibo_logger.success(_msg("🥳", "视频上传完成"))
                 break
@@ -505,7 +505,74 @@ class WeiboVideo(WeiboBaseUploader):
                 body_text = await page.evaluate("() => document.body.innerText || ''")
                 if "视频已上传成功" in body_text:
                     weibo_logger.success(_msg("🥳", "视频发布成功"))
-                    return
+
+                    # === 跳转到视频管理页，轮询检查审核状态并获取视频链接 ===
+                    weibo_logger.info(_msg("🧭", "正在跳转到视频管理页..."))
+                    video_manage_url = "https://me.weibo.com/content/video"
+                    await page.goto(video_manage_url)
+                    await page.wait_for_timeout(3000)
+
+                    weibo_logger.info(_msg("📍", f"当前 URL: {page.url}"))
+
+                    # 等待视频列表加载
+                    weibo_logger.info(_msg("⏳", "等待视频列表加载..."))
+                    for i in range(10):
+                        video_count = await page.locator('.vue-recycle-scroller__item-view').count()
+                        if video_count > 0:
+                            weibo_logger.info(_msg("✅", f"视频列表已加载，共 {video_count} 个视频"))
+                            break
+                        await page.wait_for_timeout(2000)
+
+                    # 轮询检查第一个视频是否有编辑按钮（有编辑按钮 = 审核通过）
+                    weibo_logger.info(_msg("🔍", "开始检查第一个视频的审核状态..."))
+                    max_retries = 30  # 最多检查30次，每次5秒，共150秒
+                    video_link = None
+
+                    for i in range(max_retries):
+                        # 刷新页面获取最新状态
+                        await page.reload()
+                        await page.wait_for_timeout(2000)
+
+                        # 等待视频列表加载
+                        for j in range(5):
+                            video_count = await page.locator('.vue-recycle-scroller__item-view').count()
+                            if video_count > 0:
+                                break
+                            await page.wait_for_timeout(1000)
+
+                        first_video = page.locator('.vue-recycle-scroller__item-view').first
+                        edit_btn = first_video.locator('button:has-text("编辑")')
+                        has_edit_btn = await edit_btn.count() > 0
+
+                        if has_edit_btn:
+                            weibo_logger.success(_msg("✅", f"第 {i+1} 次检查: 发现编辑按钮，审核通过！"))
+
+                            # 点击第一个视频封面，会打开新页签
+                            weibo_logger.info(_msg("👆", "点击第一个视频获取链接..."))
+
+                            # 监听新页签打开事件
+                            async with page.expect_popup() as popup_info:
+                                video_cover = first_video.locator('._pic_kfy49_6')
+                                await video_cover.click()
+
+                            # 获取新页签
+                            new_page = await popup_info.value
+                            await new_page.wait_for_load_state()
+
+                            # 直接使用新页签的 URL 作为视频链接
+                            video_link = new_page.url.split('?')[0]  # 去掉查询参数
+                            weibo_logger.success(_msg("🔗", f"视频链接: {video_link}"))
+
+                            # 关闭新页签
+                            await new_page.close()
+                            break
+                        else:
+                            weibo_logger.info(_msg("⏳", f"第 {i+1} 次检查: 未发现编辑按钮，审核中..."))
+                            await page.wait_for_timeout(5000)
+                    else:
+                        weibo_logger.warning(_msg("⚠️", "审核超时，请稍后手动检查"))
+
+                    return video_link
                 # 同时检查失败标志
                 if "上传失败" in body_text or "发布失败" in body_text:
                     raise RuntimeError("微博提示发布失败")
@@ -513,10 +580,18 @@ class WeiboVideo(WeiboBaseUploader):
 
             # 超时未检测到成功提示，需要手动确认
             weibo_logger.warning(_msg("⚠️", "未检测到明确的发布成功提示，请手动确认发布状态"))
+            return None
         except Exception as e:
             weibo_logger.warning(_msg("⚠️", f"发布异常: {e}，可能已自动发布"))
+            return None
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright) -> dict:
+        """
+        上传视频
+
+        Returns:
+            dict: {"success": bool, "video_link": str|None, "message": str}
+        """
         weibo_logger.info(_msg("🧍", "检查 cookie 和视频文件..."))
         await self.validate_upload_args()
         weibo_logger.info(_msg("🥳", "上传前检查通过"))
@@ -524,6 +599,8 @@ class WeiboVideo(WeiboBaseUploader):
         browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
         context = await browser.new_context(storage_state=self.account_file)
         context = await set_init_script(context)
+
+        result = {"success": False, "video_link": None, "message": ""}
 
         try:
             page = await context.new_page()
@@ -561,16 +638,29 @@ class WeiboVideo(WeiboBaseUploader):
             page.on("response", on_response)
             page.on("console", on_console)
 
-            await self.upload_video_content(page)
+            video_link = await self.upload_video_content(page)
             await context.storage_state(path=self.account_file)
             weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
+
+            result["success"] = True
+            result["video_link"] = video_link
+            if video_link:
+                result["message"] = f"发布成功，视频链接: {video_link}"
+            else:
+                result["message"] = "发布成功，但未获取到视频链接"
+        except Exception as e:
+            result["message"] = str(e)
+            weibo_logger.error(_msg("❌", f"上传失败: {e}"))
         finally:
             await context.close()
             await browser.close()
 
-    async def main(self):
+        return result
+
+    async def main(self) -> dict:
+        """主入口，返回发布结果"""
         async with async_playwright() as playwright:
-            await self.upload(playwright)
+            return await self.upload(playwright)
 
 
 class WeiboNote(WeiboBaseUploader):

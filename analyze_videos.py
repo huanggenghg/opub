@@ -17,21 +17,18 @@ from utils.video_analyzer import (
     save_video_config,
     config_exists,
     load_video_config,
+    get_frame_files,
+    cleanup_frames_dir,
 )
 
 
 def analyze_frames_with_claude(frame_paths: list[str], video_name: str) -> tuple[str, str]:
     """
     分析帧图像生成标题和描述
-
-    此函数需要 Claude Code 在执行时直接读取帧图像并分析
-    返回的标题/描述会作为占位符，等待 Claude Code 覆盖
+    使用智谱 AI GLM-4V 视觉模型分析视频帧
     """
-    # 占位符实现
-    name_without_ext = video_name.rsplit('.', 1)[0]
-    title = f"{name_without_ext} - 精彩内容分享"
-    desc = f"这是一个关于{name_without_ext}的视频内容，欢迎观看。"
-    return title, desc
+    from utils.video_analyzer import analyze_frames_with_glm4v
+    return analyze_frames_with_glm4v(frame_paths, video_name)
 
 
 def main():
@@ -66,8 +63,10 @@ def main():
         print(f"\n[{idx}/{len(video_files)}] 分析: {basename}")
 
         try:
-            # 提取关键帧
-            frame_paths = extract_frames(video_file, num_frames=3)
+            # 提取关键帧（返回帧文件夹目录）
+            frames_dir = extract_frames(video_file, num_frames=3)
+            # 获取帧文件路径列表
+            frame_paths = get_frame_files(frames_dir)
             print(f"  提取了 {len(frame_paths)} 帧")
 
             # 分析内容
@@ -80,13 +79,7 @@ def main():
             print(f"  保存: {os.path.basename(config_file)}")
 
             # 清理临时文件
-            import shutil
-            for frame_path in frame_paths:
-                if os.path.exists(frame_path):
-                    os.remove(frame_path)
-            temp_dir = os.path.dirname(frame_paths[0]) if frame_paths else ""
-            if temp_dir and os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir, ignore_errors=True)
+            cleanup_frames_dir(frames_dir)
 
         except Exception as e:
             print(f"  错误: {e}")

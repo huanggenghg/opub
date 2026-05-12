@@ -463,6 +463,44 @@ class WeiboVideo(WeiboBaseUploader):
             except Exception as e2:
                 weibo_logger.error(_msg("❌", f"选择类型失败: {e2}"))
 
+        # 选择内容声明（必选：内容无需标注）
+        weibo_logger.info(_msg("📝", "正在选择内容声明..."))
+        try:
+            # 点击"内容声明"下面的选择区域
+            content_declare_area = page.locator('text=内容声明').locator('xpath=following-sibling::*').first
+            await content_declare_area.click()
+            await page.wait_for_timeout(500)
+
+            # 在弹框中选择"内容无需标注"
+            no_mark_option = page.locator('text=内容无需标注').first
+            await no_mark_option.click()
+            await page.wait_for_timeout(500)
+
+            # 点击弹框的确定按钮
+            confirm_btn = page.locator('button:has-text("确定")').first
+            await confirm_btn.click()
+            await page.wait_for_timeout(500)
+            weibo_logger.success(_msg("✅", "已选择内容声明: 内容无需标注"))
+        except Exception as e:
+            weibo_logger.warning(_msg("⚠️", f"选择内容声明失败: {e}，尝试其他方式..."))
+            try:
+                # 备选：直接点击包含"内容声明"的父容器
+                declare_container = page.locator('div:has-text("内容声明"):has-text("请选择")').first
+                await declare_container.click()
+                await page.wait_for_timeout(500)
+
+                no_mark_option = page.locator('text=内容无需标注').first
+                await no_mark_option.click()
+                await page.wait_for_timeout(500)
+
+                # 点击弹框的确定按钮
+                confirm_btn = page.locator('button:has-text("确定")').first
+                await confirm_btn.click()
+                await page.wait_for_timeout(500)
+                weibo_logger.success(_msg("✅", "已选择内容声明: 内容无需标注"))
+            except Exception as e2:
+                weibo_logger.error(_msg("❌", f"选择内容声明失败: {e2}"))
+
         # 设置定时发布
         if self.publish_strategy == WEIBO_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time(page, self.publish_date)
@@ -498,92 +536,91 @@ class WeiboVideo(WeiboBaseUploader):
         try:
             await publish_btn.wait_for(state="visible", timeout=10000)
             await publish_btn.click()
+        except Exception as e:
+            weibo_logger.warning(_msg("⚠️", f"查找发布按钮超时: {e}"))
 
-            # 等待发布成功提示出现：页面会显示"视频已上传成功"
-            weibo_logger.info(_msg("⏳", "等待发布结果..."))
-            for i in range(15):  # 等待最多15秒
-                body_text = await page.evaluate("() => document.body.innerText || ''")
-                if "视频已上传成功" in body_text:
-                    weibo_logger.success(_msg("🥳", "视频发布成功"))
+        # 等待发布成功提示出现：页面会显示"视频已上传成功"
+        weibo_logger.info(_msg("⏳", "等待发布结果..."))
+        for i in range(60):  # 等待最多60秒
+            body_text = await page.evaluate("() => document.body.innerText || ''")
+            if "视频已上传成功" in body_text:
+                weibo_logger.success(_msg("🥳", "视频发布成功"))
 
-                    # === 跳转到视频管理页，轮询检查审核状态并获取视频链接 ===
-                    weibo_logger.info(_msg("🧭", "正在跳转到视频管理页..."))
-                    video_manage_url = "https://me.weibo.com/content/video"
-                    await page.goto(video_manage_url)
-                    await page.wait_for_timeout(3000)
+                # === 跳转到视频管理页，轮询检查审核状态并获取视频链接 ===
+                weibo_logger.info(_msg("🧭", "正在跳转到视频管理页..."))
+                video_manage_url = "https://me.weibo.com/content/video"
+                await page.goto(video_manage_url)
+                await page.wait_for_timeout(3000)
 
-                    weibo_logger.info(_msg("📍", f"当前 URL: {page.url}"))
+                weibo_logger.info(_msg("📍", f"当前 URL: {page.url}"))
+
+                # 等待视频列表加载
+                weibo_logger.info(_msg("⏳", "等待视频列表加载..."))
+                for i in range(10):
+                    video_count = await page.locator('.vue-recycle-scroller__item-view').count()
+                    if video_count > 0:
+                        weibo_logger.info(_msg("✅", f"视频列表已加载，共 {video_count} 个视频"))
+                        break
+                    await page.wait_for_timeout(2000)
+
+                # 轮询检查第一个视频是否有编辑按钮（有编辑按钮 = 审核通过）
+                weibo_logger.info(_msg("🔍", "开始检查第一个视频的审核状态..."))
+                max_retries = 30  # 最多检查30次，每次5秒，共150秒
+                video_link = None
+
+                for i in range(max_retries):
+                    # 刷新页面获取最新状态
+                    await page.reload()
+                    await page.wait_for_timeout(2000)
 
                     # 等待视频列表加载
-                    weibo_logger.info(_msg("⏳", "等待视频列表加载..."))
-                    for i in range(10):
+                    for j in range(5):
                         video_count = await page.locator('.vue-recycle-scroller__item-view').count()
                         if video_count > 0:
-                            weibo_logger.info(_msg("✅", f"视频列表已加载，共 {video_count} 个视频"))
                             break
-                        await page.wait_for_timeout(2000)
+                        await page.wait_for_timeout(1000)
 
-                    # 轮询检查第一个视频是否有编辑按钮（有编辑按钮 = 审核通过）
-                    weibo_logger.info(_msg("🔍", "开始检查第一个视频的审核状态..."))
-                    max_retries = 30  # 最多检查30次，每次5秒，共150秒
-                    video_link = None
+                    first_video = page.locator('.vue-recycle-scroller__item-view').first
+                    edit_btn = first_video.locator('button:has-text("编辑")')
+                    has_edit_btn = await edit_btn.count() > 0
 
-                    for i in range(max_retries):
-                        # 刷新页面获取最新状态
-                        await page.reload()
-                        await page.wait_for_timeout(2000)
+                    if has_edit_btn:
+                        weibo_logger.success(_msg("✅", f"第 {i+1} 次检查: 发现编辑按钮，审核通过！"))
 
-                        # 等待视频列表加载
-                        for j in range(5):
-                            video_count = await page.locator('.vue-recycle-scroller__item-view').count()
-                            if video_count > 0:
-                                break
-                            await page.wait_for_timeout(1000)
+                        # 点击第一个视频封面，会打开新页签
+                        weibo_logger.info(_msg("👆", "点击第一个视频获取链接..."))
 
-                        first_video = page.locator('.vue-recycle-scroller__item-view').first
-                        edit_btn = first_video.locator('button:has-text("编辑")')
-                        has_edit_btn = await edit_btn.count() > 0
+                        # 监听新页签打开事件
+                        async with page.expect_popup() as popup_info:
+                            video_cover = first_video.locator('._pic_kfy49_6')
+                            await video_cover.click()
 
-                        if has_edit_btn:
-                            weibo_logger.success(_msg("✅", f"第 {i+1} 次检查: 发现编辑按钮，审核通过！"))
+                        # 获取新页签
+                        new_page = await popup_info.value
+                        await new_page.wait_for_load_state()
 
-                            # 点击第一个视频封面，会打开新页签
-                            weibo_logger.info(_msg("👆", "点击第一个视频获取链接..."))
+                        # 直接使用新页签的 URL 作为视频链接
+                        video_link = new_page.url.split('?')[0]  # 去掉查询参数
+                        weibo_logger.success(_msg("🔗", f"视频链接: {video_link}"))
 
-                            # 监听新页签打开事件
-                            async with page.expect_popup() as popup_info:
-                                video_cover = first_video.locator('._pic_kfy49_6')
-                                await video_cover.click()
-
-                            # 获取新页签
-                            new_page = await popup_info.value
-                            await new_page.wait_for_load_state()
-
-                            # 直接使用新页签的 URL 作为视频链接
-                            video_link = new_page.url.split('?')[0]  # 去掉查询参数
-                            weibo_logger.success(_msg("🔗", f"视频链接: {video_link}"))
-
-                            # 关闭新页签
-                            await new_page.close()
-                            break
-                        else:
-                            weibo_logger.info(_msg("⏳", f"第 {i+1} 次检查: 未发现编辑按钮，审核中..."))
-                            await page.wait_for_timeout(5000)
+                        # 关闭新页签
+                        await new_page.close()
+                        break
                     else:
-                        weibo_logger.warning(_msg("⚠️", "审核超时，请稍后手动检查"))
+                        weibo_logger.info(_msg("⏳", f"第 {i+1} 次检查: 未发现编辑按钮，审核中..."))
+                        await page.wait_for_timeout(5000)
+                else:
+                    weibo_logger.warning(_msg("⚠️", "审核超时，请稍后手动检查"))
 
-                    return video_link
-                # 同时检查失败标志
-                if "上传失败" in body_text or "发布失败" in body_text:
-                    raise RuntimeError("微博提示发布失败")
-                await page.wait_for_timeout(1000)
+                return video_link
+            # 同时检查失败标志
+            if "上传失败" in body_text or "发布失败" in body_text:
+                raise RuntimeError("微博提示发布失败")
+            await page.wait_for_timeout(1000)
 
-            # 超时未检测到成功提示，需要手动确认
-            weibo_logger.warning(_msg("⚠️", "未检测到明确的发布成功提示，请手动确认发布状态"))
-            return None
-        except Exception as e:
-            weibo_logger.warning(_msg("⚠️", f"发布异常: {e}，可能已自动发布"))
-            return None
+        # 超时未检测到成功提示，需要手动确认
+        weibo_logger.warning(_msg("⚠️", "未检测到明确的发布成功提示，请手动确认发布状态"))
+        return None
 
     async def upload(self, playwright: Playwright) -> dict:
         """

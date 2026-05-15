@@ -129,8 +129,8 @@ def extract_frames(video_file: str, num_frames: int = 3) -> str:
     import hashlib
     video_hash = hashlib.md5(video_file.encode('utf-8')).hexdigest()[:8]
     video_name = os.path.basename(video_file).rsplit('.', 1)[0]
-    # 使用 hash 作为目录名，避免中文路径问题
-    temp_dir = os.path.join(frames_base_dir, f"{video_hash}_{video_name[:20] if len(video_name) > 20 else video_name}")
+    # 使用纯 hash 作为目录名，完全避免中文和特殊字符路径问题
+    temp_dir = os.path.join(frames_base_dir, video_hash)
     os.makedirs(temp_dir, exist_ok=True)
 
     cap = cv2.VideoCapture(video_file)

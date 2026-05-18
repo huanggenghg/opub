@@ -3,6 +3,8 @@
 图片转视频工具
 将图片序列转换为视频文件
 """
+from __future__ import annotations
+
 import os
 from pathlib import Path
 

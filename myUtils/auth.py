@@ -103,21 +103,20 @@ async def cookie_auth_xhs(account_file):
 
 
 async def check_cookie(type, file_path):
-    match type:
+    if type == 1:
         # 小红书
-        case 1:
-            return await cookie_auth_xhs(Path(BASE_DIR / "cookiesFile" / file_path))
+        return await cookie_auth_xhs(Path(BASE_DIR / "cookiesFile" / file_path))
+    elif type == 2:
         # 视频号
-        case 2:
-            return await cookie_auth_tencent(Path(BASE_DIR / "cookiesFile" / file_path))
+        return await cookie_auth_tencent(Path(BASE_DIR / "cookiesFile" / file_path))
+    elif type == 3:
         # 抖音
-        case 3:
-            return await cookie_auth_douyin(Path(BASE_DIR / "cookiesFile" / file_path))
+        return await cookie_auth_douyin(Path(BASE_DIR / "cookiesFile" / file_path))
+    elif type == 4:
         # 快手
-        case 4:
-            return await cookie_auth_ks(Path(BASE_DIR / "cookiesFile" / file_path))
-        case _:
-            return False
+        return await cookie_auth_ks(Path(BASE_DIR / "cookiesFile" / file_path))
+    else:
+        return False
 
 # a = asyncio.run(check_cookie(1,"3a6cfdc0-3d51-11f0-8507-44e51723d63c.json"))
 # print(a)

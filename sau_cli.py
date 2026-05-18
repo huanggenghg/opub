@@ -39,7 +39,7 @@ from uploader.xiaohongshu_uploader.main import (
 SCHEDULE_FORMAT = "%Y-%m-%d %H:%M"
 
 
-@dataclass(slots=True)
+@dataclass
 class DouyinVideoUploadRequest:
     account_name: str
     video_file: Path
@@ -55,7 +55,7 @@ class DouyinVideoUploadRequest:
     headless: bool = True
 
 
-@dataclass(slots=True)
+@dataclass
 class DouyinNoteUploadRequest:
     account_name: str
     image_files: list[Path]
@@ -68,7 +68,7 @@ class DouyinNoteUploadRequest:
     headless: bool = True
 
 
-@dataclass(slots=True)
+@dataclass
 class KuaishouVideoUploadRequest:
     account_name: str
     video_file: Path
@@ -82,7 +82,7 @@ class KuaishouVideoUploadRequest:
     headless: bool = True
 
 
-@dataclass(slots=True)
+@dataclass
 class KuaishouNoteUploadRequest:
     account_name: str
     image_files: list[Path]
@@ -95,7 +95,7 @@ class KuaishouNoteUploadRequest:
     headless: bool = True
 
 
-@dataclass(slots=True)
+@dataclass
 class XiaohongshuVideoUploadRequest:
     account_name: str
     video_file: Path
@@ -109,7 +109,7 @@ class XiaohongshuVideoUploadRequest:
     headless: bool = True
 
 
-@dataclass(slots=True)
+@dataclass
 class XiaohongshuNoteUploadRequest:
     account_name: str
     image_files: list[Path]
@@ -122,7 +122,7 @@ class XiaohongshuNoteUploadRequest:
     headless: bool = True
 
 
-@dataclass(slots=True)
+@dataclass
 class BilibiliVideoUploadRequest:
     account_name: str
     video_file: Path

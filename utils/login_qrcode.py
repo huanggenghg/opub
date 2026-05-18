@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
+
 from datetime import datetime
 import base64
 from pathlib import Path

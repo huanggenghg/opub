@@ -3,6 +3,8 @@
 视频内容分析模块
 分析视频画面内容，自动生成标题和描述
 """
+from __future__ import annotations
+
 import json
 import os
 import shutil

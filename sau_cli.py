@@ -439,14 +439,25 @@ def build_parser() -> argparse.ArgumentParser:
         prog="sau",
         description="CLI for social-auto-upload.",
     )
-    platform_parsers = parser.add_subparsers(dest="platform", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # === status 子命令 ===
+    status_parser = subparsers.add_parser("status", help="Check environment and login status")
+
+    # === login 子命令 ===
+    login_parser = subparsers.add_parser("login", help="Login to a platform")
+    login_parser.add_argument("--platform", required=True,
+                              choices=["douyin", "kuaishou", "xiaohongshu", "bilibili", "weibo", "tencent", "baijiahao", "tk"],
+                              help="Platform to login")
+    login_parser.add_argument("--account", required=True, help="Account name")
+    login_parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
 
     # === generate 子命令 ===
-    generate_parser = platform_parsers.add_parser("generate", help="Generate video title/description from content analysis")
+    generate_parser = subparsers.add_parser("generate", help="Generate video title/description from content analysis")
     generate_parser.add_argument("--dir", required=True, help="Video directory path")
     generate_parser.add_argument("--force", action="store_true", help="Force overwrite existing config files")
 
-    douyin_parser = platform_parsers.add_parser("douyin", help="Douyin operations")
+    douyin_parser = subparsers.add_parser("douyin", help="Douyin operations")
     douyin_actions = douyin_parser.add_subparsers(dest="action", required=True)
 
     for action_name in ("login", "check"):
@@ -476,7 +487,7 @@ def build_parser() -> argparse.ArgumentParser:
     upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     add_runtime_flags(upload_note_parser)
 
-    kuaishou_parser = platform_parsers.add_parser("kuaishou", help="Kuaishou operations")
+    kuaishou_parser = subparsers.add_parser("kuaishou", help="Kuaishou operations")
     kuaishou_actions = kuaishou_parser.add_subparsers(dest="action", required=True)
 
     for action_name in ("login", "check"):
@@ -504,7 +515,7 @@ def build_parser() -> argparse.ArgumentParser:
     kuaishou_upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     add_runtime_flags(kuaishou_upload_note_parser)
 
-    xiaohongshu_parser = platform_parsers.add_parser("xiaohongshu", help="Xiaohongshu operations")
+    xiaohongshu_parser = subparsers.add_parser("xiaohongshu", help="Xiaohongshu operations")
     xiaohongshu_actions = xiaohongshu_parser.add_subparsers(dest="action", required=True)
 
     for action_name in ("login", "check"):
@@ -533,7 +544,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_runtime_flags(xiaohongshu_upload_note_parser)
 
     # === publish 子命令 ===
-    publish_parser = platform_parsers.add_parser("publish", help="Publish to multiple platforms via config file")
+    publish_parser = subparsers.add_parser("publish", help="Publish to multiple platforms via config file")
     publish_parser.add_argument("--config", default="publish_config.ini", help="Config file path (default: publish_config.ini)")
     publish_parser.add_argument("--platforms", default=None, help="Override enabled platforms, comma-separated")
     publish_parser.add_argument("--video", default=None, help="Override video file/directory path")
@@ -544,7 +555,7 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--start-from", type=int, default=None, help="Start from video index (1-based)")
     publish_parser.add_argument("--force", action="store_true", help="Force regenerate video config")
 
-    bilibili_parser = platform_parsers.add_parser("bilibili", help="Bilibili operations")
+    bilibili_parser = subparsers.add_parser("bilibili", help="Bilibili operations")
     bilibili_actions = bilibili_parser.add_subparsers(dest="action", required=True)
 
     for action_name in ("login", "check"):
@@ -563,8 +574,115 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def dispatch(args: argparse.Namespace) -> int:
+    # === 处理 status 命令 ===
+    if args.command == "status":
+        import shutil
+        import subprocess
+
+        # Python 版本
+        py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        print(f"Python: {py_ver} ✓")
+
+        # 浏览器驱动
+        patchright_path = shutil.which("patchright")
+        if patchright_path:
+            print(f"Browser: patchright found at {patchright_path}")
+        else:
+            print("Browser: patchright not found (run: patchright install chromium)")
+
+        # 配置目录
+        from conf import BASE_DIR
+        config_path = BASE_DIR / "config.json"
+        if config_path.exists():
+            print(f"Config: {config_path}")
+        else:
+            print(f"Config: {config_path} (not found, using defaults)")
+
+        # Cookies 状态
+        cookies_dir = BASE_DIR / "cookies"
+        platforms = {
+            "weibo": "weibo_uploader",
+            "kuaishou": "ks_uploader",
+            "douyin": "douyin_uploader",
+            "xiaohongshu": "xiaohongshu_uploader",
+            "bilibili": "bilibili_uploader",
+            "tencent": "tencent_uploader",
+            "baijiahao": "baijiahao_uploader",
+            "tk": "tk_uploader",
+        }
+        ready = []
+        for name, subdir in platforms.items():
+            cookie_dir = cookies_dir / subdir
+            if cookie_dir.exists():
+                accounts = list(cookie_dir.glob("*.json"))
+                if accounts:
+                    acct_names = [a.stem for a in accounts]
+                    print(f"  {name}: {', '.join(acct_names)}")
+                    ready.append(name)
+                else:
+                    print(f"  {name}: no accounts")
+            else:
+                print(f"  {name}: no accounts")
+
+        if ready:
+            print(f"Platforms ready: {', '.join(ready)}")
+        else:
+            print("Platforms ready: none (login required)")
+
+        return 0
+
+    # === 处理 login 命令 ===
+    if args.command == "login":
+        platform = args.platform
+        account = args.account
+        account_file = resolve_account_file(platform, account)
+        headless = args.headless
+
+        setup_map = {
+            "douyin": ("uploader.douyin_uploader.main", "douyin_setup"),
+            "kuaishou": ("uploader.ks_uploader.main", "ks_setup"),
+            "xiaohongshu": ("uploader.xiaohongshu_uploader.main", "xiaohongshu_setup"),
+            "weibo": ("uploader.weibo_uploader.main", "weibo_setup"),
+            "tencent": ("uploader.tencent_uploader.main", "tencent_setup"),
+            "baijiahao": ("uploader.baijiahao_uploader.main", "baijiahao_setup"),
+            "tk": ("uploader.tk_uploader.main", "tiktok_setup"),
+            "bilibili": ("uploader.bilibili_uploader.runtime", "run_biliup_command"),
+        }
+
+        entry = setup_map.get(platform)
+        if not entry:
+            print(f"Unsupported platform: {platform}", file=sys.stderr)
+            return 1
+
+        import importlib
+        module = importlib.import_module(entry[0])
+        func = getattr(module, entry[1])
+
+        # bilibili 特殊处理
+        if platform == "bilibili":
+            result = func(["-u", str(account_file), "login"], interactive=True)
+            return 0 if result.returncode == 0 else 1
+
+        # baijiahao 和 tk 的 setup 签名不同
+        if platform in ("baijiahao", "tk"):
+            result = await func(str(account_file), handle=True)
+        else:
+            result = await func(str(account_file), handle=True, return_detail=True, headless=headless)
+
+        if isinstance(result, dict):
+            if result.get("success"):
+                print(f"Login successful: {platform}")
+                return 0
+            else:
+                print(f"Login failed: {result.get('message', 'unknown error')}", file=sys.stderr)
+                return 1
+        elif isinstance(result, bool):
+            return 0 if result else 1
+        else:
+            return 0
+
     # === 处理 generate 命令 ===
-    if args.platform == "generate":
+    if args.command == "generate":
         import os
         import shutil
 
@@ -688,7 +806,7 @@ async def dispatch(args: argparse.Namespace) -> int:
         return 0
 
     # === 处理 publish 命令 ===
-    if args.platform == "publish":
+    if args.command == "publish":
         from publish_all import read_config, parse_config, get_video_files, get_video_content, print_header, print_results, publish_to_platform, PLATFORM_NAMES, resolve_path
 
         config_file = args.config
@@ -817,7 +935,7 @@ async def dispatch(args: argparse.Namespace) -> int:
 
         return 0
 
-    if args.platform == "douyin":
+    if args.command == "douyin":
         if args.action == "login":
             result = await login_douyin_account(args.account, headless=args.headless)
             if not result["success"]:
@@ -869,7 +987,7 @@ async def dispatch(args: argparse.Namespace) -> int:
 
         raise RuntimeError(f"Unsupported Douyin action: {args.action}")
 
-    if args.platform == "kuaishou":
+    if args.command == "kuaishou":
         if args.action == "login":
             result = await login_kuaishou_account(args.account, headless=args.headless)
             if not result["success"]:
@@ -919,7 +1037,7 @@ async def dispatch(args: argparse.Namespace) -> int:
 
         raise RuntimeError(f"Unsupported Kuaishou action: {args.action}")
 
-    if args.platform == "xiaohongshu":
+    if args.command == "xiaohongshu":
         if args.action == "login":
             result = await login_xiaohongshu_account(args.account, headless=args.headless)
             if not result["success"]:
@@ -971,7 +1089,7 @@ async def dispatch(args: argparse.Namespace) -> int:
 
         raise RuntimeError(f"Unsupported Xiaohongshu action: {args.action}")
 
-    if args.platform == "bilibili":
+    if args.command == "bilibili":
         if args.action == "login":
             result = await login_bilibili_account(args.account)
             if not result["success"]:
@@ -1000,7 +1118,7 @@ async def dispatch(args: argparse.Namespace) -> int:
 
         raise RuntimeError(f"Unsupported Bilibili action: {args.action}")
 
-    raise RuntimeError(f"Unsupported platform: {args.platform}")
+    raise RuntimeError(f"Unsupported command: {args.command}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:

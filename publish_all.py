@@ -769,24 +769,37 @@ async def main():
 
         for i, platform in enumerate(video_params["enabled_platforms"], 1):
             platform_name = PLATFORM_NAMES.get(platform, platform)
-            print(f"[{i}/{total}] 发布到 {platform_name}...")
 
-            # 获取账号文件
+            # 获取账号文件（支持逗号分隔多账号）
             account_key = f"{platform}_account"
-            account_file = video_params["platforms"].get(account_key, "")
+            account_file_str = video_params["platforms"].get(account_key, "")
+            account_files = [af.strip() for af in account_file_str.split(",") if af.strip()]
 
-            platform_params = {
-                **video_params,
-                "account_file": account_file,
-            }
+            if not account_files:
+                print(f"[{i}/{total}] 发布到 {platform_name}...")
+                results[platform] = {"success": False, "message": f"未配置 {platform} 账号"}
+                print(f"  ❌ 失败: 未配置账号")
+                continue
 
-            result = await publish_to_platform(platform, platform_params)
-            results[platform] = result
+            for acct_idx, account_file in enumerate(account_files):
+                if len(account_files) > 1:
+                    print(f"[{i}/{total}] 发布到 {platform_name} (账号 {acct_idx + 1}/{len(account_files)})...")
+                else:
+                    print(f"[{i}/{total}] 发布到 {platform_name}...")
 
-            if result["success"]:
-                print(f"  ✅ 成功")
-            else:
-                print(f"  ❌ 失败: {result['message']}")
+                platform_params = {
+                    **video_params,
+                    "account_file": account_file,
+                }
+
+                result = await publish_to_platform(platform, platform_params)
+                result_key = platform if len(account_files) == 1 else f"{platform}_{acct_idx + 1}"
+                results[result_key] = result
+
+                if result["success"]:
+                    print(f"  ✅ 成功")
+                else:
+                    print(f"  ❌ 失败: {result['message']}")
 
         print_results(results)
         all_results[video_file] = results

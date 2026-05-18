@@ -3,11 +3,25 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "social-auto-upload"
-version = "0.1.0"
+name = "hgeng-sau"
+version = "0.1.1"
 description = "Social media auto uploader"
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+  {name = "hgeng", email = "huanggenghg@gmail.com"},
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Video",
+]
+keywords = ["social-media", "auto-upload", "video", "douyin", "xiaohongshu", "kuaishou", "weibo"]
 dependencies = [
   "loguru==0.7.3",
   "opencv-python>=4.13.0.92",
@@ -16,6 +30,11 @@ dependencies = [
   "requests==2.32.3",
   "segno>=1.6.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/huanggenghg/social-auto-upload"
+Repository = "https://github.com/huanggenghg/social-auto-upload"
+Issues = "https://github.com/huanggenghg/social-auto-upload/issues"
 
 [project.scripts]
 sau = "sau_cli:main"
@@ -30,7 +49,7 @@ web = [
 package = true
 
 [tool.setuptools]
-py-modules = ["cli_main", "conf", "sau_cli"]
+py-modules = ["conf", "sau_cli"]
 include-package-data = true
 
 [tool.setuptools.packages.find]

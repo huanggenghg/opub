@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Iterable, Sequence
 
 from conf import BASE_DIR
@@ -531,6 +532,18 @@ def build_parser() -> argparse.ArgumentParser:
     xiaohongshu_upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     add_runtime_flags(xiaohongshu_upload_note_parser)
 
+    # === publish 子命令 ===
+    publish_parser = platform_parsers.add_parser("publish", help="Publish to multiple platforms via config file")
+    publish_parser.add_argument("--config", default="publish_config.ini", help="Config file path (default: publish_config.ini)")
+    publish_parser.add_argument("--platforms", default=None, help="Override enabled platforms, comma-separated")
+    publish_parser.add_argument("--video", default=None, help="Override video file/directory path")
+    publish_parser.add_argument("--title", default=None, help="Override title")
+    publish_parser.add_argument("--desc", default=None, help="Override description")
+    publish_parser.add_argument("--tags", default=None, help="Override tags, comma-separated")
+    publish_parser.add_argument("--schedule", type=schedule_value, default=None, help=f"Override schedule time in {schedule_help}")
+    publish_parser.add_argument("--start-from", type=int, default=None, help="Start from video index (1-based)")
+    publish_parser.add_argument("--force", action="store_true", help="Force regenerate video config")
+
     bilibili_parser = platform_parsers.add_parser("bilibili", help="Bilibili operations")
     bilibili_actions = bilibili_parser.add_subparsers(dest="action", required=True)
 
@@ -672,6 +685,136 @@ async def dispatch(args: argparse.Namespace) -> int:
 
         print("\n" + "=" * 50)
         print(f"生成完成: 成功 {results['success']}, 跳过 {results['skip']}, 错误 {results['error']}")
+        return 0
+
+    # === 处理 publish 命令 ===
+    if args.platform == "publish":
+        from publish_all import read_config, parse_config, get_video_files, get_video_content, print_header, print_results, publish_to_platform, PLATFORM_NAMES, resolve_path
+
+        config_file = args.config
+        config_path = Path(config_file)
+        if not config_path.is_absolute():
+            config_path = Path(resolve_path(config_file))
+        if not config_path.exists():
+            print(f"Config file not found: {config_path}", file=sys.stderr)
+            return 1
+
+        config = read_config(config_file)
+        params = parse_config(config)
+
+        # CLI 参数覆盖配置文件
+        if args.platforms is not None:
+            params["enabled_platforms"] = [p.strip() for p in args.platforms.split(",") if p.strip()]
+        if args.video is not None:
+            params["video_file"] = args.video
+        if args.title is not None:
+            params["title"] = args.title
+        if args.desc is not None:
+            params["desc"] = args.desc
+        if args.tags is not None:
+            params["tags"] = [t.strip() for t in args.tags.split(",") if t.strip()]
+        if args.schedule is not None:
+            params["publish_strategy"] = "scheduled"
+            params["publish_time"] = args.schedule
+        if args.start_from is not None:
+            params["start_from"] = args.start_from
+        if args.force:
+            params["force"] = True
+
+        if not params["enabled_platforms"]:
+            print("No platforms enabled", file=sys.stderr)
+            return 1
+
+        # 图文转视频处理
+        if params["content_type"] == "note" and params.get("convert_to_video"):
+            if not params.get("images"):
+                print("Image-to-video conversion requires images", file=sys.stderr)
+                return 1
+            print("Converting images to video...")
+            try:
+                from utils.image_to_video import convert_images_to_video_for_publish
+                video_path = convert_images_to_video_for_publish(
+                    image_paths=params["images"],
+                    title=params["title"],
+                    duration=params["video_duration"],
+                )
+                params["content_type"] = "video"
+                params["video_file"] = video_path
+                print(f"Video generated: {video_path}\n")
+            except Exception as e:
+                print(f"Image-to-video conversion failed: {e}", file=sys.stderr)
+                return 1
+
+        video_files = get_video_files(params["video_file"])
+        if not video_files:
+            print("No video files found", file=sys.stderr)
+            return 1
+
+        print(f"Found {len(video_files)} video file(s)")
+        for vf in video_files:
+            print(f"  - {Path(vf).name}")
+        print()
+
+        all_results = {}
+        start_from = params.get("start_from", 1)
+        if start_from > 1:
+            print(f"\n[SKIP] Starting from video {start_from} (skipping {start_from - 1})\n")
+
+        for video_idx, video_file in enumerate(video_files, 1):
+            if video_idx < start_from:
+                continue
+
+            print(f"\n========== Video [{video_idx}/{len(video_files)}] ==========")
+            print(f"File: {Path(video_file).name}")
+
+            title, desc = get_video_content(video_file, params["title"], params["desc"])
+            video_params = {**params, "video_file": video_file, "title": title, "desc": desc}
+
+            print_header(video_params)
+
+            results = {}
+            total = len(video_params["enabled_platforms"])
+            for i, platform in enumerate(video_params["enabled_platforms"], 1):
+                platform_name = PLATFORM_NAMES.get(platform, platform)
+
+                # 获取账号文件（支持逗号分隔多账号）
+                account_key = f"{platform}_account"
+                account_file_str = video_params["platforms"].get(account_key, "")
+                account_files = [af.strip() for af in account_file_str.split(",") if af.strip()]
+
+                if not account_files:
+                    print(f"[{i}/{total}] Publishing to {platform_name}...")
+                    results[platform] = {"success": False, "message": f"未配置 {platform} 账号"}
+                    print(f"  ✗ Failed: 未配置账号")
+                    continue
+
+                for acct_idx, account_file in enumerate(account_files):
+                    if len(account_files) > 1:
+                        print(f"[{i}/{total}] Publishing to {platform_name} (account {acct_idx + 1}/{len(account_files)})...")
+                    else:
+                        print(f"[{i}/{total}] Publishing to {platform_name}...")
+
+                    platform_params = {**video_params, "account_file": account_file}
+
+                    result = await publish_to_platform(platform, platform_params)
+                    result_key = platform if len(account_files) == 1 else f"{platform}_{acct_idx + 1}"
+                    results[result_key] = result
+
+                    if result["success"]:
+                        print(f"  ✓ Success")
+                    else:
+                        print(f"  ✗ Failed: {result['message']}")
+
+            print_results(results)
+            all_results[video_file] = results
+
+        # 总体汇总
+        print("\n========== Summary ==========")
+        success_count = sum(1 for results in all_results.values() for r in results.values() if r["success"])
+        fail_count = sum(1 for results in all_results.values() for r in results.values() if not r["success"])
+        print(f"Success: {success_count}")
+        print(f"Failed: {fail_count}")
+
         return 0
 
     if args.platform == "douyin":

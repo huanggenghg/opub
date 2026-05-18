@@ -12,22 +12,30 @@ def _detect_mode() -> Path:
     pip 模式：→ BASE_DIR = ~/.social-auto-upload/"""
     if (_PROJECT_ROOT / "uploader").is_dir():
         return _PROJECT_ROOT
-    return Path(os.environ.get("SAU_HOME", Path.home() / ".social-auto-upload"))
+    sau_home = os.environ.get("SAU_HOME", "").strip()
+    if sau_home:
+        return Path(sau_home)
+    return Path.home() / ".social-auto-upload"
 
 
 BASE_DIR = _detect_mode()
 
 # 首次运行自动创建数据目录
-if not BASE_DIR.exists():
+try:
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     (BASE_DIR / "cookies").mkdir(exist_ok=True)
+except OSError:
+    pass  # 权限不足时静默忽略，后续操作会报具体错误
 
 
 def _load_config() -> dict:
     config_path = BASE_DIR / "config.json"
     if config_path.exists():
-        with open(config_path) as f:
-            return json.load(f)
+        try:
+            with open(config_path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass  # 配置文件损坏时使用默认值
     return {}
 
 

@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).parent.resolve()
+
+
+def _detect_mode() -> Path:
+    """开发模式：项目根有 uploader/ 目录 → BASE_DIR = 项目根
+    pip 模式：→ BASE_DIR = ~/.social-auto-upload/"""
+    if (_PROJECT_ROOT / "uploader").is_dir():
+        return _PROJECT_ROOT
+    return Path(os.environ.get("SAU_HOME", Path.home() / ".social-auto-upload"))
+
+
+BASE_DIR = _detect_mode()
+
+# 首次运行自动创建数据目录
+if not BASE_DIR.exists():
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    (BASE_DIR / "cookies").mkdir(exist_ok=True)
+
+
+def _load_config() -> dict:
+    config_path = BASE_DIR / "config.json"
+    if config_path.exists():
+        with open(config_path) as f:
+            return json.load(f)
+    return {}
+
+
+_config = _load_config()
+
+LOCAL_CHROME_HEADLESS = _config.get("chrome_headless", True)
+LOCAL_CHROME_PATH = _config.get("chrome_path", "")
+DEBUG_MODE = _config.get("debug", False)
+ZHIPU_API_KEY = _config.get("zhipu_api_key", "")
+ZHIPU_VISION_MODEL = _config.get("zhipu_vision_model", "glm-4v-plus")
+XHS_SERVER = _config.get("xhs_server", "")

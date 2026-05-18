@@ -147,6 +147,72 @@ def resolve_account_file(platform: str, account_name: str) -> Path:
     return account_file
 
 
+async def _ensure_login(platform: str, account_file: Path, headless: bool = False) -> bool:
+    """检查 cookie 有效性，无效则自动触发登录。返回 True 表示已登录。"""
+    check_funcs = {
+        "douyin": ("uploader.douyin_uploader.main", "cookie_auth"),
+        "kuaishou": ("uploader.ks_uploader.main", "cookie_auth"),
+        "xiaohongshu": ("uploader.xiaohongshu_uploader.main", "cookie_auth"),
+        "weibo": ("uploader.weibo_uploader.main", "cookie_auth"),
+        "tencent": ("uploader.tencent_uploader.main", "cookie_auth"),
+        "baijiahao": ("uploader.baijiahao_uploader.main", "cookie_auth"),
+        "tk": ("uploader.tk_uploader.main", "cookie_auth"),
+    }
+
+    # Bilibili 特殊处理
+    if platform == "bilibili":
+        from uploader.bilibili_uploader.runtime import run_biliup_command
+        result = run_biliup_command(["-u", str(account_file), "renew"])
+        if result.returncode == 0:
+            return True
+        print(f"Cookie invalid, triggering login for bilibili...")
+        result = run_biliup_command(["-u", str(account_file), "login"], interactive=True)
+        return result.returncode == 0
+
+    module_path, func_name = check_funcs.get(platform, (None, None))
+    if not module_path:
+        print(f"No check function for platform: {platform}", file=sys.stderr)
+        return False
+
+    import importlib
+    module = importlib.import_module(module_path)
+    check_func = getattr(module, func_name)
+
+    # 检查 cookie
+    if await check_func(str(account_file)):
+        return True
+
+    # Cookie 无效，自动触发登录
+    print(f"Cookie invalid, triggering login for {platform}...")
+    setup_funcs = {
+        "douyin": ("uploader.douyin_uploader.main", "douyin_setup"),
+        "kuaishou": ("uploader.ks_uploader.main", "ks_setup"),
+        "xiaohongshu": ("uploader.xiaohongshu_uploader.main", "xiaohongshu_setup"),
+        "weibo": ("uploader.weibo_uploader.main", "weibo_setup"),
+        "tencent": ("uploader.tencent_uploader.main", "tencent_setup"),
+        "baijiahao": ("uploader.baijiahao_uploader.main", "baijiahao_setup"),
+        "tk": ("uploader.tk_uploader.main", "tiktok_setup"),
+    }
+
+    setup_path, setup_name = setup_funcs.get(platform, (None, None))
+    if not setup_path:
+        print(f"No login function for platform: {platform}", file=sys.stderr)
+        return False
+
+    setup_module = importlib.import_module(setup_path)
+    setup_func = getattr(setup_module, setup_name)
+
+    # baijiahao 和 tk 的 setup 签名不同
+    if platform in ("baijiahao", "tk"):
+        result = await setup_func(str(account_file), handle=True)
+    else:
+        result = await setup_func(str(account_file), handle=True, return_detail=True, headless=headless)
+
+    if isinstance(result, dict):
+        return result.get("success", False)
+    return bool(result)
+
+
 def parse_tags(raw_tags: str | None) -> list[str]:
     if not raw_tags:
         return []
@@ -911,6 +977,13 @@ async def dispatch(args: argparse.Namespace) -> int:
                         print(f"[{i}/{total}] Publishing to {platform_name} (account {acct_idx + 1}/{len(account_files)})...")
                     else:
                         print(f"[{i}/{total}] Publishing to {platform_name}...")
+
+                    # 自动检查登录状态，未登录则触发登录
+                    if not await _ensure_login(platform, Path(account_file)):
+                        result_key = platform if len(account_files) == 1 else f"{platform}_{acct_idx + 1}"
+                        results[result_key] = {"success": False, "message": f"登录失败: {platform}"}
+                        print(f"  ✗ Failed: login required but failed")
+                        continue
 
                     platform_params = {**video_params, "account_file": account_file}
 

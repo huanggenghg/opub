@@ -1,6 +1,6 @@
 ---
 name: sau-cli
-description: Use when operating the social-auto-upload CLI tool — logging in, uploading videos, publishing to platforms, or analyzing video content. Also use when a user asks to publish/upload to Douyin, Xiaohongshu, Kuaishou, Weibo, Bilibili, Tencent, Baijiahao, or TikTok via command line.
+description: Use when operating the social-auto-upload CLI tool — checking environment, logging in, uploading videos, publishing to platforms, or analyzing video content. Also use when a user asks to publish/upload to Douyin, Xiaohongshu, Kuaishou, Weibo, Bilibili, Tencent, Baijiahao, or TikTok via command line.
 ---
 
 # sau CLI 使用指南
@@ -10,9 +10,10 @@ description: Use when operating the social-auto-upload CLI tool — logging in, 
 使用前必须确保：
 
 1. **安装包**：`pip install hgeng-sau`
-2. **浏览器驱动**：`playwright install chromium`
-3. **配置文件**：复制 `conf.example.py` 为 `conf.py`，填入智谱 API key（GLM-4V 视觉模型）
-4. **登录账号**：各平台需先登录获取 cookie，否则上传会失败
+2. **浏览器驱动**：`patchright install chromium`
+3. **环境检查**：`sau status`（确认环境就绪）
+
+无需手动配置任何文件，安装后即可使用。
 
 ## CLI 命令总览
 
@@ -22,45 +23,37 @@ sau <子命令> [选项]
 
 | 子命令 | 说明 | 是否需要登录 |
 |---------|------|-------------|
+| `status` | 检查环境与登录状态 | 否 |
+| `login` | 登录指定平台（扫码） | 否（登录本身） |
 | `generate` | 分析视频帧，自动生成标题描述 | 否（需智谱 API key） |
-| `publish` | 一键多平台发布（读配置文件） | 是 |
+| `publish` | 一键多平台发布（读配置文件） | 自动检查，未登录则触发登录 |
 | `douyin` | 抖音：login / check / upload-video / upload-note | 是 |
 | `kuaishou` | 快手：login / check / upload-video / upload-note | 是 |
 | `xiaohongshu` | 小红书：login / check / upload-video / upload-note | 是 |
 | `bilibili` | B站：login / check / upload-video | 是 |
 
-**注意**：微博、微信视频号、百家号、TikTok 没有独立 CLI 子命令，只能通过 `sau publish` 批量发布。
-
 ## 常用命令
+
+### 环境检查
+
+```bash
+sau status                    # 检查 Python、浏览器、配置、各平台登录状态
+```
 
 ### 登录
 
 ```bash
-sau douyin login --account <账号名>          # 抖音登录（扫码）
-sau kuaishou login --account <账号名>        # 快手登录
-sau xiaohongshu login --account <账号名>     # 小红书登录
-sau bilibili login --account <账号名>        # B站登录（终端二维码）
+sau login --platform weibo --account <账号名>       # 微博登录
+sau login --platform douyin --account <账号名>       # 抖音登录
+sau login --platform kuaishou --account <账号名>     # 快手登录
+sau login --platform xiaohongshu --account <账号名>  # 小红书登录
+sau login --platform bilibili --account <账号名>     # B站登录
+sau login --platform tencent --account <账号名>      # 微信视频号登录
+sau login --platform baijiahao --account <账号名>    # 百家号登录
+sau login --platform tk --account <账号名>           # TikTok 登录
 ```
 
-登录后 cookie 保存在 `cookies/<平台>_<账号名>.json`。
-
-### 检查登录状态
-
-```bash
-sau douyin check --account <账号名>
-sau kuaishou check --account <账号名>
-sau xiaohongshu check --account <账号名>
-sau bilibili check --account <账号名>
-```
-
-### 单平台上传
-
-```bash
-sau douyin upload-video --account <账号> --file <视频> --title <标题> [--tags 标签1,标签2] [--schedule 2026-05-20 12:00]
-sau kuaishou upload-video --account <账号> --file <视频> --title <标题>
-sau xiaohongshu upload-video --account <账号> --file <视频> --title <标题>
-sau bilibili upload-video --account <账号> --file <视频> --title <标题> --desc <描述> --tid <分区ID>
-```
+登录后 cookie 保存在 `~/.social-auto-upload/cookies/` 目录。
 
 ### 一键多平台发布
 
@@ -74,22 +67,63 @@ sau publish --force                            # 强制重新生成视频配置
 sau publish --config my_config.ini             # 指定配置文件
 ```
 
-### 视频内容分析
+**自动登录**：发布时自动检查各平台 cookie 有效性，无效则自动触发登录流程（扫码），无需手动分步操作。
+
+### 单平台上传
 
 ```bash
-sau generate --dir videos/                     # 分析目录下所有视频
-sau generate --dir videos/ --force             # 强制重新分析（覆盖已有配置）
+sau douyin upload-video --account <账号> --file <视频> --title <标题> [--tags 标签1,标签2] [--schedule 2026-05-20 12:00]
+sau kuaishou upload-video --account <账号> --file <视频> --title <标题>
+sau xiaohongshu upload-video --account <账号> --file <视频> --title <标题>
+sau bilibili upload-video --account <账号> --file <视频> --title <标题> --desc <描述> --tid <分区ID>
 ```
 
-分析结果保存为视频同名的 `.json` 文件，`sau publish` 时自动读取。
+### 视频内容分析（可选功能）
+
+```bash
+pip install hgeng-sau[analyze]                 # 安装视频分析依赖
+sau generate --dir videos/                     # 分析目录下所有视频
+sau generate --dir videos/ --force             # 强制重新分析
+```
+
+## 配置（可选）
+
+默认无需配置。如需自定义，在 `~/.social-auto-upload/config.json` 中设置：
+
+```json
+{
+  "chrome_headless": true,
+  "chrome_path": "",
+  "debug": false,
+  "zhipu_api_key": "",
+  "zhipu_vision_model": "glm-4v-plus",
+  "xhs_server": ""
+}
+```
+
+环境变量 `SAU_HOME` 可覆盖数据目录（默认 `~/.social-auto-upload/`）。
+
+## Agent 交互流程
+
+```
+Agent 收到发布请求
+  → sau status（检查环境）
+  → sau publish --platforms weibo --video xxx --title xxx
+    → 内部自动 check cookie
+    → cookie 无效 → 自动触发 login（扫码）
+    → 登录成功 → 继续发布
+  → 返回结果
+```
+
+Agent 只需知道 `sau status` 和 `sau publish` 两个命令。
 
 ## 常见问题
 
 | 问题 | 原因 | 解决 |
 |------|------|------|
-| cookie missing or expired | 未登录或 cookie 过期 | 先 `sau <平台> login --account <账号>` |
-| 未找到视频文件 | video_file 路径错误 | 路径相对于项目根目录，或用 `--video` 覆盖 |
-| 标题为空 | 未配置标题 | `sau generate` 自动生成，或 `--title` 手动指定 |
-| B站/TikTok 发布失败 | publish_all 中标注暂未实现 | B站用 `sau bilibili upload-video`，TikTok 用脚本 |
-| 浏览器启动失败 | 未安装浏览器驱动 | `playwright install chromium` |
-| 智谱 API 报错 | 未配置 API key | 在 `conf.py` 中填入 ZHIPU_API_KEY |
+| Browser: patchright not found | 未安装浏览器驱动 | `patchright install chromium` |
+| cookie missing or expired | 未登录或 cookie 过期 | `sau login --platform <平台> --account <账号>` |
+| 未找到视频文件 | video_file 路径错误 | 路径相对于数据目录，或用 `--video` 覆盖 |
+| 标题为空 | 未配置标题 | `sau generate` 自动生成（需安装 analyze 依赖），或 `--title` 手动指定 |
+| 浏览器启动失败 | 未安装浏览器驱动 | `patchright install chromium` |
+| 智谱 API 报错 | 未配置 API key | 在 config.json 中填入 zhipu_api_key |

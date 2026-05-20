@@ -649,12 +649,60 @@ async def dispatch(args: argparse.Namespace) -> int:
         py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
         print(f"Python: {py_ver} ✓")
 
-        # 浏览器驱动
-        patchright_path = shutil.which("patchright")
-        if patchright_path:
-            print(f"Browser: patchright found at {patchright_path}")
+        # 浏览器驱动：自动安装 patchright 库 + chromium 二进制
+        try:
+            import patchright as _pr
+            from importlib.metadata import version as _pkg_ver
+            _pr_ver = _pkg_ver("patchright")
+        except ImportError:
+            print("Browser: patchright not installed, installing...")
+            rc = subprocess.call([sys.executable, "-m", "pip", "install", "patchright"])
+            if rc == 0:
+                import patchright as _pr
+                from importlib.metadata import version as _pkg_ver
+                _pr_ver = _pkg_ver("patchright")
+                print(f"Browser: patchright {_pr_ver} installed ✓")
+            else:
+                print("Browser: patchright install failed", file=sys.stderr)
+                return 1
+
+        # 检查 chromium 浏览器二进制是否已安装（匹配 patchright 期望的版本号）
+        def _chromium_revision_installed():
+            import json
+            pkg_root = os.path.dirname(_pr.__file__)
+            browsers_json = os.path.join(pkg_root, "driver", "package", "browsers.json")
+            if not os.path.exists(browsers_json):
+                return False
+            with open(browsers_json) as f:
+                data = json.load(f)
+            chromium_revisions = [
+                b["revision"] for b in data.get("browsers", [])
+                if b.get("name") == "chromium" and b.get("installByDefault", True)
+            ]
+            if not chromium_revisions:
+                return False
+            rev = chromium_revisions[0]
+            home = os.path.expanduser("~")
+            possible = [
+                os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""),
+                os.path.join(home, "Library", "Caches", "ms-playwright"),
+                os.path.join(home, ".cache", "ms-playwright"),
+            ]
+            for p in possible:
+                if p and os.path.isdir(p):
+                    if f"chromium-{rev}" in os.listdir(p):
+                        return True
+            return False
+
+        if _chromium_revision_installed():
+            print(f"Browser: patchright {_pr_ver} + chromium ✓")
         else:
-            print("Browser: patchright not found (run: patchright install chromium)")
+            print("Browser: chromium not installed or version mismatch, installing...")
+            rc = subprocess.call([sys.executable, "-m", "patchright", "install", "chromium"])
+            if rc == 0:
+                print(f"Browser: patchright {_pr_ver} + chromium installed ✓")
+            else:
+                print("Browser: chromium install failed", file=sys.stderr)
 
         # 配置目录
         from conf import BASE_DIR
@@ -873,18 +921,58 @@ async def dispatch(args: argparse.Namespace) -> int:
 
     # === 处理 publish 命令 ===
     if args.command == "publish":
-        from publish_all import read_config, parse_config, get_video_files, get_video_content, print_header, print_results, publish_to_platform, PLATFORM_NAMES, resolve_path
+        from publish_all import parse_config, get_video_files, get_video_content, print_header, print_results, publish_to_platform, PLATFORM_NAMES, resolve_path
 
         config_file = args.config
         config_path = Path(config_file)
         if not config_path.is_absolute():
             config_path = Path(resolve_path(config_file))
-        if not config_path.exists():
-            print(f"Config file not found: {config_path}", file=sys.stderr)
-            return 1
 
-        config = read_config(config_file)
-        params = parse_config(config)
+        if config_path.exists():
+            from publish_all import read_config
+            config = read_config(config_file)
+            params = parse_config(config)
+        else:
+            # ini 不存在时用默认 params，CLI 参数覆盖
+            if args.platforms is None and args.video is None:
+                print(f"Config file not found: {config_path}", file=sys.stderr)
+                print("Specify --platforms and --video, or provide a config file with --config", file=sys.stderr)
+                return 1
+            params = {
+                "content_type": "video",
+                "title": "",
+                "desc": "",
+                "tags": [],
+                "video_file": "",
+                "images": [],
+                "publish_strategy": "immediate",
+                "publish_time": None,
+                "enabled_platforms": [],
+                "platforms": {},
+                "convert_to_video": False,
+                "video_duration": 5,
+                "start_from": 1,
+            }
+            # 自动发现 cookies 目录中的账号文件
+            from conf import BASE_DIR as _BASE_DIR
+            _cookies_dir = _BASE_DIR / "cookies"
+            _platform_subdirs = {
+                "douyin": "douyin_uploader",
+                "xiaohongshu": "xiaohongshu_uploader",
+                "kuaishou": "ks_uploader",
+                "bilibili": "bilibili_uploader",
+                "tencent": "tencent_uploader",
+                "baijiahao": "baijiahao_uploader",
+                "tk": "tk_uploader",
+                "weibo": "weibo_uploader",
+            }
+            for _plat, _subdir in _platform_subdirs.items():
+                _plat_cookie_dir = _cookies_dir / _subdir
+                if _plat_cookie_dir.exists():
+                    _acct_files = sorted(_plat_cookie_dir.glob("*.json"))
+                    if _acct_files:
+                        _rel_paths = [str(a.relative_to(_BASE_DIR)) for a in _acct_files]
+                        params["platforms"][f"{_plat}_account"] = ", ".join(_rel_paths)
 
         # CLI 参数覆盖配置文件
         if args.platforms is not None:

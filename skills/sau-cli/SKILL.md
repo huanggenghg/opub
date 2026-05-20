@@ -32,6 +32,8 @@ sau <子命令> [选项]
 | `xiaohongshu` | 小红书：login / check / upload-video / upload-note | 是 |
 | `bilibili` | B站：login / check / upload-video | 是 |
 
+**其他平台**（weibo、tencent、baijiahao、tk）通过 `sau login --platform <平台>` 和 `sau publish` 支持，暂无独立子命令。
+
 ## 常用命令
 
 ### 环境检查
@@ -51,9 +53,12 @@ sau login --platform bilibili --account <账号名>     # B站登录
 sau login --platform tencent --account <账号名>      # 微信视频号登录
 sau login --platform baijiahao --account <账号名>    # 百家号登录
 sau login --platform tk --account <账号名>           # TikTok 登录
+sau login --platform <平台> --account <账号> --headless  # 无头模式登录
 ```
 
 登录后 cookie 保存在 `~/.social-auto-upload/cookies/` 目录。
+
+**注意**：Bilibili 登录必须由用户在本地真实终端执行，agent 不应在非交互环境里运行 `sau login --platform bilibili`。
 
 ### 一键多平台发布
 

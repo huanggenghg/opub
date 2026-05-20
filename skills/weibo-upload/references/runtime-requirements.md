@@ -35,20 +35,19 @@ sau status
 ### `sau` 已在 PATH 中
 
 ```bash
-sau kuaishou --help
+sau login --platform weibo --account <name>
+sau publish --platforms weibo
 ```
 
 ### 开发模式（仓库内）
 
 ```bash
 uv pip install -e .
-sau kuaishou --help
+sau login --platform weibo --account <name>
 ```
 
 ## 无头和有头模式
 
-- 使用 `--headless` 表示无头模式
-- 使用 `--headed` 表示有头模式
-- 快手 CLI 默认按无头模式运行
-- 如果用户明确要求可见浏览器窗口，或二维码展示确实有问题，再切到 `--headed`
-- 如果登录过程中已经生成了本地二维码图片，agent 应优先直接把图片展示/发送给用户扫码，不要只告诉用户图片路径
+- `sau login --platform weibo --account <name> --headless` 无头模式
+- 默认有头模式（微博登录通常需要扫码）
+- 如果登录过程中生成了本地二维码图片，agent 应优先直接把图片展示/发送给用户扫码

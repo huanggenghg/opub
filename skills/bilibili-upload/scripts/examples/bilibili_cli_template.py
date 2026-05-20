@@ -1,39 +1,45 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
-import sys
-from pathlib import Path
 
-from conf import BASE_DIR
-from utils.constant import VideoZoneTypes
+
+def run_command(command: list[str]) -> None:
+    print("Running:", " ".join(shlex.quote(part) for part in command))
+    subprocess.run(command, check=True)
 
 
 def main() -> None:
     account = "account_a"
     # account_name is user-defined. One account_name maps to one account file.
     # You can prepare multiple account names and run them in parallel.
-    cli_path = Path(BASE_DIR) / "sau_cli.py"
-    command = [
-        sys.executable,
-        str(cli_path),
-        "bilibili",
-        "upload-video",
-        "--account",
-        account,
-        "--file",
-        str(Path(BASE_DIR) / "videos" / "demo.mp4"),
-        "--title",
-        "Bilibili CLI Demo",
-        "--desc",
-        "Bilibili CLI Demo",
-        "--tid",
-        str(VideoZoneTypes.SPORTS_FOOTBALL.value),
-        "--tags",
-        "足球,测试",
-        "--schedule",
-        "2026-03-26 16:00",
+    # Bilibili login must be run by the user in a local interactive terminal.
+
+    commands = [
+        # Login: user must run this in a real terminal, not by an agent
+        # ["sau", "bilibili", "login", "--account", account],
+        ["sau", "bilibili", "check", "--account", account],
+        [
+            "sau",
+            "bilibili",
+            "upload-video",
+            "--account",
+            account,
+            "--file",
+            "videos/demo.mp4",
+            "--title",
+            "Bilibili video from Python",
+            "--desc",
+            "Bilibili video description from Python",
+            "--tid",
+            "121",  # 121 = 体育-足球
+            "--tags",
+            "cli,video",
+        ],
     ]
-    subprocess.run(command, check=True)
+
+    for command in commands:
+        run_command(command)
 
 
 if __name__ == "__main__":

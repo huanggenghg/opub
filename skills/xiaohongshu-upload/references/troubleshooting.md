@@ -2,25 +2,22 @@
 
 ## 找不到 `sau` 命令
 
-可以尝试以下方式：
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-sau xiaohongshu --help
-```
-
-```powershell
-.\.venv\Scripts\sau.exe xiaohongshu --help
-```
+先确认是否已安装：
 
 ```bash
-uv run sau xiaohongshu --help
+pip install hgeng-sau
 ```
 
-如果当前环境还没有安装项目：
+开发模式：
 
 ```bash
 uv pip install -e .
+```
+
+环境检查：
+
+```bash
+sau status
 ```
 
 ## cookie 无效或已过期

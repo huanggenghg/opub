@@ -2,9 +2,15 @@
 
 这个 skill 默认假设当前环境已经具备：
 
-- 已安装 `social-auto-upload`
-- 可以调用 `sau`，或者至少可以执行 `python sau_cli.py`
+- 已安装 `hgeng-sau`
+- 可以调用 `sau` 命令
 - 当前机器首次运行时可以联网访问 GitHub Release
+
+## 安装
+
+```bash
+pip install hgeng-sau
+```
 
 ## 关键说明
 
@@ -15,7 +21,13 @@
 - 如果本地没有 `biliup`，程序会自动下载
 - 如果上游 GitHub Release 有更新，程序会自动更新后再继续执行
 
-## 推荐调用方式
+## 环境检查
+
+```bash
+sau status
+```
+
+## 常见调用方式
 
 ### `sau` 已在 PATH 中
 
@@ -23,18 +35,11 @@
 sau bilibili --help
 ```
 
-### 仓库内直接调用
-
-PowerShell：
-
-```powershell
-.\.venv\Scripts\python.exe sau_cli.py bilibili --help
-```
-
-bash / zsh：
+### 开发模式（仓库内）
 
 ```bash
-python sau_cli.py bilibili --help
+uv pip install -e .
+sau bilibili --help
 ```
 
 ## 首次运行注意事项

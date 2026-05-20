@@ -50,7 +50,7 @@ web = [
 package = true
 
 [tool.setuptools]
-py-modules = ["conf", "sau_cli"]
+py-modules = ["conf", "sau_cli", "publish_all"]
 include-package-data = true
 
 [tool.setuptools.packages.find]

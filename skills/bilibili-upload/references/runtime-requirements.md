@@ -4,7 +4,6 @@
 
 - 已安装 `hgeng-sau`
 - 可以调用 `sau` 命令
-- 当前机器首次运行时可以联网访问 GitHub Release
 
 ## 安装
 

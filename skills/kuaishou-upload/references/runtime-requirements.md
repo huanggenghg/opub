@@ -4,7 +4,6 @@
 
 - 已安装 `hgeng-sau`
 - 可以调用 `sau` 命令
-- 已为 `patchright` 安装 Chromium
 
 ## 安装
 
@@ -12,23 +11,13 @@
 pip install hgeng-sau
 ```
 
-## 安装 patchright 浏览器
-
-```bash
-patchright install chromium
-```
-
-国内镜像加速：
-
-```bash
-PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright" patchright install chromium
-```
-
 ## 环境检查
 
 ```bash
 sau status
 ```
+
+`sau status` 会自动检测并安装缺失的 patchright 库和 chromium 浏览器驱动，无需手动安装。
 
 ## 常见调用方式
 

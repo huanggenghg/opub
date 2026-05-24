@@ -10,10 +10,9 @@ description: Use when operating the social-auto-upload CLI tool — checking env
 使用前必须确保：
 
 1. **安装包**：`pip install hgeng-sau`
-2. **浏览器驱动**：`patchright install chromium`
-3. **环境检查**：`sau status`（确认环境就绪）
+2. **环境检查**：`sau status`（自动检测并安装缺失的 patchright 库和 chromium 浏览器驱动）
 
-无需手动配置任何文件，安装后即可使用。
+无需手动安装浏览器驱动或配置任何文件，`sau status` 一条命令搞定。
 
 ## CLI 命令总览
 
@@ -126,9 +125,9 @@ Agent 只需知道 `sau status` 和 `sau publish` 两个命令。
 
 | 问题 | 原因 | 解决 |
 |------|------|------|
-| Browser: patchright not found | 未安装浏览器驱动 | `patchright install chromium` |
+| Browser: patchright not found | 未安装浏览器驱动 | `sau status`（自动安装） |
 | cookie missing or expired | 未登录或 cookie 过期 | `sau login --platform <平台> --account <账号>` |
 | 未找到视频文件 | video_file 路径错误 | 路径相对于数据目录，或用 `--video` 覆盖 |
 | 标题为空 | 未配置标题 | `sau generate` 自动生成（需安装 analyze 依赖），或 `--title` 手动指定 |
-| 浏览器启动失败 | 未安装浏览器驱动 | `patchright install chromium` |
+| 浏览器启动失败 | 未安装浏览器驱动 | `sau status`（自动安装） |
 | 智谱 API 报错 | 未配置 API key | 在 config.json 中填入 zhipu_api_key |

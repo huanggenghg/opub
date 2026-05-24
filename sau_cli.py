@@ -1090,19 +1090,20 @@ async def dispatch(args: argparse.Namespace) -> int:
                     continue
 
                 for acct_idx, account_file in enumerate(account_files):
+                    resolved_account = resolve_path(account_file)
                     if len(account_files) > 1:
                         print(f"[{i}/{total}] Publishing to {platform_name} (account {acct_idx + 1}/{len(account_files)})...")
                     else:
                         print(f"[{i}/{total}] Publishing to {platform_name}...")
 
                     # 自动检查登录状态，未登录则触发登录
-                    if not await _ensure_login(platform, Path(account_file)):
+                    if not await _ensure_login(platform, Path(resolved_account)):
                         result_key = platform if len(account_files) == 1 else f"{platform}_{acct_idx + 1}"
                         results[result_key] = {"success": False, "message": f"登录失败: {platform}"}
                         print(f"  ✗ Failed: login required but failed")
                         continue
 
-                    platform_params = {**video_params, "account_file": account_file}
+                    platform_params = {**video_params, "account_file": resolved_account}
 
                     result = await publish_to_platform(platform, platform_params)
                     result_key = platform if len(account_files) == 1 else f"{platform}_{acct_idx + 1}"

@@ -668,7 +668,7 @@ async def dispatch(args: argparse.Namespace) -> int:
 
         # 检查 chromium 浏览器二进制是否已安装（匹配 patchright 期望的版本号）
         def _chromium_revision_installed():
-            import json
+            import json, os
             pkg_root = os.path.dirname(_pr.__file__)
             browsers_json = os.path.join(pkg_root, "driver", "package", "browsers.json")
             if not os.path.exists(browsers_json):

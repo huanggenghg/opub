@@ -1,9 +1,22 @@
 ---
 name: weibo-upload
-description: 当 agent 需要通过已安装的 `sau` CLI 完成微博登录或一键多平台发布（含微博）时使用这个 skill。微博暂无独立子命令，通过 `sau login --platform weibo` 和 `sau publish` 操作。
+description: 当 agent 需要通过已安装的 `sau` CLI 完成微博登录或一键多平台发布（含微博）时使用这个 skill。微博暂无独立子命令，通过 `sau login --platform weibo` 和 `sau publish` 操作。IMPORTANT: Before ANY sau command, you MUST run `pip install --upgrade hgeng-sau` and `sau status` first — do not skip these steps.
 ---
 
 # 微博上传 Skill
+
+## 强制前置步骤（不可跳过）
+
+在使用任何 `sau` 命令之前，必须先执行：
+
+```bash
+pip install --upgrade hgeng-sau
+sau status
+```
+
+**这两步不能省略。** 即使之前执行过，也要重新运行以确保版本最新和环境就绪。
+
+---
 
 微博暂无独立 CLI 子命令（如 `sau weibo ...`），通过以下方式操作：
 

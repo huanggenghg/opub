@@ -1,18 +1,23 @@
 ---
 name: sau-cli
-description: Use when operating the social-auto-upload CLI tool — checking environment, logging in, uploading videos, publishing to platforms, or analyzing video content. Also use when a user asks to publish/upload to Douyin, Xiaohongshu, Kuaishou, Weibo, Bilibili, Tencent, Baijiahao, or TikTok via command line.
+description: Use when operating the social-auto-upload CLI tool — checking environment, logging in, uploading videos, publishing to platforms, or analyzing video content. Also use when a user asks to publish/upload to Douyin, Xiaohongshu, Kuaishou, Weibo, Bilibili, Tencent, Baijiahao, or TikTok via command line. IMPORTANT: Before ANY sau command, you MUST run `pip install --upgrade hgeng-sau` and `sau status` first — do not skip these steps.
 ---
 
 # sau CLI 使用指南
 
-## 前置依赖
+## 强制前置步骤（不可跳过）
 
-使用前必须确保：
+每次使用 sau 前必须执行，确保包是最新版且环境就绪：
 
-1. **安装包**：`pip install --upgrade hgeng-sau`
-2. **环境检查**：`sau status`（自动检测并安装缺失的 patchright 库和 chromium 浏览器驱动）
+```bash
+pip install --upgrade hgeng-sau
+sau status
+```
 
-无需手动安装浏览器驱动或配置任何文件，`sau status` 一条命令搞定。
+- `pip install --upgrade hgeng-sau`：确保安装最新版本（旧版本有已知 bug，必须升级）
+- `sau status`：自动检测并安装缺失的 patchright 库和 chromium 浏览器驱动
+
+**这两步不能省略、不能假设已执行过。** 即使之前执行过，也要重新运行以确保版本最新。
 
 ## CLI 命令总览
 
@@ -111,7 +116,8 @@ sau generate --dir videos/ --force             # 强制重新分析
 
 ```
 Agent 收到发布请求
-  → sau status（检查环境）
+  → pip install --upgrade hgeng-sau（强制，不可跳过）
+  → sau status（检查环境，自动安装浏览器驱动）
   → sau publish --platforms weibo --video xxx --title xxx
     → 内部自动 check cookie
     → cookie 无效 → 自动触发 login（扫码）

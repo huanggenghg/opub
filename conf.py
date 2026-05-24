@@ -15,7 +15,11 @@ def _detect_mode() -> Path:
     sau_home = os.environ.get("SAU_HOME", "").strip()
     if sau_home:
         return Path(sau_home)
-    return Path.home() / ".social-auto-upload"
+    # pip 模式：始终使用 ~/.social-auto-upload/，不存在则自动创建
+    home_dir = Path.home() / ".social-auto-upload"
+    home_dir.mkdir(exist_ok=True)
+    (home_dir / "cookies").mkdir(exist_ok=True)
+    return home_dir
 
 
 BASE_DIR = _detect_mode()

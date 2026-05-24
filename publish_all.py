@@ -13,13 +13,12 @@ from datetime import datetime
 from pathlib import Path
 
 # 添加项目根目录到 Python 路径
-BASE_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(BASE_DIR))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from conf import BASE_DIR as PROJECT_BASE_DIR
+from conf import BASE_DIR
 
 # 内容模板文件路径
-CONTENT_TEMPLATES_FILE = BASE_DIR / "templates" / "content_templates.json"
+CONTENT_TEMPLATES_FILE = Path(__file__).resolve().parent / "templates" / "content_templates.json"
 
 # 平台名称映射
 PLATFORM_NAMES = {

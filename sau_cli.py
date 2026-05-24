@@ -666,7 +666,9 @@ async def dispatch(args: argparse.Namespace) -> int:
                 print("Browser: patchright install failed", file=sys.stderr)
                 return 1
 
-        # 检查 chromium 浏览器二进制是否已安装（匹配 patchright 期望的版本号）
+        # 检查全局 chromium 是否已安装（匹配当前 patchright 期望的版本号）
+        # chromium 二进制存于全局目录 ~/Library/Caches/ms-playwright/，与 Python 环境无关
+        # 但不同 patchright 版本需要不同 revision，必须精确匹配
         def _chromium_revision_installed():
             import json, os
             pkg_root = os.path.dirname(_pr.__file__)
@@ -697,7 +699,7 @@ async def dispatch(args: argparse.Namespace) -> int:
         if _chromium_revision_installed():
             print(f"Browser: patchright {_pr_ver} + chromium ✓")
         else:
-            print("Browser: chromium not installed or version mismatch, installing...")
+            print("Browser: chromium not installed, installing...")
             rc = subprocess.call([sys.executable, "-m", "patchright", "install", "chromium"])
             if rc == 0:
                 print(f"Browser: patchright {_pr_ver} + chromium installed ✓")

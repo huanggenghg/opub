@@ -716,34 +716,50 @@ async def dispatch(args: argparse.Namespace) -> int:
 
         # Cookies 状态
         cookies_dir = BASE_DIR / "cookies"
-        platforms = {
-            "weibo": "weibo_uploader",
-            "kuaishou": "ks_uploader",
-            "douyin": "douyin_uploader",
-            "xiaohongshu": "xiaohongshu_uploader",
-            "bilibili": "bilibili_uploader",
-            "tencent": "tencent_uploader",
-            "baijiahao": "baijiahao_uploader",
-            "tk": "tk_uploader",
-        }
-        ready = []
-        for name, subdir in platforms.items():
-            cookie_dir = cookies_dir / subdir
-            if cookie_dir.exists():
-                accounts = list(cookie_dir.glob("*.json"))
+        if not cookies_dir.exists():
+            print("Platforms ready: none (login required)")
+        else:
+            # 扁平结构：cookies/douyin_account.json, cookies/weibo_account1.json
+            # 兼容旧子目录：cookies/douyin_uploader/account.json
+            platform_prefixes = {
+                "douyin": "douyin_",
+                "kuaishou": "kuaishou_",
+                "xiaohongshu": "xiaohongshu_",
+                "weibo": "weibo_",
+                "tencent": "tencent_",
+                "baijiahao": "baijiahao_",
+                "tk": "tk_",
+                "bilibili": "bilibili_",
+            }
+            platform_subdirs = {
+                "douyin": "douyin_uploader",
+                "kuaishou": "ks_uploader",
+                "xiaohongshu": "xiaohongshu_uploader",
+                "weibo": "weibo_uploader",
+                "tencent": "tencent_uploader",
+                "baijiahao": "baijiahao_uploader",
+                "tk": "tk_uploader",
+                "bilibili": "bilibili_uploader",
+            }
+            ready = []
+            for name, prefix in platform_prefixes.items():
+                # 新扁平结构
+                flat_accounts = sorted(cookies_dir.glob(f"{prefix}*.json"))
+                # 旧子目录结构
+                subdir = platform_subdirs[name]
+                subdir_accounts = sorted((cookies_dir / subdir).glob("*.json")) if (cookies_dir / subdir).exists() else []
+                accounts = flat_accounts + [a for a in subdir_accounts if a not in flat_accounts]
                 if accounts:
                     acct_names = [a.stem for a in accounts]
                     print(f"  {name}: {', '.join(acct_names)}")
                     ready.append(name)
                 else:
                     print(f"  {name}: no accounts")
-            else:
-                print(f"  {name}: no accounts")
 
-        if ready:
-            print(f"Platforms ready: {', '.join(ready)}")
-        else:
-            print("Platforms ready: none (login required)")
+            if ready:
+                print(f"Platforms ready: {', '.join(ready)}")
+            else:
+                print("Platforms ready: none (login required)")
 
         return 0
 
@@ -955,26 +971,37 @@ async def dispatch(args: argparse.Namespace) -> int:
                 "video_duration": 5,
                 "start_from": 1,
             }
-            # 自动发现 cookies 目录中的账号文件
+            # 自动发现 cookies 目录中的账号文件（扁平结构 + 兼容旧子目录）
             from conf import BASE_DIR as _BASE_DIR
             _cookies_dir = _BASE_DIR / "cookies"
+            _platform_prefixes = {
+                "douyin": "douyin_",
+                "kuaishou": "kuaishou_",
+                "xiaohongshu": "xiaohongshu_",
+                "weibo": "weibo_",
+                "tencent": "tencent_",
+                "baijiahao": "baijiahao_",
+                "tk": "tk_",
+            }
             _platform_subdirs = {
                 "douyin": "douyin_uploader",
-                "xiaohongshu": "xiaohongshu_uploader",
                 "kuaishou": "ks_uploader",
-                "bilibili": "bilibili_uploader",
+                "xiaohongshu": "xiaohongshu_uploader",
+                "weibo": "weibo_uploader",
                 "tencent": "tencent_uploader",
                 "baijiahao": "baijiahao_uploader",
                 "tk": "tk_uploader",
-                "weibo": "weibo_uploader",
             }
-            for _plat, _subdir in _platform_subdirs.items():
-                _plat_cookie_dir = _cookies_dir / _subdir
-                if _plat_cookie_dir.exists():
-                    _acct_files = sorted(_plat_cookie_dir.glob("*.json"))
-                    if _acct_files:
-                        _rel_paths = [str(a.relative_to(_BASE_DIR)) for a in _acct_files]
-                        params["platforms"][f"{_plat}_account"] = ", ".join(_rel_paths)
+            for _plat, _prefix in _platform_prefixes.items():
+                # 新扁平结构：cookies/douyin_account.json
+                _flat_files = sorted(_cookies_dir.glob(f"{_prefix}*.json"))
+                # 旧子目录结构：cookies/douyin_uploader/account.json
+                _subdir = _platform_subdirs[_plat]
+                _subdir_files = sorted((_cookies_dir / _subdir).glob("*.json")) if (_cookies_dir / _subdir).exists() else []
+                _acct_files = _flat_files + [a for a in _subdir_files if a not in _flat_files]
+                if _acct_files:
+                    _rel_paths = [str(a.relative_to(_BASE_DIR)) for a in _acct_files]
+                    params["platforms"][f"{_plat}_account"] = ", ".join(_rel_paths)
 
         # CLI 参数覆盖配置文件
         if args.platforms is not None:

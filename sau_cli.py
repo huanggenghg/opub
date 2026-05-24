@@ -52,7 +52,7 @@ class DouyinVideoUploadRequest:
     product_title: str = ""
     publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool = False
 
 
 @dataclass
@@ -65,7 +65,7 @@ class DouyinNoteUploadRequest:
     publish_date: datetime | int
     publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool = False
 
 
 @dataclass
@@ -79,7 +79,7 @@ class KuaishouVideoUploadRequest:
     thumbnail_file: Path | None = None
     publish_strategy: str = KUAISHOU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool = False
 
 
 @dataclass
@@ -92,7 +92,7 @@ class KuaishouNoteUploadRequest:
     publish_date: datetime | int
     publish_strategy: str = KUAISHOU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool = False
 
 
 @dataclass
@@ -106,7 +106,7 @@ class XiaohongshuVideoUploadRequest:
     thumbnail_file: Path | None = None
     publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool = False
 
 
 @dataclass
@@ -119,7 +119,7 @@ class XiaohongshuNoteUploadRequest:
     publish_date: datetime | int
     publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool = False
 
 
 @dataclass
@@ -235,7 +235,7 @@ def parse_schedule(raw_schedule: str | None) -> datetime | int:
     return datetime.strptime(raw_schedule, SCHEDULE_FORMAT)
 
 
-async def login_douyin_account(account_name: str, headless: bool = True) -> dict:
+async def login_douyin_account(account_name: str, headless: bool = False) -> dict:
     account_file = resolve_account_file("douyin", account_name)
     return await douyin_setup(str(account_file), handle=True, return_detail=True, headless=headless)
 
@@ -247,7 +247,7 @@ async def check_douyin_account(account_name: str) -> bool:
     return await douyin_cookie_auth(str(account_file))
 
 
-async def login_kuaishou_account(account_name: str, headless: bool = True) -> dict:
+async def login_kuaishou_account(account_name: str, headless: bool = False) -> dict:
     account_file = resolve_account_file("kuaishou", account_name)
     return await ks_setup(str(account_file), handle=True, return_detail=True, headless=headless)
 
@@ -259,7 +259,7 @@ async def check_kuaishou_account(account_name: str) -> bool:
     return await kuaishou_cookie_auth(str(account_file))
 
 
-async def login_xiaohongshu_account(account_name: str, headless: bool = True) -> dict:
+async def login_xiaohongshu_account(account_name: str, headless: bool = False) -> dict:
     account_file = resolve_account_file("xiaohongshu", account_name)
     return await xiaohongshu_setup(str(account_file), handle=True, return_detail=True, headless=headless)
 
@@ -496,7 +496,7 @@ def add_runtime_flags(parser: argparse.ArgumentParser) -> None:
     headless_group = parser.add_mutually_exclusive_group()
     headless_group.add_argument("--headed", dest="headless", action="store_false", help="Run with browser UI")
     headless_group.add_argument("--headless", dest="headless", action="store_true", help="Run in headless mode")
-    parser.set_defaults(headless=True)
+    parser.set_defaults(headless=False)
 
 
 def build_parser() -> argparse.ArgumentParser:

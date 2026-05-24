@@ -45,7 +45,7 @@ def _load_config() -> dict:
 
 _config = _load_config()
 
-LOCAL_CHROME_HEADLESS = _config.get("chrome_headless", True)
+LOCAL_CHROME_HEADLESS = _config.get("chrome_headless", False)
 LOCAL_CHROME_PATH = _config.get("chrome_path", "")
 DEBUG_MODE = _config.get("debug", False)
 ZHIPU_API_KEY = _config.get("zhipu_api_key", "")

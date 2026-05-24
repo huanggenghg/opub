@@ -9,7 +9,7 @@ description: Use when operating the social-auto-upload CLI tool — checking env
 
 使用前必须确保：
 
-1. **安装包**：`pip install hgeng-sau`
+1. **安装包**：`pip install hgeng-sau>=0.2.4`
 2. **环境检查**：`sau status`（自动检测并安装缺失的 patchright 库和 chromium 浏览器驱动）
 
 无需手动安装浏览器驱动或配置任何文件，`sau status` 一条命令搞定。
@@ -85,7 +85,7 @@ sau bilibili upload-video --account <账号> --file <视频> --title <标题> --
 ### 视频内容分析（可选功能）
 
 ```bash
-pip install hgeng-sau[analyze]                 # 安装视频分析依赖
+pip install "hgeng-sau[analyze]>=0.2.4"        # 安装视频分析依赖
 sau generate --dir videos/                     # 分析目录下所有视频
 sau generate --dir videos/ --force             # 强制重新分析
 ```

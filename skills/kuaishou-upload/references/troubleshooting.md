@@ -5,7 +5,7 @@
 先确认是否已安装：
 
 ```bash
-pip install hgeng-sau
+pip install hgeng-sau>=0.2.4
 ```
 
 开发模式：

@@ -276,25 +276,29 @@ async def ensure_login(platform: str, account_file: str) -> bool:
     """确保平台已登录，未登录则触发登录流程"""
     account_file = resolve_path(account_file)
 
-    # 先检查 cookie 是否有效
-    check_map = {
-        "douyin": ("uploader.douyin_uploader.main", "cookie_auth"),
-        "xiaohongshu": ("uploader.xiaohongshu_uploader.main", "cookie_auth"),
-        "kuaishou": ("uploader.ks_uploader.main", "cookie_auth"),
-        "weibo": ("uploader.weibo_uploader.main", "cookie_auth"),
-        "tencent": ("uploader.tencent_uploader.main", "cookie_auth"),
-        "baijiahao": ("uploader.baijiahao_uploader.main", "cookie_auth"),
-        "tk": ("uploader.tk_uploader.main", "cookie_auth"),
-    }
+    # 文件不存在，直接触发登录
+    if not os.path.exists(account_file):
+        pass
+    else:
+        # 文件存在，先检查 cookie 是否有效
+        check_map = {
+            "douyin": ("uploader.douyin_uploader.main", "cookie_auth"),
+            "xiaohongshu": ("uploader.xiaohongshu_uploader.main", "cookie_auth"),
+            "kuaishou": ("uploader.ks_uploader.main", "cookie_auth"),
+            "weibo": ("uploader.weibo_uploader.main", "cookie_auth"),
+            "tencent": ("uploader.tencent_uploader.main", "cookie_auth"),
+            "baijiahao": ("uploader.baijiahao_uploader.main", "cookie_auth"),
+            "tk": ("uploader.tk_uploader.main", "cookie_auth"),
+        }
 
-    check_entry = check_map.get(platform)
-    if check_entry:
-        import importlib
-        module_path, func_name = check_entry
-        module = importlib.import_module(module_path)
-        check_func = getattr(module, func_name)
-        if await check_func(account_file):
-            return True
+        check_entry = check_map.get(platform)
+        if check_entry:
+            import importlib
+            module_path, func_name = check_entry
+            module = importlib.import_module(module_path)
+            check_func = getattr(module, func_name)
+            if await check_func(account_file):
+                return True
 
     # cookie 无效，触发登录（保留原有的 setup 调用逻辑）
     if platform == "douyin":

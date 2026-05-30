@@ -102,10 +102,11 @@ class PublishEngineTests(unittest.TestCase):
             "force": True,
         }
 
-        with patch("publish_all.get_video_files", return_value=["videos/demo.mp4"]):
-            with patch("publish_all.get_video_content", return_value=("标题", "描述")) as get_video_content:
-                with patch("publish_all.publish_one_item", new=AsyncMock(return_value={})) as publish_one_item:
-                    code = asyncio.run(publish_all.run_publish_with_params(params))
+        with patch("publish_all.runtime_preflight", new=AsyncMock(return_value=True)):
+            with patch("publish_all.get_video_files", return_value=["videos/demo.mp4"]):
+                with patch("publish_all.get_video_content", return_value=("标题", "描述")) as get_video_content:
+                    with patch("publish_all.publish_one_item", new=AsyncMock(return_value={})) as publish_one_item:
+                        code = asyncio.run(publish_all.run_publish_with_params(params))
 
         self.assertEqual(code, 0)
         get_video_content.assert_called_once_with(
@@ -115,6 +116,64 @@ class PublishEngineTests(unittest.TestCase):
             force=True,
         )
         publish_one_item.assert_awaited_once()
+
+    def test_run_publish_with_params_skips_preflight_when_video_missing(self):
+        params = {
+            "content_type": "video",
+            "title": "标题",
+            "desc": "描述",
+            "tags": [],
+            "video_file": "videos/missing.mp4",
+            "images": [],
+            "publish_strategy": "immediate",
+            "publish_time": None,
+            "enabled_platforms": ["weibo"],
+            "platforms": {},
+            "convert_to_video": False,
+            "video_duration": 5,
+            "start_from": 1,
+        }
+
+        with patch("publish_all.runtime_preflight", new=AsyncMock(return_value=True)) as preflight:
+            code = asyncio.run(publish_all.run_publish_with_params(params))
+
+        self.assertEqual(code, 1)
+        preflight.assert_not_awaited()
+
+
+class RuntimePreflightTests(unittest.TestCase):
+    def test_playwright_browser_cache_dirs_include_windows_default(self):
+        fake_home = Path("/Users/example")
+        with patch.dict("publish_all.os.environ", {}, clear=True), \
+             patch("publish_all.Path.home", return_value=fake_home):
+            cache_dirs = publish_all.playwright_browser_cache_dirs()
+
+        self.assertIn(fake_home / "AppData" / "Local" / "ms-playwright", cache_dirs)
+
+    def test_runtime_preflight_installs_missing_chromium(self):
+        with patch("publish_all.patchright_available", return_value=True), \
+             patch("publish_all.patchright_chromium_installed", return_value=False), \
+             patch("publish_all.install_patchright_chromium", return_value=True) as install:
+            ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
+
+        self.assertTrue(ok)
+        install.assert_called_once()
+
+    def test_runtime_preflight_fails_when_chromium_install_fails(self):
+        with patch("publish_all.patchright_available", return_value=True), \
+             patch("publish_all.patchright_chromium_installed", return_value=False), \
+             patch("publish_all.install_patchright_chromium", return_value=False):
+            ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
+
+        self.assertFalse(ok)
+
+    def test_runtime_preflight_fails_without_patchright_and_does_not_install(self):
+        with patch("publish_all.patchright_available", return_value=False), \
+             patch("publish_all.install_patchright_chromium", return_value=True) as install:
+            ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
+
+        self.assertFalse(ok)
+        install.assert_not_called()
 
 
 if __name__ == "__main__":

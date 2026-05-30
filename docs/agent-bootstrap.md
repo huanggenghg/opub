@@ -27,7 +27,7 @@
 
 1. 把整个仓库给你的 agent 客户端。
 2. 把下面这段启动提示词完整发给它。
-3. 等 agent 完成安装和 CLI 验证后，再继续给它下达登录、上传、定时发布等任务。
+3. 等 agent 完成安装和统一发布入口验证后，再继续给它下达登录、上传、定时发布等任务。
 
 ## 通用启动提示词
 
@@ -49,26 +49,25 @@
 
 1. 默认把仓库根目录视为当前工作目录。
 2. 优先使用 `uv` 管理 Python 环境，不要默认回退到旧的 `requirements.txt`。
-3. 优先使用当前主线 CLI：`sau`。
+3. 优先使用当前主线 CLI：`hgsau publish`。
 4. 优先参考这些文档：
    - `docs/install.md`
    - `docs/CLI.md`
    - `docs/update.md`
-5. 如果需要平台级操作，优先参考这些 skill：
+5. `publish_config.ini` 是主要控制文件，请优先通过它配置内容、素材路径、启用平台和账号文件。
+6. 如果需要平台级操作，优先参考这些 skill：
    - `skills/douyin-upload/`
    - `skills/kuaishou-upload/`
    - `skills/xiaohongshu-upload/`
    - `skills/bilibili-upload/`
-6. 不要默认走历史 `examples/` 和旧 Web 路径，除非当前 CLI 主线不可用。
-7. 如果登录流程生成二维码图片，不要只返回图片路径；请直接展示图片，或者明确告诉我该打开哪个本地图片文件扫码。
-8. 如果是 Bilibili 登录，不要在非交互环境里强行代跑；应改为指导我在本地真实终端执行。
-9. 安装完成后，请优先验证以下命令：
-   - `sau --help`
-   - `sau douyin --help`
-   - `sau kuaishou --help`
-   - `sau xiaohongshu --help`
-   - `sau bilibili --help`
-10. 完成后，请明确输出：
+7. 不要默认走历史 `examples/` 和旧 Web 路径，除非当前 CLI 主线不可用。
+8. 如果登录流程生成二维码图片，不要只返回图片路径；请直接展示图片，或者明确告诉我该打开哪个本地图片文件扫码。
+9. 如果是 Bilibili 登录，不要在非交互环境里强行代跑；应改为指导我在本地真实终端完成扫码。
+10. 安装完成后，请优先验证 `hgsau publish --help`。
+11. 需要执行发布时，请先确认 `publish_config.ini`，然后运行：
+   `hgsau publish`
+12. `hgsau publish` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
+13. 完成后，请明确输出：
    - 你实际执行了哪些命令
    - 哪些验证通过了
    - 当前项目是否已经进入“可继续登录/上传”的状态
@@ -81,30 +80,30 @@
 
 下面这些是你可以继续发给 agent 的任务示例。
 
-### 做一次平台登录
+### 更新发布配置
 
 ```text
-请继续帮我登录小红书账号，使用有头模式，账号名用 `creator`。
+请帮我检查 `publish_config.ini`，把发布平台改成小红书，账号名用 `creator`，素材使用 `videos/demo.mp4`。
 ```
 
 ```text
-请继续帮我登录抖音账号，使用无头模式，账号名用 `creator`。
+请帮我把 `publish_config.ini` 改成定时发布，不要立即发布。
 ```
 
 ### 做一次 CLI 可用性检查
 
 ```text
-请检查 bilibili、douyin、kuaishou、xiaohongshu 四个平台的 CLI 入口是否都可用，并告诉我缺什么依赖。
+请检查统一发布入口是否可用，并告诉我缺什么依赖。
 ```
 
 ### 做一次真实上传
 
 ```text
-请使用 xiaohongshu CLI，帮我上传一个图文草稿，使用定时发布，不要立即发布。
+请按 `publish_config.ini` 帮我发布一次，发布前先说明将启用哪些平台和素材。
 ```
 
 ```text
-请使用 douyin CLI，帮我上传一个视频，优先走当前主线，不要走历史 example。
+请临时覆盖配置，只发布到抖音和微博，视频用 `videos/demo.mp4`，标题用 `标题`。
 ```
 
 ## OpenClaw / Codex / Claude Code 使用建议
@@ -146,3 +145,22 @@
 - `xiaohongshu`
 
 这样比给用户准备四套平台 prompt 更稳，也更容易维护。
+
+## 快速开始
+
+1. 编辑 `publish_config.ini`，配置内容、素材路径、启用平台和账号文件。
+2. 执行统一发布入口：
+
+```bash
+hgsau publish
+```
+
+如需临时覆盖配置：
+
+```bash
+hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
+```
+
+`hgsau publish` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
+
+本项目不维护国际化文档，当前文档以中文优先。

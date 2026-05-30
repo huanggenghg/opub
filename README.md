@@ -2,7 +2,7 @@
 
 `social-auto-upload` 是一个强大的自动化工具，旨在帮助内容创作者和运营者高效地将视频内容一键发布到多个国内外主流社交媒体平台。
 项目实现了对 `抖音`、`Bilibili`、`小红书`、`快手`、`视频号`、`百家号` 以及 `TikTok` 等平台的视频上传、定时发布等功能。
-结合各平台 `uploader` 模块，您可以轻松配置和扩展支持的平台，并通过示例脚本快速上手。
+当前推荐通过 `publish_config.ini` 配置内容、素材、平台和账号，然后执行 `hgsau publish` 完成统一发布流程。
 
 <img src="media/show/tkupload.gif" alt="tiktok show" width="800"/>
 
@@ -38,7 +38,7 @@
 - [💡 功能特性](#💡功能特性)
 - [💾 安装指南](#💾安装指南)
 - [🤖 AI Agent](#🤖ai-agent)
-- [🏁 快速开始](#🏁快速开始)
+- [快速开始](#快速开始)
 - [🗂️ 重构计划](#🗂️重构计划)
 - [📣 近况说明](#📣近况说明)
 - [🐇 项目背景](#🐇项目背景)
@@ -91,8 +91,8 @@ AI的发展毋庸置疑，希望你遇到这种安装和使用，不要再怯场
 这份提示词会引导 agent：
 
 - 优先按当前主线安装项目
-- 优先使用 `uv`、`sau` CLI 和 `skills/`
-- 先验证 `bilibili`、`douyin`、`kuaishou`、`xiaohongshu` 四个平台入口是否可用
+- 优先使用 `uv`、`publish_config.ini` 和 `hgsau publish`
+- 先验证统一发布入口是否可用，再按配置完成发布
 
 
 ### 补充说明：
@@ -106,6 +106,7 @@ AI的发展毋庸置疑，希望你遇到这种安装和使用，不要再怯场
 - 历史 Web 说明请看：[历史 Web 版本说明](./docs/legacy-web.md)
 - 其他单平台 skill 与整合型 skill 仍在开发中
 - `requirements.txt` 目前主要用于历史兼容路径，普通用户不需要优先使用它
+- 本项目不维护国际化文档，当前文档以中文优先。
 
 
 ## 📣近况说明
@@ -141,53 +142,33 @@ AI的发展毋庸置疑，希望你遇到这种安装和使用，不要再怯场
 Web 端相关代码仍然保留，但已经不是当前主线，不保证可直接运行，也不保证与当前 uploader/CLI 完全同步。
 
 
-## 🏁快速开始
+## 快速开始
 
-### 方式 1：使用 CLI
-
-当前抖音、快手、小红书、Bilibili 已经接入 CLI：
+1. 编辑 `publish_config.ini`，配置内容、素材路径、启用平台和账号文件。
+2. 执行统一发布入口：
 
 ```bash
-sau douyin login --account <account_name>
-sau douyin check --account <account_name>
-sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
-sau douyin upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文正文"
-
-sau kuaishou login --account <account_name>
-sau kuaishou check --account <account_name>
-sau kuaishou upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
-sau kuaishou upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文正文"
-
-sau xiaohongshu login --account <account_name>
-sau xiaohongshu check --account <account_name>
-sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
-sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文正文"
-
-sau bilibili login --account <account_name>
-sau bilibili check --account <account_name>
-sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tid 249
+hgsau publish
 ```
 
-补充说明：
+如需临时覆盖配置：
 
-- `creator` 之类的名字只是示例值，真正含义是 `account_name`
-- 一个 `account_name` 对应一个账号文件，可以准备多个账号，也可以按账号名并发执行任务
-- 浏览器平台统一约定：
-- 视频使用 `title + desc + tags`
-- 图文使用 `title + note + tags`
-- Bilibili CLI 不要求用户手动安装 `biliup`
-- 首次运行相关命令时，程序会自动下载 `biliup`
-- 后续运行会自动检查上游 release 并更新
-- Bilibili 登录建议由用户自己在本地真实终端里执行；如果终端二维码显示不完整，可以直接打开当前目录下的 `qrcode.png` 扫码
+```bash
+hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
+```
 
-### 方式 2：使用 examples
+`hgsau publish` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
+
+`publish_config.ini` 是主要控制文件，用于配置内容、素材路径、启用平台、账号文件、定时发布和平台元数据。命令行参数只用于临时覆盖本次运行的配置。
+
+### examples
 
 `examples/` 目录里同时存在两类脚本：
 
 - 当前主线 CLI 包装示例
 - 历史直连 uploader 示例
 
-对抖音、快手、小红书、Bilibili 来说，当前主线优先使用上面的 `sau ...` CLI。
+对抖音、快手、小红书、Bilibili 和微博来说，当前主线优先使用上面的统一发布入口。
 下面这些脚本主要是历史直连 uploader 示例或调试入口：
 
 - `examples/upload_to_douyin.py`

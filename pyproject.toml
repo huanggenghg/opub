@@ -3,7 +3,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hgeng-sau"
+name = "hgsau"
 version = "0.3.0"
 description = "Social media auto uploader"
 readme = "README.md"
@@ -38,7 +38,7 @@ Repository = "https://github.com/huanggenghg/social-auto-upload"
 Issues = "https://github.com/huanggenghg/social-auto-upload/issues"
 
 [project.scripts]
-sau = "sau_cli:main"
+hgsau = "hgsau_cli:main"
 
 [project.optional-dependencies]
 web = [
@@ -50,7 +50,7 @@ web = [
 package = true
 
 [tool.setuptools]
-py-modules = ["conf", "sau_cli", "publish_all"]
+py-modules = ["conf", "hgsau_cli", "publish_all"]
 include-package-data = true
 
 [tool.setuptools.packages.find]

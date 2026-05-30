@@ -278,7 +278,7 @@ async def login_bilibili_account(account_name: str) -> dict:
             "success": False,
             "message": (
                 "Bilibili login requires a local interactive terminal. "
-                f"Please run `sau bilibili login --account {account_name}` yourself in a local terminal. "
+                f"Please run `hgsau` with `bilibili login --account {account_name}` yourself in a local terminal. "
                 "If the terminal QR code does not render completely, open `./qrcode.png` and scan that image."
             ),
             "account_file": str(account_file),
@@ -306,7 +306,7 @@ async def upload_video(request: DouyinVideoUploadRequest) -> Path:
     is_ready = await douyin_setup(str(account_file), handle=False)
     if not is_ready:
         raise RuntimeError(
-            f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
+            f"Douyin cookie is missing or expired: {account_file}. Run `hgsau` with `douyin login --account {request.account_name}` first."
         )
 
     app = DouYinVideo(
@@ -332,7 +332,7 @@ async def upload_note(request: DouyinNoteUploadRequest) -> Path:
     is_ready = await douyin_setup(str(account_file), handle=False)
     if not is_ready:
         raise RuntimeError(
-            f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
+            f"Douyin cookie is missing or expired: {account_file}. Run `hgsau` with `douyin login --account {request.account_name}` first."
         )
 
     app = DouYinNote(
@@ -355,7 +355,7 @@ async def upload_kuaishou_video(request: KuaishouVideoUploadRequest) -> Path:
     is_ready = await ks_setup(str(account_file), handle=False)
     if not is_ready:
         raise RuntimeError(
-            f"Kuaishou cookie is missing or expired: {account_file}. Run `sau kuaishou login --account {request.account_name}` first."
+            f"Kuaishou cookie is missing or expired: {account_file}. Run `hgsau` with `kuaishou login --account {request.account_name}` first."
         )
 
     app = KSVideo(
@@ -379,7 +379,7 @@ async def upload_kuaishou_note(request: KuaishouNoteUploadRequest) -> Path:
     is_ready = await ks_setup(str(account_file), handle=False)
     if not is_ready:
         raise RuntimeError(
-            f"Kuaishou cookie is missing or expired: {account_file}. Run `sau kuaishou login --account {request.account_name}` first."
+            f"Kuaishou cookie is missing or expired: {account_file}. Run `hgsau` with `kuaishou login --account {request.account_name}` first."
         )
 
     app = KSNote(
@@ -402,7 +402,7 @@ async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest) -> di
     is_ready = await xiaohongshu_setup(str(account_file), handle=False)
     if not is_ready:
         raise RuntimeError(
-            f"Xiaohongshu cookie is missing or expired: {account_file}. Run `sau xiaohongshu login --account {request.account_name}` first."
+            f"Xiaohongshu cookie is missing or expired: {account_file}. Run `hgsau` with `xiaohongshu login --account {request.account_name}` first."
         )
 
     app = XiaoHongShuVideo(
@@ -426,7 +426,7 @@ async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest) -> dict
     is_ready = await xiaohongshu_setup(str(account_file), handle=False)
     if not is_ready:
         raise RuntimeError(
-            f"Xiaohongshu cookie is missing or expired: {account_file}. Run `sau xiaohongshu login --account {request.account_name}` first."
+            f"Xiaohongshu cookie is missing or expired: {account_file}. Run `hgsau` with `xiaohongshu login --account {request.account_name}` first."
         )
 
     app = XiaoHongShuNote(
@@ -449,7 +449,7 @@ async def upload_bilibili_video(request: BilibiliVideoUploadRequest) -> Path:
     account_file = resolve_account_file("bilibili", request.account_name)
     if not account_file.exists():
         raise RuntimeError(
-            f"Bilibili account file is missing: {account_file}. Run `sau bilibili login --account {request.account_name}` first."
+            f"Bilibili account file is missing: {account_file}. Run `hgsau` with `bilibili login --account {request.account_name}` first."
         )
 
     arguments = [
@@ -502,7 +502,7 @@ def add_runtime_flags(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     parser = argparse.ArgumentParser(
-        prog="sau",
+        prog="hgsau",
         description="CLI for social-auto-upload.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

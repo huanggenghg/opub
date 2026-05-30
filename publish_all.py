@@ -9,8 +9,10 @@ import json
 import os
 import random
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -45,6 +47,18 @@ TITLE_LIMITS = {
 }
 
 
+@dataclass
+class PublishOverrides:
+    platforms: Optional[str] = None
+    video: Optional[str] = None
+    title: Optional[str] = None
+    desc: Optional[str] = None
+    tags: Optional[str] = None
+    schedule: Optional[datetime] = None
+    start_from: Optional[int] = None
+    force: bool = False
+
+
 def load_content_templates() -> list:
     """加载内容模板"""
     if CONTENT_TEMPLATES_FILE.exists():
@@ -72,7 +86,13 @@ def fill_empty_content(title: str, desc: str) -> tuple:
     return title, desc
 
 
-def get_video_content(video_file: str, default_title: str, default_desc: str, auto_generate: bool = True) -> tuple:
+def get_video_content(
+    video_file: str,
+    default_title: str,
+    default_desc: str,
+    auto_generate: bool = True,
+    force: bool = False,
+) -> tuple:
     """
     获取视频的标题和描述
 
@@ -87,6 +107,7 @@ def get_video_content(video_file: str, default_title: str, default_desc: str, au
         default_title: 默认标题（来自 publish_config.ini）
         default_desc: 默认描述（来自 publish_config.ini）
         auto_generate: 是否自动生成配置（默认 True）
+        force: 是否强制重新生成，忽略已有同名配置
 
     Returns:
         (title, desc) 元组
@@ -95,7 +116,7 @@ def get_video_content(video_file: str, default_title: str, default_desc: str, au
 
     # 1. 最高优先：视频同名 JSON 配置文件
     config = load_video_config(video_file)
-    if config:
+    if config and not force:
         title = config.get("title", "")
         desc = config.get("desc", "")
         if title or desc:
@@ -103,7 +124,7 @@ def get_video_content(video_file: str, default_title: str, default_desc: str, au
             return title, desc
 
     # 2. 自动生成配置（如果启用且无配置文件）
-    if auto_generate and not config_exists(video_file):
+    if auto_generate and (force or not config_exists(video_file)):
         print(f"[AUTO] 视频无配置文件，正在自动生成...")
         try:
             from utils.video_analyzer import (
@@ -155,7 +176,9 @@ def get_video_content(video_file: str, default_title: str, default_desc: str, au
 
 def read_config(config_file: str = "publish_config.ini") -> dict:
     """读取配置文件"""
-    config_path = BASE_DIR / config_file
+    config_path = Path(config_file)
+    if not config_path.is_absolute():
+        config_path = BASE_DIR / config_path
     if not config_path.exists():
         raise FileNotFoundError(f"配置文件不存在: {config_path}")
 
@@ -167,6 +190,93 @@ def read_config(config_file: str = "publish_config.ini") -> dict:
         "platforms": dict(parser["platforms"]),
     }
     return config
+
+
+def _split_csv(value: Optional[str]) -> list:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _discover_account_files() -> Dict[str, str]:
+    cookies_dir = BASE_DIR / "cookies"
+    platform_prefixes = {
+        "douyin": "douyin_",
+        "kuaishou": "kuaishou_",
+        "xiaohongshu": "xiaohongshu_",
+        "weibo": "weibo_",
+        "tencent": "tencent_",
+        "baijiahao": "baijiahao_",
+        "tk": "tk_",
+    }
+    platform_subdirs = {
+        "douyin": "douyin_uploader",
+        "kuaishou": "ks_uploader",
+        "xiaohongshu": "xiaohongshu_uploader",
+        "weibo": "weibo_uploader",
+        "tencent": "tencent_uploader",
+        "baijiahao": "baijiahao_uploader",
+        "tk": "tk_uploader",
+    }
+
+    platforms = {}
+    for platform, prefix in platform_prefixes.items():
+        flat_files = sorted(cookies_dir.glob(f"{prefix}*.json"))
+        subdir = platform_subdirs[platform]
+        subdir_files = sorted((cookies_dir / subdir).glob("*.json")) if (cookies_dir / subdir).exists() else []
+        account_files = flat_files + [file for file in subdir_files if file not in flat_files]
+        if account_files:
+            rel_paths = [str(file.relative_to(BASE_DIR)) for file in account_files]
+            platforms[f"{platform}_account"] = ", ".join(rel_paths)
+    return platforms
+
+
+def default_params_from_overrides() -> Dict[str, Any]:
+    return {
+        "content_type": "video",
+        "title": "",
+        "desc": "",
+        "tags": [],
+        "video_file": "",
+        "images": [],
+        "publish_strategy": "immediate",
+        "publish_time": None,
+        "enabled_platforms": [],
+        "platforms": _discover_account_files(),
+        "convert_to_video": False,
+        "video_duration": 5,
+        "start_from": 1,
+    }
+
+
+def apply_overrides(params: Dict[str, Any], overrides: Optional[PublishOverrides]) -> Dict[str, Any]:
+    merged = dict(params)
+    if overrides is None:
+        return merged
+
+    if overrides.platforms is not None:
+        merged["enabled_platforms"] = _split_csv(overrides.platforms)
+    if overrides.video is not None:
+        merged["video_file"] = overrides.video
+    if overrides.title is not None:
+        merged["title"] = overrides.title
+    if overrides.desc is not None:
+        merged["desc"] = overrides.desc
+    if overrides.tags is not None:
+        merged["tags"] = _split_csv(overrides.tags)
+    if overrides.schedule is not None:
+        merged["publish_strategy"] = "scheduled"
+        merged["publish_time"] = overrides.schedule
+    if overrides.start_from is not None:
+        merged["start_from"] = overrides.start_from
+    if overrides.force:
+        merged["force"] = True
+
+    return merged
+
+
+def runtime_preflight() -> bool:
+    return True
 
 
 def parse_config(config: dict) -> dict:
@@ -710,19 +820,58 @@ def print_results(results: dict):
         print(f"{platform_name}: {status}")
 
 
-async def main():
-    """主函数"""
-    try:
-        config = read_config()
-    except FileNotFoundError as e:
-        print(f"❌ 错误: {e}")
-        return
+async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
+    print_header(video_params)
 
-    params = parse_config(config)
+    results = {}
+    total = len(video_params["enabled_platforms"])
 
+    for i, platform in enumerate(video_params["enabled_platforms"], 1):
+        platform_name = PLATFORM_NAMES.get(platform, platform)
+
+        # 获取账号文件（支持逗号分隔多账号）
+        account_key = f"{platform}_account"
+        account_file_str = video_params["platforms"].get(account_key, "")
+        account_files = [af.strip() for af in account_file_str.split(",") if af.strip()]
+
+        if not account_files:
+            print(f"[{i}/{total}] 发布到 {platform_name}...")
+            results[platform] = {"success": False, "message": f"未配置 {platform} 账号"}
+            print("  ❌ 失败: 未配置账号")
+            continue
+
+        for acct_idx, account_file in enumerate(account_files):
+            if len(account_files) > 1:
+                print(f"[{i}/{total}] 发布到 {platform_name} (账号 {acct_idx + 1}/{len(account_files)})...")
+            else:
+                print(f"[{i}/{total}] 发布到 {platform_name}...")
+
+            platform_params = {
+                **video_params,
+                "account_file": account_file,
+            }
+
+            result = await publish_to_platform(platform, platform_params)
+            result_key = platform if len(account_files) == 1 else f"{platform}_{acct_idx + 1}"
+            results[result_key] = result
+
+            if result["success"]:
+                print("  ✅ 成功")
+            else:
+                print(f"  ❌ 失败: {result['message']}")
+
+    print_results(results)
+    return results
+
+
+async def run_publish_with_params(params: Dict[str, Any]) -> int:
     if not params["enabled_platforms"]:
         print("❌ 错误: 未配置启用平台")
-        return
+        return 1
+
+    if not runtime_preflight():
+        print("❌ 错误: 运行环境检查失败")
+        return 1
 
     # 注意：标题为空时，会在视频处理流程中自动生成或使用模板填充
     # 不在此处检查标题，让 get_video_content() 处理
@@ -731,7 +880,7 @@ async def main():
     if params["content_type"] == "note" and params["convert_to_video"]:
         if not params["images"]:
             print("❌ 错误: 图文转视频需要提供图片")
-            return
+            return 1
 
         print("正在将图片转换为视频...")
         try:
@@ -748,13 +897,13 @@ async def main():
             print(f"[OK] 视频已生成: {video_path}\n")
         except Exception as e:
             print(f"[ERROR] 图片转视频失败: {e}")
-            return
+            return 1
 
     # 获取视频文件列表
     video_files = get_video_files(params["video_file"])
     if not video_files:
         print("❌ 错误: 未找到视频文件")
-        return
+        return 1
 
     print(f"找到 {len(video_files)} 个视频文件:")
     for vf in video_files:
@@ -776,7 +925,12 @@ async def main():
         print(f"文件: {os.path.basename(video_file)}")
 
         # 使用视频配置文件或默认配置/模板填充
-        title, desc = get_video_content(video_file, params["title"], params["desc"])
+        title, desc = get_video_content(
+            video_file,
+            params["title"],
+            params["desc"],
+            force=params.get("force", False),
+        )
 
         # 更新参数
         video_params = {
@@ -786,54 +940,14 @@ async def main():
             "desc": desc,
         }
 
-        print_header(video_params)
-
-        results = {}
-        total = len(video_params["enabled_platforms"])
-
-        for i, platform in enumerate(video_params["enabled_platforms"], 1):
-            platform_name = PLATFORM_NAMES.get(platform, platform)
-
-            # 获取账号文件（支持逗号分隔多账号）
-            account_key = f"{platform}_account"
-            account_file_str = video_params["platforms"].get(account_key, "")
-            account_files = [af.strip() for af in account_file_str.split(",") if af.strip()]
-
-            if not account_files:
-                print(f"[{i}/{total}] 发布到 {platform_name}...")
-                results[platform] = {"success": False, "message": f"未配置 {platform} 账号"}
-                print(f"  ❌ 失败: 未配置账号")
-                continue
-
-            for acct_idx, account_file in enumerate(account_files):
-                if len(account_files) > 1:
-                    print(f"[{i}/{total}] 发布到 {platform_name} (账号 {acct_idx + 1}/{len(account_files)})...")
-                else:
-                    print(f"[{i}/{total}] 发布到 {platform_name}...")
-
-                platform_params = {
-                    **video_params,
-                    "account_file": account_file,
-                }
-
-                result = await publish_to_platform(platform, platform_params)
-                result_key = platform if len(account_files) == 1 else f"{platform}_{acct_idx + 1}"
-                results[result_key] = result
-
-                if result["success"]:
-                    print(f"  ✅ 成功")
-                else:
-                    print(f"  ❌ 失败: {result['message']}")
-
-        print_results(results)
-        all_results[video_file] = results
+        all_results[video_file] = await publish_one_item(video_params)
 
     # 打印总体汇总
     print("\n========== 总体发布汇总 ==========")
     success_count = 0
     fail_count = 0
-    for video_file, results in all_results.items():
-        for platform, result in results.items():
+    for results in all_results.values():
+        for result in results.values():
             if result["success"]:
                 success_count += 1
             else:
@@ -841,8 +955,42 @@ async def main():
     print(f"成功: {success_count} 次")
     print(f"失败: {fail_count} 次")
 
-    print_results(results)
+    return 0
+
+
+async def run_publish(
+    config_file: str = "publish_config.ini",
+    overrides: Optional[PublishOverrides] = None,
+) -> int:
+    config_path = Path(config_file)
+    if not config_path.is_absolute():
+        config_path = BASE_DIR / config_path
+
+    if config_path.exists():
+        config = read_config(str(config_path))
+        params = parse_config(config)
+    else:
+        if overrides is None or overrides.platforms is None or overrides.video is None:
+            print(f"❌ 错误: 配置文件不存在: {config_path}")
+            print("请提供配置文件，或同时指定 --platforms 和 --video")
+            return 1
+        params = default_params_from_overrides()
+
+    params = apply_overrides(params, overrides)
+    return await run_publish_with_params(params)
+
+
+def run_publish_sync(
+    config_file: str = "publish_config.ini",
+    overrides: Optional[PublishOverrides] = None,
+) -> int:
+    return asyncio.run(run_publish(config_file, overrides))
+
+
+async def main() -> int:
+    """主函数"""
+    return await run_publish()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

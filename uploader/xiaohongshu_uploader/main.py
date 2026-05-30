@@ -66,8 +66,13 @@ def _build_login_result(
 
 
 async def _open_xhs_qrcode_panel(page: Page) -> None:
-    # 主站登录页面的选择器
+    # 主站登录页面的选择器，兼容新旧登录框结构。
     login_box = page.locator(".login-container").first
+    if not await login_box.count():
+        login_box = page.locator(".login-box-container").first
+    if not await login_box.count():
+        login_box = page.locator("div[class*='login-box']").first
+
     await login_box.wait_for(state="visible", timeout=30000)
 
     # 检查是否已经是扫码模式
@@ -94,6 +99,26 @@ async def _find_xhs_qrcode_locator(page: Page):
 
     # 备用选择器
     qrcode_img = page.locator('.login-container img').first
+    if await qrcode_img.count():
+        return qrcode_img
+
+    # 旧版登录框：二维码在“APP扫一扫登录”文案后续兄弟节点中。
+    qrcode_img = (
+        page.locator(".login-box-container")
+        .get_by_text("APP扫一扫登录")
+        .filter(visible=True)
+        .locator("xpath=..//following-sibling::div//img")
+        .nth(0)
+    )
+    if await qrcode_img.count():
+        return qrcode_img
+
+    qrcode_img = (
+        page.locator("div[class*='login-box']")
+        .locator("div:has-text('扫一扫')")
+        .locator("xpath=..//following-sibling::div//img")
+        .nth(0)
+    )
     if await qrcode_img.count():
         return qrcode_img
 

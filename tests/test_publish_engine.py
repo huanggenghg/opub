@@ -176,5 +176,72 @@ class RuntimePreflightTests(unittest.TestCase):
         install.assert_not_called()
 
 
+class AccountLoginFlowTests(unittest.TestCase):
+    def test_publish_one_item_triggers_login_before_publish(self):
+        params = {
+            "enabled_platforms": ["douyin"],
+            "platforms": {"douyin_account": "cookies/douyin.json"},
+            "content_type": "video",
+            "video_file": "videos/demo.mp4",
+            "title": "标题",
+            "desc": "描述",
+            "tags": [],
+            "publish_strategy": "immediate",
+            "publish_time": None,
+            "convert_to_video": False,
+        }
+
+        with patch("publish_all.ensure_account_login", new=AsyncMock(return_value=True)) as ensure_login, \
+             patch("publish_all.publish_to_platform", new=AsyncMock(return_value={"success": True, "message": "发布成功"})) as publish:
+            results = publish_all.run_async_for_test(publish_all.publish_one_item(params))
+
+        ensure_login.assert_awaited_once_with("douyin", "cookies/douyin.json")
+        publish.assert_awaited_once()
+        self.assertTrue(results["douyin"]["success"])
+
+    def test_publish_one_item_skips_publish_when_login_fails(self):
+        params = {
+            "enabled_platforms": ["douyin"],
+            "platforms": {"douyin_account": "cookies/douyin.json"},
+            "content_type": "video",
+            "video_file": "videos/demo.mp4",
+            "title": "标题",
+            "desc": "描述",
+            "tags": [],
+            "publish_strategy": "immediate",
+            "publish_time": None,
+            "convert_to_video": False,
+        }
+
+        with patch("publish_all.ensure_account_login", new=AsyncMock(return_value=False)), \
+             patch("publish_all.publish_to_platform", new=AsyncMock(return_value={"success": True, "message": "发布成功"})) as publish:
+            results = publish_all.run_async_for_test(publish_all.publish_one_item(params))
+
+        publish.assert_not_awaited()
+        self.assertFalse(results["douyin"]["success"])
+        self.assertIn("登录失败", results["douyin"]["message"])
+
+    def test_publish_one_item_skips_login_for_unsupported_platforms(self):
+        params = {
+            "enabled_platforms": ["bilibili"],
+            "platforms": {"bilibili_account": "cookies/bili.json"},
+            "content_type": "video",
+            "video_file": "videos/demo.mp4",
+            "title": "标题",
+            "desc": "描述",
+            "tags": [],
+            "publish_strategy": "immediate",
+            "publish_time": None,
+            "convert_to_video": False,
+        }
+
+        with patch("publish_all.ensure_account_login", new=AsyncMock()) as ensure_login:
+            results = publish_all.run_async_for_test(publish_all.publish_one_item(params))
+
+        ensure_login.assert_not_awaited()
+        self.assertFalse(results["bilibili"]["success"])
+        self.assertIn("暂未实现", results["bilibili"]["message"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -525,15 +525,20 @@ async def ensure_login(platform: str, account_file: str) -> bool:
         return False
 
 
+async def ensure_account_login(platform: str, account_file: str) -> bool:
+    resolved_account = resolve_path(account_file)
+    return await ensure_login(platform, resolved_account)
+
+
+def platform_requires_account_login(platform: str) -> bool:
+    return platform not in {"bilibili", "tk"}
+
+
 async def publish_to_douyin(params: dict) -> dict:
     """发布到抖音"""
     from uploader.douyin_uploader.main import DouYinVideo, DouYinNote
 
     account_file = resolve_path(params["account_file"])
-
-    # 检查/触发登录
-    if not await ensure_login("douyin", account_file):
-        return {"success": False, "message": "抖音登录失败"}
 
     title = truncate_title(params["title"], "douyin")
     tags = params["tags"]
@@ -588,10 +593,6 @@ async def publish_to_xiaohongshu(params: dict) -> dict:
     from uploader.xiaohongshu_uploader.main import XiaoHongShuVideo, XiaoHongShuNote
 
     account_file = resolve_path(params["account_file"])
-
-    # 检查/触发登录
-    if not await ensure_login("xiaohongshu", account_file):
-        return {"success": False, "message": "小红书登录失败"}
 
     title = truncate_title(params["title"], "xiaohongshu")
     tags = params["tags"]
@@ -656,10 +657,6 @@ async def publish_to_kuaishou(params: dict) -> dict:
 
     account_file = resolve_path(params["account_file"])
 
-    # 检查/触发登录
-    if not await ensure_login("kuaishou", account_file):
-        return {"success": False, "message": "快手登录失败"}
-
     title = truncate_title(params["title"], "kuaishou")
     tags = params["tags"]
     publish_strategy = params["publish_strategy"]
@@ -722,10 +719,6 @@ async def publish_to_tencent(params: dict) -> dict:
 
     account_file = resolve_path(params["account_file"])
 
-    # 检查/触发登录
-    if not await ensure_login("tencent", account_file):
-        return {"success": False, "message": "微信视频号登录失败"}
-
     title = truncate_title(params["title"], "tencent")
     tags = params["tags"]
     publish_strategy = params["publish_strategy"]
@@ -762,10 +755,6 @@ async def publish_to_baijiahao(params: dict) -> dict:
 
     account_file = resolve_path(params["account_file"])
 
-    # 检查/触发登录
-    if not await ensure_login("baijiahao", account_file):
-        return {"success": False, "message": "百家号登录失败"}
-
     title = truncate_title(params["title"], "baijiahao")
     tags = params["tags"]
     publish_strategy = params["publish_strategy"]
@@ -800,10 +789,6 @@ async def publish_to_weibo(params: dict) -> dict:
     from utils.excel_writer import write_video_link
 
     account_file = resolve_path(params["account_file"])
-
-    # 检查/触发登录
-    if not await ensure_login("weibo", account_file):
-        return {"success": False, "message": "微博登录失败"}
 
     title = truncate_title(params["title"], "weibo")
     tags = params["tags"]
@@ -943,8 +928,14 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
                 "account_file": account_file,
             }
 
-            result = await publish_to_platform(platform, platform_params)
             result_key = platform if len(account_files) == 1 else f"{platform}_{acct_idx + 1}"
+
+            if platform_requires_account_login(platform) and not await ensure_account_login(platform, account_file):
+                results[result_key] = {"success": False, "message": f"登录失败: {platform_name}"}
+                print("  失败: 登录失败")
+                continue
+
+            result = await publish_to_platform(platform, platform_params)
             results[result_key] = result
 
             if result["success"]:

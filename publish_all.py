@@ -1027,18 +1027,12 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
 
     # 打印总体汇总
     print("\n========== 总体发布汇总 ==========")
-    success_count = 0
-    fail_count = 0
-    for results in all_results.values():
-        for result in results.values():
-            if result["success"]:
-                success_count += 1
-            else:
-                fail_count += 1
+    success_count = sum(1 for results in all_results.values() for result in results.values() if result["success"])
+    fail_count = sum(1 for results in all_results.values() for result in results.values() if not result["success"])
     print(f"成功: {success_count} 次")
     print(f"失败: {fail_count} 次")
 
-    return 0
+    return 0 if fail_count == 0 else 1
 
 
 async def run_publish(

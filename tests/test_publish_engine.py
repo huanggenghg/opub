@@ -243,5 +243,64 @@ class AccountLoginFlowTests(unittest.TestCase):
         self.assertIn("暂未实现", results["bilibili"]["message"])
 
 
+class PublishFailurePolicyTests(unittest.TestCase):
+    def test_publish_one_item_continues_after_platform_failure(self):
+        params = {
+            "enabled_platforms": ["douyin", "weibo"],
+            "platforms": {
+                "douyin_account": "cookies/douyin.json",
+                "weibo_account": "cookies/weibo.json",
+            },
+            "content_type": "video",
+            "video_file": "videos/demo.mp4",
+            "title": "标题",
+            "desc": "描述",
+            "tags": [],
+            "publish_strategy": "immediate",
+            "publish_time": None,
+            "convert_to_video": False,
+        }
+
+        async def fake_publish(platform, publish_params):
+            if platform == "douyin":
+                return {"success": False, "message": "发布失败"}
+            return {"success": True, "message": "发布成功"}
+
+        with patch("publish_all.ensure_account_login", new=AsyncMock(return_value=True)), \
+             patch("publish_all.publish_to_platform", new=AsyncMock(side_effect=fake_publish)):
+            results = publish_all.run_async_for_test(publish_all.publish_one_item(params))
+
+        self.assertFalse(results["douyin"]["success"])
+        self.assertTrue(results["weibo"]["success"])
+
+    def test_run_publish_with_params_returns_one_when_any_publish_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video_path = Path(tmp_dir) / "demo.mp4"
+            video_path.write_bytes(b"video")
+            params = {
+                "enabled_platforms": ["douyin"],
+                "platforms": {"douyin_account": "cookies/douyin.json"},
+                "content_type": "video",
+                "video_file": str(video_path),
+                "images": [],
+                "title": "标题",
+                "desc": "描述",
+                "tags": [],
+                "publish_strategy": "immediate",
+                "publish_time": None,
+                "convert_to_video": False,
+                "video_duration": 5,
+                "start_from": 1,
+            }
+
+            with patch("publish_all.runtime_preflight", new=AsyncMock(return_value=True)), \
+                 patch("publish_all.get_video_content", return_value=("标题", "描述")), \
+                 patch("publish_all.publish_one_item", new=AsyncMock(return_value={"douyin": {"success": False, "message": "发布失败"}})) as publish_one_item:
+                code = publish_all.run_async_for_test(publish_all.run_publish_with_params(params))
+
+        publish_one_item.assert_awaited_once()
+        self.assertEqual(code, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

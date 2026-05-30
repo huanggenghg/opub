@@ -27,11 +27,11 @@ The project consists of a Python backend and a Vue.js frontend.
 
 **Command-line Interface:**
 
-The project also provides a command-line interface (CLI) for users who prefer to work from the terminal. For new Douyin CLI work, prefer the `sau douyin ...` entrypoint over legacy example scripts.
+The project provides one public command-line workflow for terminal users:
 
-*   `login`: To log in to the Douyin uploader account.
-*   `check`: To verify whether the saved Douyin cookie is still valid.
-*   `upload`: To upload one video file with explicit metadata flags.
+*   `hgsau publish`: Read `publish_config.ini`, validate runtime dependencies, check account login per enabled platform, publish, and print a summary.
+
+Platform, account, media, metadata, and schedule settings should be configured in `publish_config.ini`. Standalone platform login/check/upload CLI commands are no longer part of the current mainline.
 
 ## Building and Running
 
@@ -54,7 +54,7 @@ The project also provides a command-line interface (CLI) for users who prefer to
 
 4.  **Run the backend server:**
     ```bash
-    python sau_backend.py
+    python hgsau_backend.py
     ```
     The backend server will start on `http://localhost:5409`.
 
@@ -62,7 +62,7 @@ The project also provides a command-line interface (CLI) for users who prefer to
 
 1.  **Navigate to the frontend directory:**
     ```bash
-    cd sau_frontend
+    cd hgsau_frontend
     ```
 
 2.  **Install dependencies:**
@@ -78,37 +78,24 @@ The project also provides a command-line interface (CLI) for users who prefer to
 
 ### Command-line Interface
 
-To use the CLI, you can run the `cli_main.py` script with the appropriate arguments.
-
-**Login:**
+Install the editable package and run the unified publish entry:
 
 ```bash
-sau douyin login --account <account_name>
+uv pip install -e .
+hgsau publish
 ```
 
-**Check:**
+Temporary overrides are allowed for one publish run:
 
 ```bash
-sau douyin check --account <account_name>
-```
-
-**Upload:**
-
-```bash
-sau douyin upload --account <account_name> --file <video_file> --title <title> [--tags tag1,tag2] [--schedule YYYY-MM-DD HH:MM]
-```
-
-**Install bundled skill:**
-
-```bash
-sau skill install
+hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 ```
 
 ## Development Conventions
 
 *   The backend code is located in the root directory and the `myUtils` and `uploader` directories.
-*   The frontend code is located in the `sau_frontend` directory.
+*   The frontend code is located in the `hgsau_frontend` directory.
 *   The project uses a SQLite database for data storage. The database file is located at `db/database.db`.
 *   The `conf.example.py` file should be copied to `conf.py` and configured with the appropriate settings.
 *   The `requirements.txt` file lists the Python dependencies.
-*   The `package.json` file in the `sau_frontend` directory lists the frontend dependencies.
+*   The `package.json` file in the `hgsau_frontend` directory lists the frontend dependencies.

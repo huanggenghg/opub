@@ -142,14 +142,7 @@ hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 
 8. 如果用户明确在使用 skill 系统，再引导其阅读：
 
-- `skills/douyin-upload/SKILL.md`
-- `skills/douyin-upload/references/cli-contract.md`
-- `skills/kuaishou-upload/SKILL.md`
-- `skills/kuaishou-upload/references/cli-contract.md`
-- `skills/xiaohongshu-upload/SKILL.md`
-- `skills/xiaohongshu-upload/references/cli-contract.md`
-- `skills/bilibili-upload/SKILL.md`
-- `skills/bilibili-upload/references/cli-contract.md`
+- `skills/hgsau-cli/SKILL.md`
 
 ### 对 agent 的额外说明
 

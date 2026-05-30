@@ -4,7 +4,7 @@ WORKDIR /app
 
 RUN npm config set registry https://registry.npmmirror.com
 
-COPY sau_frontend .
+COPY hgsau_frontend .
 
 RUN npm install
 
@@ -60,4 +60,4 @@ RUN mkdir -p /app/cookiesFile
 
 EXPOSE 5409
 
-CMD ["python", "sau_backend.py"]
+CMD ["python", "hgsau_backend.py"]

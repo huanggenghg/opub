@@ -20,11 +20,7 @@ hgsau publish
 
 - CLI 包装层很薄，只负责解析 `hgsau publish` 参数。
 - `publish_all.py` 是统一发布引擎，负责读取配置、合并临时覆盖、运行环境预检、账号登录校验、发布和结果汇总。
-- 如果需要给 OpenClaw、Codex 等 agent 使用，可参考仓库内 skill：
-  - `skills/douyin-upload/`
-  - `skills/kuaishou-upload/`
-  - `skills/xiaohongshu-upload/`
-  - `skills/bilibili-upload/`
+- 如果需要给 OpenClaw、Codex 等 agent 使用，可参考仓库内 skill：`skills/hgsau-cli/`
 
 ## 安装 CLI 入口
 
@@ -65,15 +61,12 @@ hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 --config publish_config.ini
 --platforms douyin,weibo
 --video videos/demo.mp4
---images videos/1.png,videos/2.png
 --title "示例标题"
 --desc "示例简介"
 --tags 运动,训练
---account creator
 --schedule "2026-03-24 21:30"
---headless
---headed
---debug
+--start-from 5
+--force
 ```
 
 ## 配置优先级
@@ -105,4 +98,4 @@ hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 
 本项目不维护国际化文档，当前文档以中文优先。
 
-后续维护 CLI 时，优先看统一 CLI 包装层、`publish_all.py`、`uploader/` 和 `skills/`。
+后续维护 CLI 时，优先看统一 CLI 包装层、`publish_all.py`、`uploader/` 和 `skills/hgsau-cli/`。

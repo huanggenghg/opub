@@ -99,12 +99,9 @@ AI的发展毋庸置疑，希望你遇到这种安装和使用，不要再怯场
 
 - CLI 使用请看：[CLI 使用说明](./docs/CLI.md)
 - 如果你准备在 `OpenClaw`、`Codex`、`Claude Code / cc` 里使用本项目，先看：[Agent Bootstrap Prompt](./docs/agent-bootstrap.md)
-- agent / skill 请看：[Douyin Upload Skill](./skills/douyin-upload/SKILL.md)
-- agent / skill 请看：[Kuaishou Upload Skill](./skills/kuaishou-upload/SKILL.md)
-- agent / skill 请看：[Xiaohongshu Upload Skill](./skills/xiaohongshu-upload/SKILL.md)
-- agent / skill 请看：[Bilibili Upload Skill](./skills/bilibili-upload/SKILL.md)
+- agent / skill 请看：[hgsau CLI Skill](./skills/hgsau-cli/SKILL.md)
 - 历史 Web 说明请看：[历史 Web 版本说明](./docs/legacy-web.md)
-- 其他单平台 skill 与整合型 skill 仍在开发中
+- 不再维护单平台独立 CLI skill，agent 统一走 `hgsau publish`
 - `requirements.txt` 目前主要用于历史兼容路径，普通用户不需要优先使用它
 - 本项目不维护国际化文档，当前文档以中文优先。
 
@@ -168,7 +165,7 @@ hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 - 当前主线 CLI 包装示例
 - 历史直连 uploader 示例
 
-对抖音、快手、小红书、Bilibili 和微博来说，当前主线优先使用上面的统一发布入口。
+对抖音、快手、小红书、Bilibili 和微博来说，当前主线只推荐使用上面的统一发布入口。
 下面这些脚本主要是历史直连 uploader 示例或调试入口：
 
 - `examples/upload_to_douyin.py`

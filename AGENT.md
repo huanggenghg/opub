@@ -107,10 +107,7 @@ hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 - `docs/CLI.md`
 - `docs/update.md`
 - `docs/agent-bootstrap.md`
-- `skills/douyin-upload/`
-- `skills/kuaishou-upload/`
-- `skills/xiaohongshu-upload/`
-- `skills/bilibili-upload/`
+- `skills/hgsau-cli/`
 
 ## Notes For Maintenance
 

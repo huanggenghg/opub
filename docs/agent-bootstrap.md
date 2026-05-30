@@ -17,7 +17,7 @@
 
 - 安装说明
 - CLI 文档
-- 平台 skill
+- 统一 CLI skill
 
 但这些内容更偏向“agent 进入仓库之后怎么执行”。
 
@@ -55,11 +55,7 @@
    - `docs/CLI.md`
    - `docs/update.md`
 5. `publish_config.ini` 是主要控制文件，请优先通过它配置内容、素材路径、启用平台和账号文件。
-6. 如果需要平台级操作，优先参考这些 skill：
-   - `skills/douyin-upload/`
-   - `skills/kuaishou-upload/`
-   - `skills/xiaohongshu-upload/`
-   - `skills/bilibili-upload/`
+6. 如果需要 agent skill，优先参考 `skills/hgsau-cli/`。
 7. 不要默认走历史 `examples/` 和旧 Web 路径，除非当前 CLI 主线不可用。
 8. 如果登录流程生成二维码图片，不要只返回图片路径；请直接展示图片，或者明确告诉我该打开哪个本地图片文件扫码。
 9. 如果是 Bilibili 登录，不要在非交互环境里强行代跑；应改为指导我在本地真实终端完成扫码。
@@ -117,7 +113,7 @@
 ### Codex
 
 - 建议先让它完成 bootstrap，再继续发平台任务
-- 让它优先使用 `docs/install.md`、`docs/CLI.md` 和 `skills/`
+- 让它优先使用 `docs/install.md`、`docs/CLI.md` 和 `skills/hgsau-cli/`
 - 不要让它一开始自由探索整个仓库，否则容易走到历史路径
 
 ### Claude Code / cc

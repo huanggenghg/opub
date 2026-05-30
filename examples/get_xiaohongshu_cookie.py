@@ -1,9 +1,9 @@
 """
-当前主线优先使用 CLI：
+当前主线仅提供统一发布入口：
 
-    sau xiaohongshu login --account <account_name>
+    hgsau publish
 
-这个脚本保留为小红书 uploader 的调试入口 / 历史直连路径。
+发布流程会按平台配置校验登录状态；这个脚本仅保留为小红书 uploader 的调试直连路径。
 """
 
 import asyncio

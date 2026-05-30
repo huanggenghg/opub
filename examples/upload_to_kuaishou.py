@@ -1,9 +1,9 @@
-"""Legacy direct-uploader example for Kuaishou.
+"""快手 uploader 调试直连示例。
 
-Current mainline usage prefers:
-    sau kuaishou login --account creator
-    sau kuaishou upload-video ...
-    sau kuaishou upload-note ...
+当前主线仅提供统一发布入口：
+    hgsau publish
+
+发布平台、账号和内容通过配置文件声明；登录校验由发布流程统一触发。
 """
 
 import asyncio

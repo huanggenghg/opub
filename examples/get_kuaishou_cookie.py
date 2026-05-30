@@ -1,7 +1,9 @@
-"""Legacy direct login helper for Kuaishou.
+"""快手登录调试直连示例。
 
-Current mainline usage prefers:
-    sau kuaishou login --account creator
+当前主线仅提供统一发布入口：
+    hgsau publish
+
+发布流程会按平台配置校验登录状态；这个脚本仅保留为 uploader 调试直连路径。
 """
 
 import asyncio

@@ -1,102 +1,56 @@
 ---
 name: hgsau-cli
-description: Use when operating this repository's unified hgsau CLI publish flow. The only supported public command is `hgsau publish`; platforms, accounts, media, metadata, and schedule are configured through `publish_config.ini` or temporary publish overrides.
+description: Use when 用户要用 hgsau 发布/上传视频、配置多平台发布、发布到抖音/小红书/快手/微博/B站/视频号/百家号/TikTok，或排查 hgsau publish、publish_config.ini、账号登录校验、浏览器驱动环境问题
 ---
 
 # hgsau CLI 使用指南
 
-## 核心原则
+## 当前主入口
 
-当前主线只保留一个公开入口：
+项目当前只提供一个公开 CLI 入口：
 
 ```bash
 hgsau publish
 ```
 
-不要再调用旧命令，也不要使用按平台拆分的登录、校验或上传子命令。登录校验属于发布场景的一部分，由 `hgsau publish` 在启用平台发布前统一触发。
+不要引导用户执行独立的登录、校验或单平台上传命令。发布平台、账号文件、视频路径、标题、描述、标签和定时发布时间都应优先写入 `publish_config.ini`，命令行参数只作为本次运行的临时覆盖。
 
-## 安装与验证
+## 触发场景
 
-在仓库根目录安装：
+当用户表达下面任一意图时使用本 skill：
+
+- 发布视频、上传视频、一键发布、多平台发布
+- 发布到抖音、小红书、快手、微博、B站、视频号、百家号或 TikTok
+- 配置发布平台、账号、cookie、登录校验、扫码登录
+- 排查 `hgsau publish`、`publish_config.ini`、patchright、Chromium 或浏览器驱动问题
+
+## 推荐流程
 
 ```bash
 uv pip install -e .
-```
-
-验证入口：
-
-```bash
 hgsau publish --help
+hgsau publish
 ```
 
-安装后应只有 `hgsau` 控制台入口；如果本地虚拟环境里还残留旧脚本，请重新安装或清理旧环境。
-
-## 配置方式
-
-`publish_config.ini` 是主要控制文件，用于声明：
-
-- 发布平台
-- 视频或图文素材
-- 标题、简介、标签
-- 账号文件
-- 定时发布时间
-- 平台特有元数据
-
-命令行参数只用于临时覆盖一次运行，不写回配置文件。
-
-常用覆盖示例：
+如需临时覆盖配置：
 
 ```bash
 hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
-hgsau publish --config my_config.ini
+hgsau publish --config my_publish_config.ini
 hgsau publish --start-from 5
 hgsau publish --force
 ```
 
-## 执行流程
+## 配置原则
 
-`hgsau publish` 会完成一个完整发布场景：
+- 用 `publish_config.ini` 声明启用平台和账号文件。
+- 用配置文件声明内容元数据；临时调试时再使用 `--video`、`--title`、`--desc`、`--tags`、`--schedule`。
+- 运行环境预检属于发布流程的一部分，会检查 patchright 和 Chromium。
+- 用户登录校验也在发布流程里完成，未登录或 cookie 失效时再触发对应平台登录。
 
-1. 读取配置文件。
-2. 合并命令行临时覆盖。
-3. 校验素材和发布参数。
-4. 执行运行环境预检，包括 patchright 与 Chromium 等浏览器依赖。
-5. 对启用平台执行账号登录校验。
-6. 未登录或登录失效时进入对应平台登录流程。
-7. 登录通过后继续发布。
-8. 输出发布结果汇总，并用退出码表达整体结果。
+## Agent 注意事项
 
-## 运行环境预检与账号登录
-
-运行环境预检只处理“本机是否具备执行发布的基础能力”，例如浏览器驱动是否安装。
-
-账号登录校验只处理“某个平台账号当前是否可用”。它不再作为独立 CLI 步骤暴露给用户，而是放在统一发布流程中执行。
-
-## Agent 使用建议
-
-收到发布任务时，优先按下面顺序处理：
-
-```text
-确认当前目录是仓库根目录
-  → uv pip install -e .
-  → hgsau publish --help
-  → 检查 publish_config.ini
-  → hgsau publish
-  → 汇总执行命令、验证结果和发布结果
-```
-
-如果登录流程生成二维码图片，不要只把图片路径告诉用户。应优先展示图片，或明确告诉用户需要打开哪个本地图片文件扫码。
-
-## 故障处理
-
-| 问题 | 处理 |
-|------|------|
-| 找不到 `hgsau` | 确认虚拟环境已激活，并重新执行 `uv pip install -e .` |
-| 浏览器依赖缺失 | 重新运行 `hgsau publish`，由运行环境预检处理；必要时手动执行 `patchright install chromium` |
-| cookie 缺失或失效 | 继续走 `hgsau publish`，发布流程会触发登录 |
-| 视频文件不存在 | 检查 `publish_config.ini` 或使用 `--video` 临时覆盖 |
-| 标题为空 | 检查配置中的标题，或使用 `--title` 临时覆盖 |
-
-## 文档语言
-
-本项目不维护国际化文档，当前文档以中文优先。
+- 不要先单独校验登录后再要求用户二次确认发布。
+- 当登录流程生成本地二维码图片时，应直接展示图片或明确告诉用户打开哪个本地图片扫码。
+- Bilibili 等需要真实交互的登录场景，不要在非交互环境里强行代跑；应指导用户在本地真实终端完成扫码后再继续发布。
+- 本项目文档中文优先，不维护国际化文案。

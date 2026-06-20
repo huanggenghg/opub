@@ -54,7 +54,7 @@
    - `docs/install.md`
    - `docs/CLI.md`
    - `docs/update.md`
-5. `publish_config.ini` 是主要控制文件，请优先通过它配置内容、素材路径、启用平台和账号文件。
+5. `publish_config.ini` 是主要控制文件。账号文件可以长期保留；内容、素材路径、启用平台、标题、简介、标签和定时发布是一次性任务字段，每次发布前都必须重新设置。
 6. 如果需要 agent skill，优先参考 `skills/hgsau-cli/`。
 7. 不要默认走历史 `examples/` 和旧 Web 路径，除非当前 CLI 主线不可用。
 8. 如果登录流程生成二维码图片，不要只返回图片路径；请直接展示图片，或者明确告诉我该打开哪个本地图片文件扫码。
@@ -62,9 +62,9 @@
 10. 首次环境准备时，先预热安装 Patchright Chromium：
    `PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium`
 11. 安装完成后，请优先验证 `hgsau publish --help`。
-12. 需要执行发布时，请先确认 `publish_config.ini`，然后运行：
+12. 需要执行发布时，请先确认本次发布的平台、素材路径、标题、简介和标签都已经重新设置，然后运行：
    `hgsau publish`
-13. `hgsau publish` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
+13. `hgsau publish` 会自动完成运行环境预检、账号登录校验、发布和结果汇总，并在结束后清空一次性任务字段，避免下次沿用旧配置。
 14. 完成后，请明确输出：
    - 你实际执行了哪些命令
    - 哪些验证通过了

@@ -74,8 +74,10 @@ Report:
 
 ## Core CLI Usage
 
-`publish_config.ini` is the primary control file. Use it to configure content,
-asset paths, enabled platforms, account files, scheduling, and platform metadata.
+`publish_config.ini` is the primary control file. Account file mappings can
+persist there, but enabled platforms, content, asset paths, tags, scheduling,
+and other publish-task fields are one-time task state. Set them explicitly for
+each publish run; `hgsau publish` resets those task fields after it runs.
 
 ## 快速开始
 

@@ -6,7 +6,9 @@
 hgsau publish
 ```
 
-`publish_config.ini` 是主要控制文件，用于描述内容、素材路径、启用平台、账号文件、定时发布和平台元数据。命令行参数只用于临时覆盖本次运行的配置。
+`publish_config.ini` 是主要控制文件，用于描述账号文件和本次发布任务。
+平台、素材路径、标题、描述、标签、定时发布时间等属于一次性任务字段；
+每次发布前都应重新设置。命令行参数只用于临时覆盖本次运行的配置。
 
 当前主线已接入：
 
@@ -38,7 +40,7 @@ hgsau publish --help
 
 ## 快速开始
 
-1. 编辑 `publish_config.ini`，配置内容、素材路径、启用平台和账号文件。
+1. 编辑 `publish_config.ini`，配置本次发布的内容、素材路径、启用平台和账号文件。
 2. 执行统一发布入口：
 
 ```bash
@@ -52,10 +54,11 @@ hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 ```
 
 `hgsau publish` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
+发布流程结束后，会自动清空一次性任务字段，包括启用平台、标题、描述、标签、素材路径、定时发布时间和起始序号；账号文件配置会保留。
 
 ## 常用覆盖参数
 
-常规使用建议写入 `publish_config.ini`。下面这些参数适合临时覆盖一次发布任务：
+下面这些参数适合临时覆盖一次发布任务：
 
 ```bash
 --config publish_config.ini
@@ -74,6 +77,7 @@ hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 1. 默认读取 `publish_config.ini`。
 2. `--config` 可以指定其他配置文件。
 3. 其他命令行参数只覆盖本次运行，不会写回配置文件。
+4. 发布流程结束后，配置文件中的一次性任务字段会被清空，避免下次发布沿用旧平台或旧素材。
 
 ## 登录二维码说明
 
@@ -93,6 +97,7 @@ hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 4. 校验启用平台对应账号是否已登录。
 5. 按配置发布视频或图文内容。
 6. 输出结果汇总，并用退出码表达整体结果。
+7. 清空一次性任务字段，保留账号文件配置。
 
 ## 文档语言
 

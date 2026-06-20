@@ -8,6 +8,49 @@ import publish_all
 
 
 class PublishEngineTests(unittest.TestCase):
+    def test_reset_publish_task_fields_clears_one_time_fields_and_keeps_accounts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "publish_config.ini"
+            config_path.write_text(
+                "# config comments should stay\n"
+                "[common]\n"
+                "content_type = note\n"
+                "convert_to_video = true\n"
+                "video_duration = 9\n"
+                "title = old title\n"
+                "desc = old desc\n"
+                "tags = old,tags\n"
+                "video_file = videos/old.mp4\n"
+                "images = images/old.png\n"
+                "publish_strategy = scheduled\n"
+                "publish_time = 2026-05-01 12:00\n"
+                "start_from = 3\n"
+                "\n"
+                "[platforms]\n"
+                "enabled = weibo,douyin\n"
+                "weibo_account = cookies/weibo.json\n",
+                encoding="utf-8",
+            )
+
+            publish_all.reset_publish_task_fields(config_path)
+
+            text = config_path.read_text(encoding="utf-8")
+
+        self.assertIn("# config comments should stay", text)
+        self.assertIn("content_type = video", text)
+        self.assertIn("convert_to_video = false", text)
+        self.assertIn("video_duration = 5", text)
+        self.assertIn("title =", text)
+        self.assertIn("desc =", text)
+        self.assertIn("tags =", text)
+        self.assertIn("video_file =", text)
+        self.assertIn("images =", text)
+        self.assertIn("publish_strategy = immediate", text)
+        self.assertIn("publish_time =", text)
+        self.assertIn("start_from =", text)
+        self.assertIn("enabled =", text)
+        self.assertIn("weibo_account = cookies/weibo.json", text)
+
     def test_apply_overrides_merges_publish_fields(self):
         publish_time = publish_all.datetime.strptime("2026-05-30 21:30", "%Y-%m-%d %H:%M")
         params = {
@@ -64,6 +107,34 @@ class PublishEngineTests(unittest.TestCase):
             code = publish_all.run_publish_sync(str(config_path))
 
         self.assertEqual(code, 1)
+
+    def test_run_publish_sync_resets_task_fields_after_config_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "publish_config.ini"
+            config_path.write_text(
+                "[common]\n"
+                "content_type = video\n"
+                "video_file = videos/demo.mp4\n"
+                "title = old title\n"
+                "tags = old\n"
+                "\n"
+                "[platforms]\n"
+                "enabled = weibo\n"
+                "weibo_account = cookies/weibo.json\n",
+                encoding="utf-8",
+            )
+
+            with patch("publish_all.run_publish_with_params", new=AsyncMock(return_value=0)):
+                code = publish_all.run_publish_sync(str(config_path))
+
+            text = config_path.read_text(encoding="utf-8")
+
+        self.assertEqual(code, 0)
+        self.assertIn("video_file =", text)
+        self.assertIn("title =", text)
+        self.assertIn("tags =", text)
+        self.assertIn("enabled =", text)
+        self.assertIn("weibo_account = cookies/weibo.json", text)
 
     def test_run_publish_sync_uses_cli_overrides_without_config_file(self):
         overrides = publish_all.PublishOverrides(

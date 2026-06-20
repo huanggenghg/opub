@@ -8,6 +8,7 @@ import configparser
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -46,6 +47,25 @@ TITLE_LIMITS = {
     "baijiahao": 30,
     "tk": 150,
     "weibo": 2000,
+}
+
+PUBLISH_TASK_FIELD_DEFAULTS = {
+    "common": {
+        "content_type": "video",
+        "convert_to_video": "false",
+        "video_duration": "5",
+        "title": "",
+        "desc": "",
+        "tags": "",
+        "video_file": "",
+        "images": "",
+        "publish_strategy": "immediate",
+        "publish_time": "",
+        "start_from": "",
+    },
+    "platforms": {
+        "enabled": "",
+    },
 }
 
 
@@ -192,6 +212,40 @@ def read_config(config_file: str = "publish_config.ini") -> dict:
         "platforms": dict(parser["platforms"]),
     }
     return config
+
+
+def reset_publish_task_fields(config_file: str | Path) -> None:
+    """清空一次性发布任务字段，保留账号文件和注释。"""
+    config_path = Path(config_file)
+    if not config_path.exists():
+        return
+
+    section_pattern = re.compile(r"^\s*\[([^\]]+)\]\s*$")
+    field_pattern = re.compile(r"^(\s*([^#;=\s]+)\s*=\s*).*$")
+    current_section = ""
+    output_lines = []
+
+    for line in config_path.read_text(encoding="utf-8").splitlines(keepends=True):
+        newline = "\n" if line.endswith("\n") else ""
+        raw_line = line[:-1] if newline else line
+
+        section_match = section_pattern.match(raw_line)
+        if section_match:
+            current_section = section_match.group(1).strip().lower()
+            output_lines.append(line)
+            continue
+
+        field_match = field_pattern.match(raw_line)
+        if field_match:
+            key = field_match.group(2).strip().lower()
+            section_defaults = PUBLISH_TASK_FIELD_DEFAULTS.get(current_section, {})
+            if key in section_defaults:
+                output_lines.append(f"{field_match.group(1)}{section_defaults[key]}{newline}")
+                continue
+
+        output_lines.append(line)
+
+    config_path.write_text("".join(output_lines), encoding="utf-8")
 
 
 def _split_csv(value: Optional[str]) -> list:
@@ -1047,15 +1101,21 @@ async def run_publish(
     if config_path.exists():
         config = read_config(str(config_path))
         params = parse_config(config)
+        reset_task_fields_after_run = True
     else:
         if overrides is None or overrides.platforms is None or overrides.video is None:
             print(f"❌ 错误: 配置文件不存在: {config_path}")
             print("请提供配置文件，或同时指定 --platforms 和 --video")
             return 1
         params = default_params_from_overrides()
+        reset_task_fields_after_run = False
 
     params = apply_overrides(params, overrides)
-    return await run_publish_with_params(params)
+    try:
+        return await run_publish_with_params(params)
+    finally:
+        if reset_task_fields_after_run:
+            reset_publish_task_fields(config_path)
 
 
 def run_publish_sync(

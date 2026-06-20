@@ -41,11 +41,14 @@ uv pip install -e .
 
 当前主线使用 `patchright` 驱动浏览器。
 
-国内用户推荐先指定镜像，再安装 Chromium：
+有代理环境时，推荐使用 Playwright 官方 CDN 安装 Chromium：
 
 ```bash
-PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright" patchright install chromium
+PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium
 ```
+
+如果你使用团队自建镜像，可以把 `PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST` 指向自己的制品仓库。
+自建镜像需要保持 Playwright 的目录结构，例如包含 `builds/cft/...`。
 
 ### 5. 配置发布控制文件
 
@@ -121,7 +124,7 @@ uv pip install -e .
 4. 如需浏览器驱动，优先使用：
 
 ```bash
-PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright" patchright install chromium
+PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium
 ```
 
 5. 安装完成后，优先检查 `hgsau publish --help`

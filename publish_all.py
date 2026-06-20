@@ -339,7 +339,8 @@ def patchright_chromium_installed() -> bool:
 
 def install_patchright_chromium() -> bool:
     env = os.environ.copy()
-    env.setdefault("PLAYWRIGHT_DOWNLOAD_HOST", "https://npmmirror.com/mirrors/playwright")
+    if not env.get("PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST") and not env.get("PLAYWRIGHT_DOWNLOAD_HOST"):
+        env["PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST"] = "https://cdn.playwright.dev"
     result = subprocess.run(
         [sys.executable, "-m", "patchright", "install", "chromium"],
         env=env,

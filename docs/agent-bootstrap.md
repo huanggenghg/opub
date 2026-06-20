@@ -59,11 +59,13 @@
 7. 不要默认走历史 `examples/` 和旧 Web 路径，除非当前 CLI 主线不可用。
 8. 如果登录流程生成二维码图片，不要只返回图片路径；请直接展示图片，或者明确告诉我该打开哪个本地图片文件扫码。
 9. 如果是 Bilibili 登录，不要在非交互环境里强行代跑；应改为指导我在本地真实终端完成扫码。
-10. 安装完成后，请优先验证 `hgsau publish --help`。
-11. 需要执行发布时，请先确认 `publish_config.ini`，然后运行：
+10. 首次环境准备时，先预热安装 Patchright Chromium：
+   `PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium`
+11. 安装完成后，请优先验证 `hgsau publish --help`。
+12. 需要执行发布时，请先确认 `publish_config.ini`，然后运行：
    `hgsau publish`
-12. `hgsau publish` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
-13. 完成后，请明确输出：
+13. `hgsau publish` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
+14. 完成后，请明确输出：
    - 你实际执行了哪些命令
    - 哪些验证通过了
    - 当前项目是否已经进入“可继续登录/上传”的状态

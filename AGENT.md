@@ -48,7 +48,7 @@ uv pip install -e .
 Install Patchright Chromium for browser automation:
 
 ```bash
-PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright" patchright install chromium
+PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium
 ```
 
 If `conf.py` does not exist, copy the example:

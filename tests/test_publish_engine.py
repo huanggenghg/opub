@@ -175,6 +175,30 @@ class RuntimePreflightTests(unittest.TestCase):
         self.assertFalse(ok)
         install.assert_not_called()
 
+    def test_install_patchright_chromium_defaults_to_playwright_cdn_for_chromium(self):
+        with patch.dict("publish_all.os.environ", {}, clear=True):
+            with patch("publish_all.subprocess.run") as run:
+                run.return_value.returncode = 0
+
+                ok = publish_all.install_patchright_chromium()
+
+        self.assertTrue(ok)
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST"], "https://cdn.playwright.dev")
+        self.assertNotIn("PLAYWRIGHT_DOWNLOAD_HOST", env)
+
+    def test_install_patchright_chromium_preserves_user_download_host(self):
+        with patch.dict("publish_all.os.environ", {"PLAYWRIGHT_DOWNLOAD_HOST": "https://mirror.example/playwright"}, clear=True):
+            with patch("publish_all.subprocess.run") as run:
+                run.return_value.returncode = 0
+
+                ok = publish_all.install_patchright_chromium()
+
+        self.assertTrue(ok)
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["PLAYWRIGHT_DOWNLOAD_HOST"], "https://mirror.example/playwright")
+        self.assertNotIn("PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST", env)
+
 
 class AccountLoginFlowTests(unittest.TestCase):
     def test_publish_one_item_triggers_login_before_publish(self):

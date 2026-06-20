@@ -30,14 +30,16 @@ uv pip install -e .
 Windows PowerShell：
 
 ```powershell
-$env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchright install chromium
+$env:PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev"; patchright install chromium
 ```
 
 Linux / macOS：
 
 ```bash
-PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright" patchright install chromium
+PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium
 ```
+
+如果使用团队自建镜像，请确保镜像包含当前 Patchright 需要的 `builds/cft/...` 路径。
 
 ### 4. 更新后自检
 

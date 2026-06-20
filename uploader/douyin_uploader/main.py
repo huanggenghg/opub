@@ -27,6 +27,8 @@ from utils.excel_writer import write_video_link
 
 DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 DOUYIN_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+DOUYIN_UPLOAD_URL = "https://creator.douyin.com/creator-micro/content/upload"
+DOUYIN_LOGIN_URL_MARKERS = ("login", "passport")
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -97,18 +99,48 @@ async def cookie_auth(account_file):
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
             page = await context.new_page()
-            await page.goto("https://creator.douyin.com/creator-micro/content/upload")
+            await page.goto(DOUYIN_UPLOAD_URL)
             try:
-                await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload", timeout=5000)
+                await page.wait_for_url(DOUYIN_UPLOAD_URL, timeout=5000)
             except Exception:
                 return False
 
-            if await page.get_by_text("手机号登录").count() or await page.get_by_text("扫码登录").count():
-                return False
-
-            return True
+            return await _is_douyin_auth_page_valid(page)
         finally:
             await browser.close()
+
+
+async def _is_douyin_locator_visible(locator) -> bool:
+    try:
+        if not await locator.count():
+            return False
+        return await locator.is_visible()
+    except Exception:
+        return False
+
+
+async def _is_douyin_auth_page_valid(page: Page) -> bool:
+    current_url = (page.url or "").lower()
+    if not current_url.startswith(DOUYIN_UPLOAD_URL):
+        return False
+    if any(marker in current_url for marker in DOUYIN_LOGIN_URL_MARKERS):
+        return False
+
+    login_markers = [
+        page.get_by_text("手机号登录").first,
+        page.get_by_text("扫码登录").first,
+        page.get_by_role("img", name="二维码").first,
+    ]
+    for marker in login_markers:
+        if await _is_douyin_locator_visible(marker):
+            return False
+
+    publish_markers = [
+        page.get_by_text("发布视频", exact=True).first,
+        page.get_by_text("发布图文", exact=True).first,
+        page.locator('input[type="file"]').first,
+    ]
+    return any([await _is_douyin_locator_visible(marker) for marker in publish_markers])
 
 
 async def douyin_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):

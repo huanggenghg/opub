@@ -11,31 +11,58 @@ from utils.files_times import get_absolute_path
 from utils.log import tiktok_logger
 from conf import LOCAL_CHROME_HEADLESS
 
+TIKTOK_UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload"
+TIKTOK_LOGIN_URL_MARKERS = ("/login", "/signup")
+
 
 async def cookie_auth(account_file):
     async with async_playwright() as playwright:
         browser = await playwright.firefox.launch(headless=LOCAL_CHROME_HEADLESS)
-        context = await browser.new_context(storage_state=account_file)
-        context = await set_init_script(context)
-        # 创建一个新的页面
-        page = await context.new_page()
-        # 访问指定的 URL
-        await page.goto("https://www.tiktok.com/tiktokstudio/upload?lang=en")
-        await page.wait_for_load_state('networkidle')
         try:
-            # 选择所有的 select 元素
-            select_elements = await page.query_selector_all('select')
-            for element in select_elements:
-                class_name = await element.get_attribute('class')
-                # 使用正则表达式匹配特定模式的 class 名称
-                if re.match(r'tiktok-.*-SelectFormContainer.*', class_name):
-                    tiktok_logger.error("[+] cookie expired")
-                    return False
-            tiktok_logger.success("[+] cookie valid")
-            return True
-        except:
-            tiktok_logger.success("[+] cookie valid")
-            return True
+            context = await browser.new_context(storage_state=account_file)
+            context = await set_init_script(context)
+            page = await context.new_page()
+            await page.goto("https://www.tiktok.com/tiktokstudio/upload?lang=en")
+            await page.wait_for_load_state('networkidle')
+
+            if await _is_tiktok_auth_page_valid(page):
+                tiktok_logger.success("[+] cookie valid")
+                return True
+
+            tiktok_logger.error("[+] cookie expired")
+            return False
+        finally:
+            await browser.close()
+
+
+async def _is_tiktok_locator_visible(locator) -> bool:
+    try:
+        if not await locator.count():
+            return False
+        return await locator.is_visible()
+    except Exception:
+        return False
+
+
+async def _is_tiktok_auth_page_valid(page) -> bool:
+    current_url = (page.url or "").lower()
+    if any(marker in current_url for marker in TIKTOK_LOGIN_URL_MARKERS):
+        return False
+
+    login_markers = [
+        page.locator('select[class*="SelectFormContainer"]').first,
+        page.locator('a[href*="/login"]').first,
+    ]
+    for marker in login_markers:
+        if await _is_tiktok_locator_visible(marker):
+            return False
+
+    upload_markers = [
+        page.locator('button:has-text("Select video")').first,
+        page.locator('button[aria-label="Select file"]').first,
+        page.locator("div.upload-container").first,
+    ]
+    return any([await _is_tiktok_locator_visible(marker) for marker in upload_markers])
 
 
 async def tiktok_setup(account_file, handle=False):
@@ -264,4 +291,3 @@ class TiktokVideo(object):
     async def main(self):
         async with async_playwright() as playwright:
             await self.upload(playwright)
-

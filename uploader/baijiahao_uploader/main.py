@@ -12,6 +12,9 @@ from utils.base_social_media import set_init_script
 from utils.log import baijiahao_logger
 from utils.network import async_retry
 
+BAIJIAHAO_HOME_URL = "https://baijiahao.baidu.com/builder/rc/home"
+BAIJIAHAO_LOGIN_URL_MARKERS = ("/login", "login")
+
 
 async def baijiahao_cookie_gen(account_file):
     async with async_playwright() as playwright:
@@ -38,20 +41,59 @@ async def baijiahao_cookie_gen(account_file):
 async def cookie_auth(account_file):
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
-        context = await browser.new_context(storage_state=account_file)
-        context = await set_init_script(context)
-        # 创建一个新的页面
-        page = await context.new_page()
-        # 访问指定的 URL
-        await page.goto("https://baijiahao.baidu.com/builder/rc/home")
-        await page.wait_for_timeout(timeout=5000)
+        try:
+            context = await browser.new_context(storage_state=account_file)
+            context = await set_init_script(context)
+            page = await context.new_page()
+            await page.goto(BAIJIAHAO_HOME_URL)
+            await page.wait_for_timeout(timeout=5000)
 
-        if await page.get_by_text('注册/登录百家号').count():
+            if await _is_baijiahao_auth_page_valid(page):
+                baijiahao_logger.success("[+] cookie 有效")
+                return True
+
             baijiahao_logger.error("等待5秒 cookie 失效")
             return False
-        else:
-            baijiahao_logger.success("[+] cookie 有效")
-            return True
+        finally:
+            await browser.close()
+
+
+async def _is_baijiahao_locator_visible(locator) -> bool:
+    try:
+        if not await locator.count():
+            return False
+        return await locator.is_visible()
+    except Exception:
+        return False
+
+
+async def _is_baijiahao_locator_present(locator) -> bool:
+    try:
+        return bool(await locator.count())
+    except Exception:
+        return False
+
+
+async def _is_baijiahao_auth_page_valid(page: Page) -> bool:
+    current_url = (page.url or "").lower()
+    if any(marker in current_url for marker in BAIJIAHAO_LOGIN_URL_MARKERS):
+        return False
+
+    login_markers = [
+        page.get_by_text("注册/登录百家号").first,
+        page.get_by_text("扫码登录").first,
+    ]
+    for marker in login_markers:
+        if await _is_baijiahao_locator_visible(marker):
+            return False
+
+    publish_markers = [
+        page.locator("input[type=file]").first,
+        page.locator('button:has-text("发布")').first,
+        page.locator('button:has-text("上传")').first,
+        page.locator("div#formMain").first,
+    ]
+    return any([await _is_baijiahao_locator_present(marker) for marker in publish_markers])
 
 
 async def baijiahao_setup(account_file, handle=False):
@@ -359,13 +401,13 @@ class BaiJiaHaoVideo(object):
                """)
 
         # 定位新闻列表容器（转义特殊CSS字符）
-        container_selector = '.overflow-auto.flex-grow.h-0.saas-scrollbar.mt\-\[-4px\].pl\-\[24px\].pr\-\[10px\].pb\-\[18px\]'
-        news_items = await page.locator(container_selector).locator('div.py\-\[6px\].group.cursor-pointer').all()
+        container_selector = r'.overflow-auto.flex-grow.h-0.saas-scrollbar.mt\-\[-4px\].pl\-\[24px\].pr\-\[10px\].pb\-\[18px\]'
+        news_items = await page.locator(container_selector).locator(r'div.py\-\[6px\].group.cursor-pointer').all()
 
         for item in news_items:
             try:
                 # 获取新闻标题
-                title_elem = item.locator('div.flex.text-gray-darker.items-center.relative.pr\-\[56px\] > span')
+                title_elem = item.locator(r'div.flex.text-gray-darker.items-center.relative.pr\-\[56px\] > span')
                 title = await title_elem.text_content()
                 if not title:
                     continue

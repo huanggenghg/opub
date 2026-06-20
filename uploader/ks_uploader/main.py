@@ -84,6 +84,33 @@ async def _is_ks_cookie_invalid(page: Page, timeout: int = 5000) -> bool:
         return False
 
 
+async def _is_ks_locator_visible(locator) -> bool:
+    try:
+        if not await locator.count():
+            return False
+        return await locator.is_visible()
+    except Exception:
+        return False
+
+
+async def _is_ks_auth_page_valid(page: Page) -> bool:
+    if not (page.url or "").startswith(KUAISHOU_UPLOAD_URL):
+        return False
+    if await _is_ks_cookie_invalid(page):
+        return False
+
+    login_markers = [
+        page.locator("main#login-form").first,
+        page.locator('div.qr-login img[alt="qrcode"]').first,
+    ]
+    for marker in login_markers:
+        if await _is_ks_locator_visible(marker):
+            return False
+
+    upload_button = page.locator('button[class^="_upload-btn"]').first
+    return await _is_ks_locator_visible(upload_button)
+
+
 async def _extract_ks_qrcode_src(page: Page) -> str:
     login_form = page.locator("main#login-form").first
     await login_form.wait_for(state="visible", timeout=30000)
@@ -164,7 +191,7 @@ async def cookie_auth(account_file):
             context = await set_init_script(context)
             page = await context.new_page()
             await page.goto(KUAISHOU_UPLOAD_URL)
-            if await _is_ks_cookie_invalid(page):
+            if not await _is_ks_auth_page_valid(page):
                 kuaishou_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
                 return False
 

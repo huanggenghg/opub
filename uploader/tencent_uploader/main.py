@@ -114,13 +114,7 @@ async def cookie_auth(account_file):
             await page.goto(TENCENT_UPLOAD_URL)
             await page.wait_for_url(TENCENT_UPLOAD_URL, timeout=5000)
 
-            login_markers = [
-                page.get_by_text("扫码登录", exact=True).first,
-                page.get_by_text("发表视频", exact=True).first,
-                page.get_by_role("button", name="发表").first,
-            ]
-
-            if await login_markers[0].count():
+            if not await _is_tencent_login_completed(page):
                 tencent_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
                 return False
 
@@ -225,7 +219,7 @@ async def _is_tencent_login_completed(page: Page) -> bool:
         except Exception:
             continue
 
-    return True
+    return False
 
 
 async def _is_tencent_qrcode_expired(page: Page) -> bool:

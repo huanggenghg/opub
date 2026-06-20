@@ -19,6 +19,8 @@ from utils.log import weibo_logger
 WEIBO_MAIN_URL = "https://weibo.com/"  # 微博主站，发布入口在首页
 WEIBO_LOGIN_URL = "https://passport.weibo.com/sso/signin?entry=miniblog&source=miniblog&disp=popup&url=https%3A%2F%2Fweibo.com%2Fu%2F6569482075&from=weibopro"  # 登录页面
 WEIBO_UPLOAD_CHANNEL_URL = "https://weibo.com/upload/channel"  # 视频上传页面
+WEIBO_LOGIN_URL_MARKERS = ("passport.weibo.com", "login.sina.com", "/login", "/sso/")
+WEIBO_UPLOAD_BUTTON_SELECTOR = 'button[id^="video_button_upload"], button._btn1_109u9_8'
 WEIBO_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 WEIBO_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 
@@ -99,32 +101,49 @@ async def cookie_auth(account_file):
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
             page = await context.new_page()
-            # 访问微博首页检查登录状态
-            await page.goto(WEIBO_MAIN_URL)
+            # 访问实际发布入口，并要求看到上传按钮，避免旧 cookie 跳到校验页后被误判为有效。
+            await page.goto(WEIBO_UPLOAD_CHANNEL_URL)
             await page.wait_for_timeout(3000)
 
-            # 检查是否有登录按钮（未登录状态）
-            login_markers = [
-                page.locator('text="登录"').first,
-                page.locator('a[href*="login"]').first,
-            ]
+            if await _is_weibo_auth_page_valid(page):
+                weibo_logger.success(_msg("🥳", "cookie 有效"))
+                return True
 
-            for marker in login_markers:
-                if await marker.count():
-                    try:
-                        if await marker.is_visible():
-                            weibo_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
-                            return False
-                    except Exception:
-                        continue
-
-            weibo_logger.success(_msg("🥳", "cookie 有效"))
-            return True
+            weibo_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
+            return False
         except Exception as exc:
             weibo_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
             return False
         finally:
             await browser.close()
+
+
+async def _is_visible(locator) -> bool:
+    try:
+        if not await locator.count():
+            return False
+        return await locator.is_visible()
+    except Exception:
+        return False
+
+
+async def _is_weibo_auth_page_valid(page: Page) -> bool:
+    """只有进入发布页并看到上传入口，才认为微博 cookie 仍然有效。"""
+    current_url = (page.url or "").lower()
+    if any(marker in current_url for marker in WEIBO_LOGIN_URL_MARKERS):
+        return False
+
+    login_markers = [
+        page.locator('text="登录"').first,
+        page.locator('text="扫码登录"').first,
+        page.locator('a[href*="login"]').first,
+    ]
+    for marker in login_markers:
+        if await _is_visible(marker):
+            return False
+
+    upload_button = page.locator(WEIBO_UPLOAD_BUTTON_SELECTOR).first
+    return await _is_visible(upload_button)
 
 
 async def _is_weibo_login_completed(page: Page) -> bool:

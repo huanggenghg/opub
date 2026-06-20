@@ -115,6 +115,10 @@ hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 - `publish_all.py` owns config loading, runtime preflight, account login checks,
   publishing, and summary output.
 - Browser automation lives under `uploader/` and related utility modules.
+- For TestPyPI uploads, first look for the local token file
+  `.secrets/testpypi.token` and use it as the Twine API token
+  (`TWINE_USERNAME=__token__`). Never print or commit the token; `.secrets/` is
+  intentionally gitignored.
 - `requirements.txt` is kept mostly for legacy compatibility; do not prefer it
   for normal setup.
 - Existing Web code is retained but is not the current mainline path.

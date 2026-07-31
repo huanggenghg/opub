@@ -211,6 +211,32 @@ class PublishEngineTests(unittest.TestCase):
         self.assertEqual(code, 1)
         preflight.assert_not_awaited()
 
+    def test_publish_to_douyin_marks_restriction_as_account_issue(self):
+        from uploader.douyin_uploader.main import DouyinPublishRestrictedError
+
+        params = {
+            "account_file": "cookies/douyin_uploader/account.json",
+            "title": "标题",
+            "tags": [],
+            "publish_strategy": "immediate",
+            "publish_time": None,
+            "content_type": "video",
+            "video_file": "videos/demo.mp4",
+            "desc": "",
+        }
+
+        async def fake_main():
+            raise DouyinPublishRestrictedError("作品发布失败，健康分不足投稿功能受限")
+
+        with patch("uploader.douyin_uploader.main.DouYinVideo") as MockDouYinVideo:
+            MockDouYinVideo.return_value.main = AsyncMock(side_effect=fake_main)
+            result = publish_all.run_async_for_test(publish_all.publish_to_douyin(params))
+
+        self.assertFalse(result["success"])
+        self.assertTrue(result["account_issue"])
+        self.assertEqual(result["issue_type"], "publish_restricted")
+        self.assertIn("健康分不足", result["message"])
+
 
 class RuntimePreflightTests(unittest.TestCase):
     def test_playwright_browser_cache_dirs_include_windows_default(self):

@@ -591,7 +591,7 @@ def platform_requires_account_login(platform: str) -> bool:
 
 async def publish_to_douyin(params: dict) -> dict:
     """发布到抖音"""
-    from uploader.douyin_uploader.main import DouYinVideo, DouYinNote
+    from uploader.douyin_uploader.main import DouYinVideo, DouYinNote, DouyinPublishRestrictedError
 
     account_file = resolve_path(params["account_file"])
 
@@ -639,6 +639,13 @@ async def publish_to_douyin(params: dict) -> dict:
             )
             await uploader.douyin_upload_note()
             return {"success": True, "message": "发布成功"}
+    except DouyinPublishRestrictedError as exc:
+        return {
+            "success": False,
+            "message": f"账号被限制发布: {exc.toast_text}",
+            "account_issue": True,
+            "issue_type": "publish_restricted",
+        }
     except Exception as e:
         return {"success": False, "message": str(e)}
 

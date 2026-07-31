@@ -783,6 +783,10 @@ class DouYinNote(DouYinBaseUploader):
         douyin_logger.info(_msg("📤", "小人正在上传图片"))
         await page.locator("div[class^='container'] input[accept*='image']").set_input_files(self.image_paths)
 
+        restriction_text = await _check_douyin_publish_restriction(page)
+        if restriction_text:
+            raise DouyinPublishRestrictedError(restriction_text)
+
         while True:
             try:
                 await page.wait_for_url(

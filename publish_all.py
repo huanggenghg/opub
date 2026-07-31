@@ -545,6 +545,7 @@ async def ensure_login(platform: str, account_file: str) -> bool:
             "weibo": ("uploader.weibo_uploader.main", "cookie_auth"),
             "tencent": ("uploader.tencent_uploader.main", "cookie_auth"),
             "baijiahao": ("uploader.baijiahao_uploader.main", "cookie_auth"),
+            "bilibili": ("uploader.bilibili_uploader.main", "cookie_auth"),
             "tk": ("uploader.tk_uploader.main", "cookie_auth"),
         }
 
@@ -573,6 +574,9 @@ async def ensure_login(platform: str, account_file: str) -> bool:
     elif platform == "baijiahao":
         from uploader.baijiahao_uploader.main import baijiahao_setup
         return await baijiahao_setup(account_file, handle=True)
+    elif platform == "bilibili":
+        from uploader.bilibili_uploader.main import bilibili_setup
+        return await bilibili_setup(account_file, handle=True)
     elif platform == "weibo":
         from uploader.weibo_uploader.main import weibo_setup
         return await weibo_setup(account_file, handle=True)
@@ -586,7 +590,7 @@ async def ensure_account_login(platform: str, account_file: str) -> bool:
 
 
 def platform_requires_account_login(platform: str) -> bool:
-    return platform not in {"bilibili", "tk"}
+    return platform not in {"tk"}
 
 
 async def publish_to_douyin(params: dict) -> dict:
@@ -845,6 +849,36 @@ async def publish_to_baijiahao(params: dict) -> dict:
         return {"success": False, "message": str(e)}
 
 
+async def publish_to_bilibili(params: dict) -> dict:
+    """发布到 B站 (via biliup CLI)"""
+    from uploader.bilibili_uploader.main import upload as biliup_upload
+
+    account_file = resolve_path(params["account_file"])
+
+    title = truncate_title(params["title"], "bilibili")
+    tags = params["tags"]
+    content_type = params["content_type"]
+
+    if content_type != "video":
+        return {"success": False, "message": "B站暂只支持视频发布"}
+
+    video_file = resolve_path(params["video_file"])
+    if not video_file or not os.path.exists(video_file):
+        return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+    try:
+        result = await biliup_upload(
+            account_file=account_file,
+            video_file=video_file,
+            title=title,
+            desc=params["desc"],
+            tags=tags,
+        )
+        return result
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
 async def publish_to_weibo(params: dict) -> dict:
     """发布到微博"""
     from uploader.weibo_uploader.main import WeiboVideo, WeiboNote
@@ -923,7 +957,7 @@ async def publish_to_platform(platform: str, params: dict) -> dict:
     elif platform == "kuaishou":
         return await publish_to_kuaishou(params)
     elif platform == "bilibili":
-        return {"success": False, "message": "B站平台暂未实现"}
+        return await publish_to_bilibili(params)
     elif platform == "tencent":
         return await publish_to_tencent(params)
     elif platform == "baijiahao":

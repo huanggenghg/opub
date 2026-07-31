@@ -1,0 +1,12 @@
+#!/usr/bin/expect -f
+set timeout 300
+spawn /Users/hgeng/.social-auto-upload/tools/biliup/macos-x86_64/biliup -u /Users/hgeng/AndroidStudioProjects/social-auto-upload/cookies/bilibili_uploader/account.json login
+expect "选择一种登录方式"
+# 当前光标在"短信登录"(第2项), 下移2次到"浏览器登录"(第4项)
+send "\x1b\[B"
+sleep 0.3
+send "\x1b\[B"
+sleep 0.3
+send "\r"
+# 等待 biliup 完成(浏览器打开 -> 用户扫码 -> 保存 cookie -> 退出)
+expect eof

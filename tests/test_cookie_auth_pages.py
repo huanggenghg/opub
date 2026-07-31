@@ -20,9 +20,11 @@ import uploader.tk_uploader.main as tk_main
 
 
 class FakeLocator:
-    def __init__(self, count=0, visible=False):
+    def __init__(self, count=0, visible=False, text="", wait_raises=None):
         self._count = count
         self._visible = visible
+        self._text = text
+        self._wait_raises = wait_raises
 
     @property
     def first(self):
@@ -33,6 +35,15 @@ class FakeLocator:
 
     async def is_visible(self):
         return self._visible
+
+    async def wait_for(self, state="visible", timeout=30000):
+        if self._wait_raises is not None:
+            raise self._wait_raises
+        if not self._visible:
+            raise TimeoutError(f"Timeout {timeout}ms exceeded waiting for state={state}")
+
+    async def inner_text(self):
+        return self._text
 
 
 class FakePage:
@@ -135,6 +146,42 @@ class CookieAuthPageTests(unittest.TestCase):
         valid = asyncio.run(tk_main._is_tiktok_auth_page_valid(page))
 
         self.assertTrue(valid)
+
+
+class DouyinRestrictionDetectorTests(unittest.TestCase):
+    def test_detector_returns_text_when_toast_visible(self):
+        page = FakePage(
+            "https://creator.douyin.com/creator-micro/content/upload",
+            {
+                ".semi-toast-error": FakeLocator(
+                    count=1, visible=True, text="作品发布失败，健康分不足投稿功能受限"
+                )
+            },
+        )
+
+        result = asyncio.run(douyin_main._check_douyin_publish_restriction(page, timeout_ms=500))
+
+        self.assertEqual(result, "作品发布失败，健康分不足投稿功能受限")
+
+    def test_detector_returns_none_when_toast_not_visible(self):
+        page = FakePage(
+            "https://creator.douyin.com/creator-micro/content/upload",
+            {".semi-toast-error": FakeLocator(count=0, visible=False)},
+        )
+
+        result = asyncio.run(douyin_main._check_douyin_publish_restriction(page, timeout_ms=500))
+
+        self.assertIsNone(result)
+
+    def test_detector_returns_none_on_unexpected_error(self):
+        page = FakePage(
+            "https://creator.douyin.com/creator-micro/content/upload",
+            {".semi-toast-error": FakeLocator(wait_raises=RuntimeError("oops"))},
+        )
+
+        result = asyncio.run(douyin_main._check_douyin_publish_restriction(page, timeout_ms=500))
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

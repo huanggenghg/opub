@@ -92,6 +92,24 @@ def _build_login_result(success: bool, status: str, message: str, account_file: 
     }
 
 
+class DouyinPublishRestrictedError(Exception):
+    """抖音账号被限制发布(如健康分不足)时抛出。"""
+    def __init__(self, toast_text: str):
+        self.toast_text = toast_text
+        super().__init__(f"账号被限制发布: {toast_text}")
+
+
+async def _check_douyin_publish_restriction(page: Page, timeout_ms: int = 2000) -> str | None:
+    """set_input_files 后检查是否出现限制 toast。返回 toast 文本,无则 None。"""
+    toast = page.locator('.semi-toast-error').first
+    try:
+        await toast.wait_for(state="visible", timeout=timeout_ms)
+        text = await toast.inner_text()
+        return text.strip() or None
+    except Exception:
+        return None
+
+
 async def cookie_auth(account_file):
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=True)

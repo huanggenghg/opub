@@ -245,17 +245,37 @@ async def get_share_link(page: Page) -> dict:
         await page.wait_for_load_state("domcontentloaded")
         await asyncio.sleep(3)
 
-        # 2. 找到并点击第一个笔记
+        # 2. 找到并点击第一个笔记（跳过置顶笔记，避免抓到旧链接）
         xiaohongshu_logger.info(_msg("🔍", "正在查找第一个笔记"))
 
-        first_note = page.locator("section.note-item").first
-        if await first_note.count() == 0:
+        notes = page.locator("section.note-item")
+        note_count = await notes.count()
+        if note_count == 0:
             xiaohongshu_logger.warning(_msg("⚠️", "未找到笔记元素"))
             return {"success": False, "share_link": "", "note_id": "", "message": "未找到笔记元素"}
 
-        # 点击第一个笔记进入详情页
+        # 用户置顶的笔记会排在最前，直接取 first 会一直抓到置顶那条，发布多条后拿到的链接都相同。
+        # 这里遍历笔记，跳过含"置顶"标识的，取第一条非置顶笔记。
+        first_note = None
+        for i in range(note_count):
+            note = notes.nth(i)
+            try:
+                note_text = await note.inner_text()
+                if "置顶" in note_text:
+                    xiaohongshu_logger.info(_msg("📌", f"跳过置顶笔记 (index={i})"))
+                    continue
+            except Exception:
+                pass
+            first_note = note
+            break
+
+        if first_note is None:
+            xiaohongshu_logger.warning(_msg("⚠️", "未找到非置顶笔记，回退到第一条笔记"))
+            first_note = notes.first
+
+        # 点击笔记进入详情页
         await first_note.click()
-        xiaohongshu_logger.info(_msg("👆", "已点击第一个笔记"))
+        xiaohongshu_logger.info(_msg("👆", "已点击笔记进入详情页"))
         await asyncio.sleep(3)
 
         current_url = page.url

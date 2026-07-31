@@ -47,12 +47,18 @@ Platform, account, media, metadata, and schedule settings should be configured i
     playwright install chromium
     ```
 
-3.  **Initialize the database:**
+3.  **Install ffmpeg (required for image-to-video conversion):**
+    The `convert_to_video` feature uses moviepy + ffmpeg to turn image notes into slideshow videos. moviepy is installed from `requirements.txt`, but ffmpeg must be installed separately as a system dependency:
+    *   macOS: `brew install ffmpeg`
+    *   Ubuntu/Debian: `sudo apt-get install ffmpeg`
+    *   Windows: download from https://ffmpeg.org/download.html and add to PATH
+
+4.  **Initialize the database:**
     ```bash
     python db/createTable.py
     ```
 
-4.  **Run the backend server:**
+5.  **Run the backend server:**
     ```bash
     python hgsau_backend.py
     ```

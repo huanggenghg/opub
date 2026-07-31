@@ -985,10 +985,25 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
 
             result_key = platform if len(account_files) == 1 else f"{platform}_{acct_idx + 1}"
 
-            if platform_requires_account_login(platform) and not await ensure_account_login(platform, account_file):
-                results[result_key] = {"success": False, "message": f"登录失败: {platform_name}"}
-                print("  失败: 登录失败")
-                continue
+            if platform_requires_account_login(platform):
+                login_error = None
+                try:
+                    login_ok = await ensure_account_login(platform, account_file)
+                except Exception as exc:
+                    login_ok = False
+                    login_error = str(exc) or exc.__class__.__name__
+                if not login_ok:
+                    msg = f"登录失败: {platform_name}"
+                    if login_error:
+                        msg += f" - {login_error}"
+                    results[result_key] = {
+                        "success": False,
+                        "message": msg,
+                        "account_issue": True,
+                        "issue_type": "login_failed",
+                    }
+                    print(f"  ❌ 失败: {msg}")
+                    continue
 
             result = await publish_to_platform(platform, platform_params)
             results[result_key] = result
@@ -1086,6 +1101,26 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
     fail_count = sum(1 for results in all_results.values() for result in results.values() if not result["success"])
     print(f"成功: {success_count} 次")
     print(f"失败: {fail_count} 次")
+
+    # 账号异常反馈：汇总所有标记为 account_issue 的失败，提醒用户处理
+    seen_issues = set()
+    account_issues = []
+    for results in all_results.values():
+        for result_key, result in results.items():
+            if not result.get("account_issue"):
+                continue
+            if result_key in seen_issues:
+                continue
+            seen_issues.add(result_key)
+            platform_name = PLATFORM_NAMES.get(result_key.split("_")[0], result_key)
+            account_issues.append((result_key, platform_name, result.get("message", "")))
+
+    if account_issues:
+        print("\n========== ⚠️ 账号异常反馈 ==========")
+        for result_key, platform_name, message in account_issues:
+            print(f"  [{result_key}] {platform_name}: {message}")
+        print("\n以上账号可能已失效、被限制或登录异常，请前往对应平台检查账号状态，")
+        print("必要时重新扫码登录或联系平台客服。")
 
     return 0 if fail_count == 0 else 1
 

@@ -13,5 +13,4 @@
 #   "debug": false,
 #   "zhipu_api_key": "",
 #   "zhipu_vision_model": "glm-4v-plus",
-#   "xhs_server": ""
 # }

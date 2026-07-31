@@ -70,8 +70,6 @@ Windows 也可以直接手动复制并重命名。
 - `LOCAL_CHROME_HEADLESS`
 - `DEBUG_MODE`
 
-`XHS_SERVER` 目前只和小红书旧流程相关。
-
 ### 7. 快速开始
 
 1. 编辑 `publish_config.ini`，配置内容、素材路径、启用平台和账号文件。

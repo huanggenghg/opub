@@ -184,5 +184,25 @@ class DouyinRestrictionDetectorTests(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class DouyinCookieAuthWaitTests(unittest.TestCase):
+    def test_wait_for_publish_marker_returns_silently_when_visible(self):
+        page = FakePage(
+            "https://creator.douyin.com/creator-micro/content/upload",
+            {"text:发布视频": FakeLocator(count=1, visible=True)},
+        )
+
+        # 不应抛异常
+        asyncio.run(douyin_main._wait_for_douyin_publish_marker(page, timeout_ms=500))
+
+    def test_wait_for_publish_marker_silent_on_timeout(self):
+        page = FakePage(
+            "https://creator.douyin.com/creator-micro/content/upload",
+            {"text:发布视频": FakeLocator(count=0, visible=False)},
+        )
+
+        # 超时也不应抛异常(静默返回,由 _is_douyin_auth_page_valid 兜底)
+        asyncio.run(douyin_main._wait_for_douyin_publish_marker(page, timeout_ms=500))
+
+
 if __name__ == "__main__":
     unittest.main()

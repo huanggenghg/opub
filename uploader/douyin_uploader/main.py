@@ -110,6 +110,14 @@ async def _check_douyin_publish_restriction(page: Page, timeout_ms: int = 2000) 
         return None
 
 
+async def _wait_for_douyin_publish_marker(page: Page, timeout_ms: int = 20000) -> None:
+    """等上传页 publish 标记渲染。超时静默返回,由 _is_douyin_auth_page_valid 兜底判定。"""
+    try:
+        await page.get_by_text("发布视频", exact=True).first.wait_for(state="visible", timeout=timeout_ms)
+    except Exception:
+        pass
+
+
 async def cookie_auth(account_file):
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=True)
@@ -123,6 +131,7 @@ async def cookie_auth(account_file):
             except Exception:
                 return False
 
+            await _wait_for_douyin_publish_marker(page)
             return await _is_douyin_auth_page_valid(page)
         finally:
             await browser.close()

@@ -2,7 +2,7 @@
 import random
 from datetime import datetime
 
-from playwright.async_api import Playwright, async_playwright, Page
+from patchright.async_api import Playwright, async_playwright, Page
 import os
 import time
 import asyncio
@@ -16,26 +16,35 @@ BAIJIAHAO_HOME_URL = "https://baijiahao.baidu.com/builder/rc/home"
 BAIJIAHAO_LOGIN_URL_MARKERS = ("/login", "login")
 
 
-async def baijiahao_cookie_gen(account_file):
+async def baijiahao_cookie_gen(account_file, poll_interval: int = 3, max_wait: int = 120) -> bool:
     async with async_playwright() as playwright:
         options = {
-            'args': [
-                '--lang en-GB'
-            ],
-            'headless': LOCAL_CHROME_HEADLESS,  # Set headless option here
+            'args': ['--lang en-GB'],
+            'headless': LOCAL_CHROME_HEADLESS,
         }
-        # Make sure to run headed.
         browser = await playwright.chromium.launch(**options)
-        # Setup context however you like.
-        context = await browser.new_context()  # Pass any options
-        context = await set_init_script(context)
-        # Pause the page, and start recording manually.
-        page = await context.new_page()
-        await page.goto("https://baijiahao.baidu.com/builder/theme/bjh/login")
-        await page.pause()
-        # 点击调试器的继续，保存cookie
-        await context.storage_state(path=account_file)
-        baijiahao_logger.success("cookie saved")
+        try:
+            context = await browser.new_context()
+            context = await set_init_script(context)
+            page = await context.new_page()
+            await page.goto("https://baijiahao.baidu.com/builder/theme/bjh/login")
+            baijiahao_logger.info("请扫码登录百家号, 登录成功后脚本会自动继续")
+
+            start_time = time.time()
+            while time.time() - start_time < max_wait:
+                current_url = (page.url or "").lower()
+                if "login" not in current_url:
+                    baijiahao_logger.info(f"检测到页面跳转: {page.url}")
+                    await asyncio.sleep(2)
+                    await context.storage_state(path=account_file)
+                    baijiahao_logger.success("cookie 已保存")
+                    return True
+                await asyncio.sleep(poll_interval)
+
+            baijiahao_logger.error(f"等待登录超时 ({max_wait}秒), cookie 未保存")
+            return False
+        finally:
+            await browser.close()
 
 
 async def cookie_auth(account_file):
@@ -45,7 +54,10 @@ async def cookie_auth(account_file):
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
             page = await context.new_page()
-            await page.goto(BAIJIAHAO_HOME_URL)
+            try:
+                await page.goto(BAIJIAHAO_HOME_URL, timeout=60000, wait_until="domcontentloaded")
+            except Exception as exc:
+                baijiahao_logger.warning(f"home 页 goto 异常(继续检测): {exc}")
             await page.wait_for_timeout(timeout=5000)
 
             if await _is_baijiahao_auth_page_valid(page):
@@ -80,7 +92,7 @@ async def _is_baijiahao_auth_page_valid(page: Page) -> bool:
         return False
 
     login_markers = [
-        page.get_by_text("注册/登录百家号").first,
+        page.get_by_text("登录/注册百家号").first,
         page.get_by_text("扫码登录").first,
     ]
     for marker in login_markers:
@@ -92,6 +104,8 @@ async def _is_baijiahao_auth_page_valid(page: Page) -> bool:
         page.locator('button:has-text("发布")').first,
         page.locator('button:has-text("上传")').first,
         page.locator("div#formMain").first,
+        page.locator('[id^="asideMenuItem-"]').first,
+        page.get_by_text("发布作品").first,
     ]
     return any([await _is_baijiahao_locator_present(marker) for marker in publish_markers])
 
@@ -101,7 +115,7 @@ async def baijiahao_setup(account_file, handle=False):
         if not handle:
             return False
         baijiahao_logger.error("cookie文件不存在或已失效，即将自动打开浏览器，请扫码登录，登陆后会自动生成cookie文件")
-        await baijiahao_cookie_gen(account_file)
+        return await baijiahao_cookie_gen(account_file)
     return True
 
 class BaiJiaHaoVideo(object):
@@ -273,13 +287,27 @@ class BaiJiaHaoVideo(object):
                 baijiahao_logger.info("等待封面生成...")
                 await asyncio.sleep(3)
 
+        await self.select_creation_declaration(page)
         await self.publish_video(page, self.publish_date)
         await page.wait_for_timeout(2000)
         if await page.locator('div.passMod_dialog-container >> text=百度安全验证:visible').count():
             baijiahao_logger.error("出现验证，退出")
             raise Exception("出现验证，退出")
-        await page.wait_for_url("https://baijiahao.baidu.com/builder/rc/clue**", timeout=5000)
-        baijiahao_logger.success("视频发布成功")
+        try:
+            await page.wait_for_url("https://baijiahao.baidu.com/builder/rc/clue**", timeout=30000)
+            baijiahao_logger.success("视频发布成功")
+        except Exception:
+            current_url = page.url
+            baijiahao_logger.warning(f"未跳转到 clue 页, 当前 URL: {current_url}")
+            # 检查页面上是否有发布成功标志
+            body_text = await page.evaluate(
+                "() => (document.body && document.body.innerText) ? document.body.innerText.slice(0, 1000) : ''"
+            )
+            if "发布成功" in body_text or "成功" in body_text:
+                baijiahao_logger.success(f"检测到发布成功标志, URL: {current_url}")
+            else:
+                baijiahao_logger.error(f"发布可能失败, body 文本前 500 字: {body_text[:500]}")
+                raise Exception(f"发布后未跳转 clue 页, 当前 URL: {current_url}")
 
         await context.storage_state(path=self.account_file)  # 保存cookie
         baijiahao_logger.info('cookie更新完毕！')
@@ -335,18 +363,85 @@ class BaiJiaHaoVideo(object):
 
     async def direct_publish(self, page):
         try:
-            publish_button = page.locator("button >> text=发布")
+            # 关闭可能存在的"我知道了"引导弹窗, 避免遮挡发布按钮
+            know_button = page.locator('button:has-text("我知道了")')
+            if await know_button.count():
+                try:
+                    await know_button.first.click(timeout=2000)
+                    baijiahao_logger.info("已关闭引导弹窗")
+                    await asyncio.sleep(1)
+                except Exception:
+                    pass
+
+            publish_button = page.get_by_test_id("publish-btn")
             if await publish_button.count():
-                await publish_button.click()
+                disabled = await publish_button.get_attribute("disabled")
+                baijiahao_logger.info(f"发布按钮 disabled={disabled}, 即将点击")
+                await publish_button.click(force=True)
+                baijiahao_logger.info(f"发布按钮已点击, 当前 URL: {page.url}")
+                # 等待 2 秒后抓取页面状态, 看是否有错误提示或弹窗
+                await asyncio.sleep(2)
+                screenshot_path = "output/baijiahao_after_publish_click.png"
+                from pathlib import Path as _Path
+                _Path(screenshot_path).parent.mkdir(parents=True, exist_ok=True)
+                await page.screenshot(path=screenshot_path, full_page=True)
+                baijiahao_logger.info(f"点击后截图: {screenshot_path}")
+                # 检查是否有错误提示
+                error_toast = await page.locator('.cheetah-message-error, .cheetah-notification-error, [class*="error"][class*="toast"]').count()
+                if error_toast:
+                    error_text = await page.locator('.cheetah-message-error, .cheetah-notification-error, [class*="error"][class*="toast"]').first.text_content()
+                    baijiahao_logger.error(f"检测到错误提示: {error_text}")
+                # 检查是否有确认弹窗
+                confirm_btn = await page.locator('button:has-text("确认"), button:has-text("确定"), button:has-text("继续发布")').count()
+                if confirm_btn:
+                    baijiahao_logger.info(f"检测到确认弹窗, 按钮数量: {confirm_btn}")
+                    try:
+                        await page.locator('button:has-text("确认"), button:has-text("确定"), button:has-text("继续发布")').first.click(timeout=2000)
+                        baijiahao_logger.info("已点击确认按钮")
+                    except Exception:
+                        pass
+            else:
+                baijiahao_logger.error("未找到发布按钮")
         except Exception as e:
             baijiahao_logger.error(f"直接发布视频失败: {e}")
             raise  # 重新抛出异常，让重试装饰器捕获
 
     async def add_title_tags(self, page):
-        title_container = page.get_by_placeholder('添加标题获得更多推荐')
+        # 百家号 videoV2 编辑页只有"作品描述"字段(contenteditable div), 无独立标题输入框
+        # 用 title 填充作品描述
         if len(self.title) <= 8:
             self.title += " 你不知道的"
-        await title_container.fill(self.title[:30])
+        editor = page.locator('div[contenteditable="true"][role="textbox"]').first
+        await editor.click()
+        await page.keyboard.press("ControlOrMeta+A")
+        await page.keyboard.press("Backspace")
+        await page.keyboard.type(self.title[:30])
+
+    async def select_creation_declaration(self, page) -> None:
+        """点击创作声明 input, 在弹出的 modal 中选择'无需声明'并确定。"""
+        declaration_input = page.locator('input[placeholder="请选择创作声明"]').first
+        if not await declaration_input.count():
+            baijiahao_logger.warning("未找到创作声明 input, 跳过")
+            return
+        baijiahao_logger.info("点击创作声明 input...")
+        await declaration_input.click()
+        try:
+            await page.wait_for_selector('.cheetah-modal-title:has-text("创作声明")', timeout=5000)
+        except Exception as e:
+            baijiahao_logger.error(f"等待创作声明 modal 超时: {e}")
+            raise
+        option = page.locator('div.flex.items-center.cursor-pointer').filter(has_text="无需声明").first
+        baijiahao_logger.info("选择'无需声明'...")
+        await option.click()
+        await asyncio.sleep(1)
+        confirm_btn = page.locator('.cheetah-modal-footer button.cheetah-btn-primary').first
+        baijiahao_logger.info("点击确定...")
+        await confirm_btn.click()
+        try:
+            await page.wait_for_selector('.cheetah-modal-title:has-text("创作声明")', state='hidden', timeout=5000)
+        except Exception:
+            pass
+        baijiahao_logger.success("创作声明已选为'无需声明'")
 
     async def main(self):
         async with async_playwright() as playwright:

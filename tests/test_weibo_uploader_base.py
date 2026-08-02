@@ -47,16 +47,6 @@ class WeiboVideoUploadTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["result_url"], "https://weibo.com/v/123")
 
-    def test_main_is_alias_of_upload(self):
-        uploader = WeiboVideo(
-            title="t", file_path="/fake.mp4", tags=[], publish_date=0,
-            account_file="/fake.json", desc="", publish_strategy=PublishStrategy.IMMEDIATE,
-        )
-        with patch.object(uploader, "upload", AsyncMock(return_value={"success": True, "message": "ok"})):
-            import asyncio
-            result = asyncio.run(uploader.main())
-        self.assertEqual(result["success"], True)
-
 
 class ModuleWrapperTests(unittest.TestCase):
     def test_cookie_auth_delegates_to_classmethod(self):

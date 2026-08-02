@@ -559,10 +559,6 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
             pass
         baijiahao_logger.success("创作声明已选为'无需声明'")
 
-    async def main(self) -> PlatformResultExtras:
-        """别名 wrapper - Task 9 删"""
-        return await self.upload()
-
 
 
     # 使用 AI成片 功能

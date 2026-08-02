@@ -774,10 +774,6 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
     async def xiaohongshu_upload_video(self) -> PlatformResultExtras:
         return await self.upload()
 
-    async def main(self) -> PlatformResultExtras:
-        """别名 wrapper - Task 9 删"""
-        return await self.upload()
-
 
 class XiaoHongShuNote(XiaoHongShuBaseUploader):
     def __init__(
@@ -924,8 +920,4 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         return result
 
     async def xiaohongshu_upload_note(self) -> PlatformResultExtras:
-        return await self.upload()
-
-    async def main(self) -> PlatformResultExtras:
-        """别名 wrapper - Task 9 删"""
         return await self.upload()

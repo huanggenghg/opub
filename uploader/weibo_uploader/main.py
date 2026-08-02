@@ -541,10 +541,6 @@ class WeiboVideo(WeiboBaseUploader):
 
         return result
 
-    async def main(self) -> dict:
-        """别名 wrapper - Task 9 删"""
-        return await self.upload()
-
 
 class WeiboNote(WeiboBaseUploader):
     """微博图文发布器"""
@@ -664,7 +660,3 @@ class WeiboNote(WeiboBaseUploader):
             weibo_logger.error(_msg("❌", f"上传失败: {e}"))
 
         return result
-
-    async def main(self) -> dict:
-        """别名 wrapper - Task 9 删"""
-        return await self.upload()

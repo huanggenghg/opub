@@ -44,16 +44,6 @@ class XiaoHongShuVideoUploadTests(unittest.TestCase):
         self.assertEqual(result["result_url"], "https://xhs.link/abc")
         self.assertEqual(result["result_id"], "xyz")
 
-    def test_main_is_alias_of_upload(self):
-        uploader = XiaoHongShuVideo(
-            title="t", file_path="/fake.mp4", tags=[], publish_date=0,
-            account_file="/fake.json", desc="", publish_strategy=PublishStrategy.IMMEDIATE,
-        )
-        with patch.object(uploader, "upload", AsyncMock(return_value={"success": True, "message": "ok"})):
-            import asyncio
-            result = asyncio.run(uploader.main())
-        self.assertTrue(result["success"])
-
 
 class ModuleWrapperTests(unittest.TestCase):
     def test_setup_signature_is_5_params(self):

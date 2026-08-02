@@ -38,16 +38,6 @@ class TencentVideoUploadTests(unittest.TestCase):
         # tencent doesn't expose URL
         self.assertNotIn("result_url", result)
 
-    def test_main_is_alias_of_upload(self):
-        uploader = TencentVideo(
-            title="t", file_path="/fake.mp4", tags=[], publish_date=0,
-            account_file="/fake.json", desc="", publish_strategy=PublishStrategy.IMMEDIATE,
-        )
-        with patch.object(uploader, "upload", AsyncMock(return_value={"success": True, "message": "ok"})):
-            import asyncio
-            result = asyncio.run(uploader.main())
-        self.assertTrue(result["success"])
-
 
 class ModuleWrapperTests(unittest.TestCase):
     def test_setup_signature_is_5_params(self):

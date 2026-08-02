@@ -61,16 +61,6 @@ class DouYinVideoUploadTests(unittest.TestCase):
         self.assertTrue(result["account_issue"])
         self.assertEqual(result["issue_type"], "publish_restricted")
 
-    def test_douyin_upload_note_is_alias_of_upload(self):
-        uploader = DouYinNote(
-            image_paths=[], note="n", tags=[], publish_date=0,
-            account_file="/fake.json", title="t", publish_strategy=PublishStrategy.IMMEDIATE,
-        )
-        with patch.object(uploader, "upload", AsyncMock(return_value={"success": True, "message": "ok"})):
-            import asyncio
-            result = asyncio.run(uploader.douyin_upload_note())
-        self.assertTrue(result["success"])
-
 
 class ModuleWrapperTests(unittest.TestCase):
     def test_setup_signature_is_5_params(self):

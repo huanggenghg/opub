@@ -752,14 +752,6 @@ class DouYinVideo(DouYinBaseUploader):
             douyin_logger.warning(_msg("⚠️", f"获取视频链接失败: {e}"))
             return None
 
-    async def douyin_upload_video(self) -> PlatformResultExtras:
-        """Backward-compat wrapper - Task 9 删"""
-        return await self.upload()
-
-    async def main(self) -> PlatformResultExtras:
-        """别名 wrapper - Task 9 删"""
-        return await self.upload()
-
 
 class DouYinNote(DouYinBaseUploader):
     def __init__(
@@ -880,11 +872,3 @@ class DouYinNote(DouYinBaseUploader):
             douyin_logger.error(_msg("❌", f"上传失败: {e}"))
 
         return result
-
-    async def douyin_upload_note(self) -> PlatformResultExtras:
-        """Backward-compat wrapper - Task 9 删"""
-        return await self.upload()
-
-    async def main(self) -> PlatformResultExtras:
-        """别名 wrapper - Task 9 删"""
-        return await self.upload()

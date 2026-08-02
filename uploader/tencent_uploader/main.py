@@ -757,14 +757,6 @@ class TencentVideo(TencentBaseUploader):
 
         return result
 
-    async def tencent_upload_video(self):
-        """Backward-compat wrapper - Task 9 删"""
-        return await self.upload()
-
-    async def main(self) -> PlatformResultExtras:
-        """别名 wrapper - Task 9 删"""
-        return await self.upload()
-
 
 class TencentNote(TencentBaseUploader):
     def __init__(
@@ -860,11 +852,3 @@ class TencentNote(TencentBaseUploader):
             tencent_logger.error(_msg("❌", f"上传失败: {e}"))
 
         return result
-
-    async def tencent_upload_note(self):
-        """Backward-compat wrapper - Task 9 删"""
-        return await self.upload()
-
-    async def main(self) -> PlatformResultExtras:
-        """别名 wrapper - Task 9 删"""
-        return await self.upload()

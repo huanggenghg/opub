@@ -690,10 +690,6 @@ class KSVideo(KSBaseUploader):
 
         return result
 
-    async def main(self) -> PlatformResultExtras:
-        """别名 wrapper - Task 9 删"""
-        return await self.upload()
-
 
 class KSNote(KSBaseUploader):
     def __init__(
@@ -877,7 +873,3 @@ class KSNote(KSBaseUploader):
             kuaishou_logger.error(_msg("❌", f"上传失败: {e}"))
 
         return result
-
-    async def main(self) -> PlatformResultExtras:
-        """别名 wrapper - Task 9 删"""
-        return await self.upload()

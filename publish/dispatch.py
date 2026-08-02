@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """平台分发:登录校验与各平台发布实现"""
+import importlib
 import os
 from typing import TypedDict
 
@@ -19,59 +20,33 @@ class PlatformResultExtras(PlatformResult, total=False):
     issue_type: str
 
 
+_PLATFORM_LOGIN = {
+    "douyin":      ("uploader.douyin_uploader.main",      "cookie_auth", "douyin_setup"),
+    "xiaohongshu": ("uploader.xiaohongshu_uploader.main", "cookie_auth", "xiaohongshu_setup"),
+    "kuaishou":    ("uploader.ks_uploader.main",          "cookie_auth", "ks_setup"),
+    "tencent":     ("uploader.tencent_uploader.main",     "cookie_auth", "tencent_setup"),
+    "baijiahao":   ("uploader.baijiahao_uploader.main",   "cookie_auth", "baijiahao_setup"),
+    "bilibili":    ("uploader.bilibili_uploader.main",    "cookie_auth", "bilibili_setup"),
+    "weibo":       ("uploader.weibo_uploader.main",       "cookie_auth", "weibo_setup"),
+}
+
+
 async def ensure_login(platform: str, account_file: str) -> bool:
     """确保平台已登录，未登录则触发登录流程"""
-    account_file = resolve_path(account_file)
-
-    # 文件不存在，直接触发登录
-    if not os.path.exists(account_file):
-        pass
-    else:
-        # 文件存在，先检查 cookie 是否有效
-        check_map = {
-            "douyin": ("uploader.douyin_uploader.main", "cookie_auth"),
-            "xiaohongshu": ("uploader.xiaohongshu_uploader.main", "cookie_auth"),
-            "kuaishou": ("uploader.ks_uploader.main", "cookie_auth"),
-            "weibo": ("uploader.weibo_uploader.main", "cookie_auth"),
-            "tencent": ("uploader.tencent_uploader.main", "cookie_auth"),
-            "baijiahao": ("uploader.baijiahao_uploader.main", "cookie_auth"),
-            "bilibili": ("uploader.bilibili_uploader.main", "cookie_auth"),
-            "tk": ("uploader.tk_uploader.main", "cookie_auth"),
-        }
-
-        check_entry = check_map.get(platform)
-        if check_entry:
-            import importlib
-            module_path, func_name = check_entry
-            module = importlib.import_module(module_path)
-            check_func = getattr(module, func_name)
-            if await check_func(account_file):
-                return True
-
-    # cookie 无效，触发登录（保留原有的 setup 调用逻辑）
-    if platform == "douyin":
-        from uploader.douyin_uploader.main import douyin_setup
-        return await douyin_setup(account_file, handle=True)
-    elif platform == "xiaohongshu":
-        from uploader.xiaohongshu_uploader.main import xiaohongshu_setup
-        return await xiaohongshu_setup(account_file, handle=True)
-    elif platform == "kuaishou":
-        from uploader.ks_uploader.main import ks_setup
-        return await ks_setup(account_file, handle=True)
-    elif platform == "tencent":
-        from uploader.tencent_uploader.main import tencent_setup
-        return await tencent_setup(account_file, handle=True)
-    elif platform == "baijiahao":
-        from uploader.baijiahao_uploader.main import baijiahao_setup
-        return await baijiahao_setup(account_file, handle=True)
-    elif platform == "bilibili":
-        from uploader.bilibili_uploader.main import bilibili_setup
-        return await bilibili_setup(account_file, handle=True)
-    elif platform == "weibo":
-        from uploader.weibo_uploader.main import weibo_setup
-        return await weibo_setup(account_file, handle=True)
-    else:
+    entry = _PLATFORM_LOGIN.get(platform)
+    if entry is None:
         return False
+
+    module_path, check_name, setup_name = entry
+    module = importlib.import_module(module_path)
+
+    if os.path.exists(account_file):
+        check_func = getattr(module, check_name)
+        if await check_func(account_file):
+            return True
+
+    setup_func = getattr(module, setup_name)
+    return await setup_func(account_file, handle=True)
 
 
 async def ensure_account_login(platform: str, account_file: str) -> bool:
@@ -80,7 +55,7 @@ async def ensure_account_login(platform: str, account_file: str) -> bool:
 
 
 def platform_requires_account_login(platform: str) -> bool:
-    return platform not in {"tk"}
+    return platform in _PLATFORM_LOGIN
 
 
 async def publish_to_douyin(params: dict) -> dict:

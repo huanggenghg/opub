@@ -106,20 +106,28 @@ def format_str_for_short_title(origin_title: str) -> str:
 async def cookie_auth(account_file):
     account_file = _resolve_account_file(account_file)
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=True))
+        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=LOCAL_CHROME_HEADLESS))
         try:
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
             page = await context.new_page()
-            await page.goto(TENCENT_UPLOAD_URL)
+            await page.goto(TENCENT_UPLOAD_URL, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_url(TENCENT_UPLOAD_URL, timeout=5000)
 
-            if not await _is_tencent_login_completed(page):
-                tencent_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
-                return False
+            # 等 publish marker 出现(页面 JS 渲染需要时间,_is_tencent_login_completed 立即 check 会误判失效)
+            try:
+                await page.locator('div:has-text("发表视频")').first.wait_for(state="visible", timeout=15000)
+                tencent_logger.success(_msg("🥳", "cookie 有效"))
+                return True
+            except Exception:
+                pass
 
-            tencent_logger.success(_msg("🥳", "cookie 有效"))
-            return True
+            if await _is_tencent_login_completed(page):
+                tencent_logger.success(_msg("🥳", "cookie 有效"))
+                return True
+
+            tencent_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
+            return False
         except Exception as exc:
             tencent_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
             return False

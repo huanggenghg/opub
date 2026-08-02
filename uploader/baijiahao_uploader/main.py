@@ -6,6 +6,7 @@ from patchright.async_api import Playwright, async_playwright, Page
 import os
 import time
 import asyncio
+import re
 
 from conf import LOCAL_CHROME_PATH, LOCAL_CHROME_HEADLESS
 from utils.base_social_media import set_init_script
@@ -14,6 +15,14 @@ from utils.network import async_retry
 
 BAIJIAHAO_HOME_URL = "https://baijiahao.baidu.com/builder/rc/home"
 BAIJIAHAO_LOGIN_URL_MARKERS = ("/login", "login")
+
+
+def _extract_bjh_public_url_from_preview_href(href: str | None) -> str | None:
+    """从 builder/preview/s?id={ID} href 提取 id,拼公开链接 https://baijiahao.baidu.com/s?id={ID}。"""
+    if not href:
+        return None
+    m = re.search(r"[?&]id=(\d+)", href)
+    return f"https://baijiahao.baidu.com/s?id={m.group(1)}" if m else None
 
 
 async def baijiahao_cookie_gen(account_file, poll_interval: int = 3, max_wait: int = 120) -> bool:

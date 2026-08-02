@@ -428,23 +428,22 @@ async def publish_to_weibo(params: dict) -> dict:
         return {"success": False, "message": str(e)}
 
 
+_PUBLISH_DISPATCH = {
+    "douyin":      publish_to_douyin,
+    "xiaohongshu": publish_to_xiaohongshu,
+    "kuaishou":    publish_to_kuaishou,
+    "tencent":     publish_to_tencent,
+    "baijiahao":   publish_to_baijiahao,
+    "bilibili":    publish_to_bilibili,
+    "weibo":       publish_to_weibo,
+}
+
+
 async def publish_to_platform(platform: str, params: dict) -> dict:
     """发布到指定平台"""
-    if platform == "douyin":
-        return await publish_to_douyin(params)
-    elif platform == "xiaohongshu":
-        return await publish_to_xiaohongshu(params)
-    elif platform == "kuaishou":
-        return await publish_to_kuaishou(params)
-    elif platform == "bilibili":
-        return await publish_to_bilibili(params)
-    elif platform == "tencent":
-        return await publish_to_tencent(params)
-    elif platform == "baijiahao":
-        return await publish_to_baijiahao(params)
-    elif platform == "tk":
+    handler = _PUBLISH_DISPATCH.get(platform)
+    if handler is not None:
+        return await handler(params)
+    if platform == "tk":
         return {"success": False, "message": "TikTok平台暂未实现"}
-    elif platform == "weibo":
-        return await publish_to_weibo(params)
-    else:
-        return {"success": False, "message": f"未知平台: {platform}"}
+    return {"success": False, "message": f"未知平台: {platform}"}

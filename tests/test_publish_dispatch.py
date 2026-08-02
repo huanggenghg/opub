@@ -75,5 +75,51 @@ class EnsureLoginTests(unittest.TestCase):
         mock_module.douyin_setup.assert_awaited_once()
 
 
+class PublishDispatchRegistryTests(unittest.TestCase):
+    def test_registry_covers_all_enabled_platforms(self):
+        from publish.dispatch import _PUBLISH_DISPATCH
+        expected = {"douyin", "xiaohongshu", "kuaishou", "tencent", "baijiahao", "bilibili", "weibo"}
+        self.assertEqual(set(_PUBLISH_DISPATCH.keys()), expected)
+
+    def test_registry_values_are_callable(self):
+        from publish.dispatch import _PUBLISH_DISPATCH
+        for platform, handler in _PUBLISH_DISPATCH.items():
+            self.assertTrue(callable(handler), f"{platform} handler not callable")
+
+    def test_publish_to_platform_dispatches_to_handler(self):
+        import asyncio
+        from publish.dispatch import publish_to_platform
+        with patch("publish.dispatch._PUBLISH_DISPATCH") as mock_reg:
+            mock_handler = AsyncMock(return_value={"success": True, "message": "ok"})
+            mock_reg.get.return_value = mock_handler
+            result = asyncio.run(
+                publish_to_platform("douyin", {"key": "val"})
+            )
+        self.assertEqual(result, {"success": True, "message": "ok"})
+        mock_handler.assert_awaited_once_with({"key": "val"})
+
+    def test_publish_to_platform_returns_stub_for_tk(self):
+        import asyncio
+        from publish.dispatch import publish_to_platform
+        with patch("publish.dispatch._PUBLISH_DISPATCH") as mock_reg:
+            mock_reg.get.return_value = None
+            result = asyncio.run(
+                publish_to_platform("tk", {})
+            )
+        self.assertFalse(result["success"])
+        self.assertIn("TikTok", result["message"])
+
+    def test_publish_to_platform_returns_error_for_unknown(self):
+        import asyncio
+        from publish.dispatch import publish_to_platform
+        with patch("publish.dispatch._PUBLISH_DISPATCH") as mock_reg:
+            mock_reg.get.return_value = None
+            result = asyncio.run(
+                publish_to_platform("unknown_plat", {})
+            )
+        self.assertFalse(result["success"])
+        self.assertIn("未知平台", result["message"])
+
+
 if __name__ == "__main__":
     unittest.main()

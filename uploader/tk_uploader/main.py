@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 
-from patchright.async_api import Page, Playwright, async_playwright
+from patchright.async_api import Page, async_playwright
 
 from conf import LOCAL_CHROME_HEADLESS
 from uploader.base_video import (
@@ -14,7 +14,6 @@ from uploader.base_video import (
     _msg,
 )
 from uploader.tk_uploader.tk_config import Tk_Locator
-from utils.base_social_media import set_init_script
 from utils.log import tiktok_logger
 
 
@@ -267,9 +266,8 @@ class TiktokVideo(BaseBrowserUploader):
                 await asyncio.sleep(2)
 
     async def choose_base_locator(self, page):
-        # await page.wait_for_selector('div.upload-container')
         if await page.locator('iframe[data-tt="Upload_index_iframe"]').count():
-            self.locator_base = self.locator_base
+            self.locator_base = page.frame_locator(Tk_Locator.tk_iframe)
         else:
             self.locator_base = page.locator(Tk_Locator.default)
 

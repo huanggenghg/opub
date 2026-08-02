@@ -183,7 +183,7 @@ class BaiJiaHaoVideo(object):
         return
         print("视频出错了，重新上传中")
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright) -> dict:
         # 使用 Chromium 浏览器启动一个浏览器实例
         launch_options = {"headless": self.headless}
         if self.local_executable_path:
@@ -302,13 +302,17 @@ class BaiJiaHaoVideo(object):
         if await page.locator('div.passMod_dialog-container >> text=百度安全验证:visible').count():
             baijiahao_logger.error("出现验证，退出")
             raise Exception("出现验证，退出")
+        video_link = None
         try:
             await page.wait_for_url("https://baijiahao.baidu.com/builder/rc/clue**", timeout=30000)
             baijiahao_logger.success("视频发布成功")
+            if self.publish_date == 0:
+                video_link = await self._capture_content_url(page)
+            else:
+                baijiahao_logger.info("定时发布,跳过内容链接抓取")
         except Exception:
             current_url = page.url
             baijiahao_logger.warning(f"未跳转到 clue 页, 当前 URL: {current_url}")
-            # 检查页面上是否有发布成功标志
             body_text = await page.evaluate(
                 "() => (document.body && document.body.innerText) ? document.body.innerText.slice(0, 1000) : ''"
             )
@@ -324,6 +328,41 @@ class BaiJiaHaoVideo(object):
         # 关闭浏览器上下文和浏览器实例
         await context.close()
         await browser.close()
+        return {"video_link": video_link}
+
+
+    async def _capture_content_url(self, page: Page) -> str | None:
+        """跳转内容管理页,取第一条列表项的公开链接。抓不到返回 None。"""
+        content_url = "https://baijiahao.baidu.com/builder/rc/content"
+        try:
+            await page.goto(content_url, timeout=60000, wait_until="domcontentloaded")
+        except Exception as e:
+            baijiahao_logger.warning(f"goto 内容管理页异常(继续): {e}")
+
+        try:
+            await page.wait_for_function(
+                "() => { const r = document.querySelector('#root'); return r && r.children.length > 0; }",
+                timeout=30000,
+            )
+        except Exception:
+            pass
+
+        item_locator = page.locator("div.client_pages_content_v2_components_articleItem")
+        for _ in range(6):
+            if await item_locator.count() > 0:
+                break
+            await asyncio.sleep(5)
+        else:
+            baijiahao_logger.warning("内容管理页未出现列表项,跳过链接抓取")
+            return None
+
+        href = await item_locator.first.locator('a[href*="builder/preview/s?id="]').first.get_attribute("href")
+        public_url = _extract_bjh_public_url_from_preview_href(href)
+        if public_url:
+            baijiahao_logger.success(f"已抓取内容公开链接: {public_url}")
+        else:
+            baijiahao_logger.warning(f"无法从 href 提取 id: {href}")
+        return public_url
 
 
     @async_retry(timeout=300)  # 例如，最多重试3次，超时时间为180秒
@@ -454,7 +493,7 @@ class BaiJiaHaoVideo(object):
 
     async def main(self):
         async with async_playwright() as playwright:
-            await self.upload(playwright)
+            return await self.upload(playwright)
 
 
 

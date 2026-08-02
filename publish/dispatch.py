@@ -226,30 +226,27 @@ async def publish_to_baijiahao(params: dict) -> dict:
 
 async def publish_to_bilibili(params: dict) -> dict:
     """发布到 B站 (via biliup CLI)"""
-    from uploader.bilibili_uploader.main import upload as biliup_upload
+    from uploader.bilibili_uploader.main import BilibiliUploader
 
     account_file = resolve_path(params["account_file"])
-
     title = truncate_title(params["title"], "bilibili")
-    tags = params["tags"]
-    content_type = params["content_type"]
 
-    if content_type != "video":
+    if params["content_type"] != "video":
         return {"success": False, "message": "B站暂只支持视频发布"}
 
-    video_file = resolve_path(params["video_file"])
-    if not video_file or not os.path.exists(video_file):
-        return {"success": False, "message": f"视频文件不存在: {video_file}"}
+    params = {**params, "video_file": resolve_path(params["video_file"])}
+
+    err = BilibiliUploader.validate_base_args(params)
+    if err:
+        return err
 
     try:
-        result = await biliup_upload(
-            account_file=account_file,
-            video_file=video_file,
-            title=title,
-            desc=params["desc"],
-            tags=tags,
+        uploader = BilibiliUploader(
+            title=title, file_path=params["video_file"], tags=params["tags"],
+            account_file=account_file, desc=params["desc"],
+            publish_strategy=params["publish_strategy"],
         )
-        return result
+        return await uploader.upload()
     except Exception as e:
         return {"success": False, "message": str(e)}
 

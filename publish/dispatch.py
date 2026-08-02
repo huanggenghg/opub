@@ -60,61 +60,34 @@ def platform_requires_account_login(platform: str) -> bool:
 
 async def publish_to_douyin(params: dict) -> dict:
     """发布到抖音"""
-    from uploader.douyin_uploader.main import DouYinVideo, DouYinNote, DouyinPublishRestrictedError
+    from uploader.douyin_uploader.main import DouYinVideo, DouYinNote
 
     account_file = resolve_path(params["account_file"])
-
     title = truncate_title(params["title"], "douyin")
-    tags = params["tags"]
-    publish_strategy = params["publish_strategy"]
-    publish_time = params["publish_time"]
-    content_type = params["content_type"]
+
+    if params["content_type"] == "video":
+        params = {**params, "video_file": resolve_path(params["video_file"])}
+    elif params.get("images"):
+        params = {**params, "images": [resolve_path(img) for img in params["images"]]}
+
+    err = DouYinVideo.validate_base_args(params)
+    if err:
+        return err
 
     try:
-        if content_type == "video":
-            video_file = resolve_path(params["video_file"])
-            if not video_file or not os.path.exists(video_file):
-                return {"success": False, "message": f"视频文件不存在: {video_file}"}
-
+        if params["content_type"] == "video":
             uploader = DouYinVideo(
-                title=title,
-                file_path=video_file,
-                tags=tags,
-                publish_date=publish_time or 0,
-                account_file=account_file,
-                desc=params["desc"],
-                publish_strategy=publish_strategy,
+                title=title, file_path=params["video_file"], tags=params["tags"],
+                publish_date=params["publish_time"] or 0, account_file=account_file,
+                desc=params["desc"], publish_strategy=params["publish_strategy"],
             )
-            await uploader.main()
-            return {"success": True, "message": "发布成功"}
         else:
-            images = params["images"]
-            if not images:
-                return {"success": False, "message": "图文模式需要提供图片"}
-
-            image_paths = [resolve_path(img) for img in images]
-            for img_path in image_paths:
-                if not os.path.exists(img_path):
-                    return {"success": False, "message": f"图片文件不存在: {img_path}"}
-
             uploader = DouYinNote(
-                image_paths=image_paths,
-                note=params["desc"],
-                tags=tags,
-                publish_date=publish_time or 0,
-                account_file=account_file,
-                title=title,
-                publish_strategy=publish_strategy,
+                image_paths=params["images"], note=params["desc"], tags=params["tags"],
+                publish_date=params["publish_time"] or 0, account_file=account_file,
+                title=title, publish_strategy=params["publish_strategy"],
             )
-            await uploader.douyin_upload_note()
-            return {"success": True, "message": "发布成功"}
-    except DouyinPublishRestrictedError as exc:
-        return {
-            "success": False,
-            "message": f"账号被限制发布: {exc.toast_text}",
-            "account_issue": True,
-            "issue_type": "publish_restricted",
-        }
+        return await uploader.upload()
     except Exception as e:
         return {"success": False, "message": str(e)}
 

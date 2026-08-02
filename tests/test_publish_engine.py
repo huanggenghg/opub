@@ -212,8 +212,6 @@ class PublishEngineTests(unittest.TestCase):
         preflight.assert_not_awaited()
 
     def test_publish_to_douyin_marks_restriction_as_account_issue(self):
-        from uploader.douyin_uploader.main import DouyinPublishRestrictedError
-
         params = {
             "account_file": "cookies/douyin_uploader/account.json",
             "title": "标题",
@@ -225,11 +223,16 @@ class PublishEngineTests(unittest.TestCase):
             "desc": "",
         }
 
-        async def fake_main():
-            raise DouyinPublishRestrictedError("作品发布失败，健康分不足投稿功能受限")
+        restriction_result = {
+            "success": False,
+            "message": "账号被限制发布: 作品发布失败，健康分不足投稿功能受限",
+            "account_issue": True,
+            "issue_type": "publish_restricted",
+        }
 
         with patch("uploader.douyin_uploader.main.DouYinVideo") as MockDouYinVideo:
-            MockDouYinVideo.return_value.main = AsyncMock(side_effect=fake_main)
+            MockDouYinVideo.validate_base_args.return_value = None
+            MockDouYinVideo.return_value.upload = AsyncMock(return_value=restriction_result)
             result = publish_all.run_async_for_test(publish_all.publish_to_douyin(params))
 
         self.assertFalse(result["success"])

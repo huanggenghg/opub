@@ -4,35 +4,34 @@ from __future__ import annotations
 from datetime import datetime
 
 import asyncio
-import inspect
 import os
 import re
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 from patchright.async_api import Page
-from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
 
-from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
-from uploader.base_video import BaseVideoUploader
+from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from uploader.base_video import (
+    BaseBrowserUploader,
+    PlatformResultExtras,
+    PublishStrategy,
+    _build_launch_kwargs,
+    _build_login_result,
+    _emit_qrcode_callback,
+    _get_qrcode_utils,
+    _msg,
+)
 from utils.base_social_media import set_init_script
-from utils.login_qrcode import build_login_qrcode_path
-from utils.login_qrcode import decode_qrcode_from_path
-from utils.login_qrcode import print_terminal_qrcode
-from utils.login_qrcode import remove_qrcode_file
-from utils.login_qrcode import save_data_url_image
 from utils.log import douyin_logger
 from utils.excel_writer import write_video_link
 
 DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 DOUYIN_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 DOUYIN_UPLOAD_URL = "https://creator.douyin.com/creator-micro/content/upload"
+DOUYIN_LOGIN_URL = "https://creator.douyin.com/"
 DOUYIN_LOGIN_URL_MARKERS = ("login", "passport")
-
-
-def _msg(emoji: str, text: str) -> str:
-    return f"{emoji} {text}"
 
 
 def extract_video_id_from_url(url: str) -> str | None:
@@ -72,26 +71,6 @@ def build_video_link(video_id: str) -> str:
     return f"https://www.douyin.com/video/{video_id}"
 
 
-async def _emit_qrcode_callback(qrcode_callback, payload: dict):
-    if not qrcode_callback:
-        return
-
-    callback_result = qrcode_callback(payload)
-    if inspect.isawaitable(callback_result):
-        await callback_result
-
-
-def _build_login_result(success: bool, status: str, message: str, account_file: str, qrcode: dict | None = None, current_url: str = "") -> dict:
-    return {
-        "success": success,
-        "status": status,
-        "message": message,
-        "account_file": str(account_file),
-        "qrcode": qrcode,
-        "current_url": current_url,
-    }
-
-
 class DouyinPublishRestrictedError(Exception):
     """抖音账号被限制发布(如健康分不足)时抛出。"""
     def __init__(self, toast_text: str):
@@ -119,22 +98,8 @@ async def _wait_for_douyin_publish_marker(page: Page, timeout_ms: int = 20000) -
 
 
 async def cookie_auth(account_file):
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True)
-        try:
-            context = await browser.new_context(storage_state=account_file)
-            context = await set_init_script(context)
-            page = await context.new_page()
-            await page.goto(DOUYIN_UPLOAD_URL)
-            try:
-                await page.wait_for_url(DOUYIN_UPLOAD_URL, timeout=5000)
-            except Exception:
-                return False
-
-            await _wait_for_douyin_publish_marker(page)
-            return await _is_douyin_auth_page_valid(page)
-        finally:
-            await browser.close()
+    """验证 cookie 是否有效 - 委托 DouYinBaseUploader.cookie_auth"""
+    return await DouYinBaseUploader.cookie_auth(account_file)
 
 
 async def _is_douyin_locator_visible(locator) -> bool:
@@ -207,15 +172,19 @@ async def _extract_douyin_qrcode_src(page: Page) -> str:
 
 
 async def _save_douyin_qrcode(page: Page, account_file: str, previous_qrcode_path: Path | None = None, qrcode_callback=None) -> dict:
+    qrcode_utils = _get_qrcode_utils()
     qrcode_src = await _extract_douyin_qrcode_src(page)
-    qrcode_path = save_data_url_image(qrcode_src, build_login_qrcode_path(account_file))
+    qrcode_path = qrcode_utils["save_data_url_image"](
+        qrcode_src,
+        qrcode_utils["build_login_qrcode_path"](account_file),
+    )
     if previous_qrcode_path and previous_qrcode_path != qrcode_path:
-        if remove_qrcode_file(previous_qrcode_path):
+        if qrcode_utils["remove_qrcode_file"](previous_qrcode_path):
             douyin_logger.info(_msg("🧹", f"临时二维码文件已清理: {previous_qrcode_path}"))
     douyin_logger.info(_msg("🖼️", f"二维码已经准备好啦，已保存到: {qrcode_path}"))
-    qrcode_content = decode_qrcode_from_path(qrcode_path)
+    qrcode_content = qrcode_utils["decode_qrcode_from_path"](qrcode_path)
     if qrcode_content:
-        print_terminal_qrcode(qrcode_content, qrcode_path, "抖音APP")
+        qrcode_utils["print_terminal_qrcode"](qrcode_content, qrcode_path, "抖音APP")
     else:
         douyin_logger.warning(_msg("😵", f"终端没法完整显示二维码，请打开 {qrcode_path} 扫码"))
     qrcode_info = {
@@ -276,15 +245,16 @@ async def douyin_cookie_gen(
     max_checks: int = 100,
     headless: bool = LOCAL_CHROME_HEADLESS,
 ):
+    qrcode_utils = _get_qrcode_utils()
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=headless)
+        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless))
         context = await browser.new_context()
         context = await set_init_script(context)
         qrcode_path = None
         result = _build_login_result(False, "failed", "抖音登录失败", account_file)
         try:
             page = await context.new_page()
-            await page.goto("https://creator.douyin.com/")
+            await page.goto(DOUYIN_LOGIN_URL)
             qrcode_info = await _save_douyin_qrcode(page, account_file, qrcode_callback=qrcode_callback)
             qrcode_path = Path(qrcode_info["image_path"])
             douyin_logger.info(_msg("🧍", "请扫码，小人正在耐心等待登录完成"))
@@ -311,7 +281,7 @@ async def douyin_cookie_gen(
         except Exception as exc:
             result = _build_login_result(False, "failed", str(exc), account_file, current_url=page.url if "page" in locals() else "")
         finally:
-            if remove_qrcode_file(qrcode_path):
+            if qrcode_utils["remove_qrcode_file"](qrcode_path):
                 douyin_logger.info(_msg("🧹", f"临时二维码文件已清理: {qrcode_path}"))
             if not result["success"]:
                 douyin_logger.error(_msg("😢", f"登录失败: {result['message']}"))
@@ -320,7 +290,15 @@ async def douyin_cookie_gen(
         return result
 
 
-class DouYinBaseUploader(BaseVideoUploader):
+class DouYinBaseUploader(BaseBrowserUploader):
+    """抖音上传器基类 - hook layer for BaseBrowserUploader."""
+
+    PLATFORM_NAME = "douyin"
+    UPLOAD_URL = DOUYIN_UPLOAD_URL
+    LOGIN_URL = DOUYIN_LOGIN_URL
+    LOGIN_MARKERS = list(DOUYIN_LOGIN_URL_MARKERS)
+    PUBLISH_MARKERS = ["发布视频", "发布图文"]
+
     def __init__(
         self,
         publish_date: datetime | int,
@@ -337,7 +315,52 @@ class DouYinBaseUploader(BaseVideoUploader):
         self.local_executable_path = LOCAL_CHROME_PATH
         self.headless = headless
 
-    async def validate_base_args(self):
+    @classmethod
+    async def cookie_auth(cls, account_file: str) -> bool:
+        """Override: douyin cookie 校验需要等待 publish marker + DOM marker 检查。"""
+        if not os.path.exists(account_file):
+            return False
+        async with async_playwright() as playwright:
+            browser = await cls._launch_browser(playwright, headless=True)
+            try:
+                context = await cls._init_context(browser, account_file)
+                page = await context.new_page()
+                await page.goto(cls.UPLOAD_URL)
+                try:
+                    await page.wait_for_url(cls.UPLOAD_URL, timeout=5000)
+                except Exception:
+                    return False
+                await _wait_for_douyin_publish_marker(page)
+                return await _is_douyin_auth_page_valid(page)
+            except Exception:
+                return False
+            finally:
+                await browser.close()
+
+    @classmethod
+    async def is_login_completed(cls, page: Page) -> bool:
+        """Override hook: douyin 登录完成判断(基于 URL + DOM marker)。"""
+        return await _is_douyin_login_completed(page)
+
+    @classmethod
+    async def extract_qrcode_src(cls, page: Page):
+        """Override hook: 从抖音登录页提取 QR 图片 src。"""
+        return await _extract_douyin_qrcode_src(page)
+
+    @classmethod
+    async def _init_context(cls, browser, account_file=None):
+        """Override: douyin 上传需要 geolocation 权限(用于 set_location)。"""
+        permissions = ["geolocation"]
+        if account_file and os.path.exists(account_file):
+            context = await browser.new_context(permissions=permissions, storage_state=account_file)
+        else:
+            context = await browser.new_context(permissions=permissions)
+        return await set_init_script(context)
+
+    async def validate_login_and_strategy(self):
+        """Renamed from `validate_base_args(self)` to avoid collision with
+        `BasePlatformUploader.validate_base_args(params)` staticmethod (called by dispatch).
+        Checks cookie existence/validity + publish_strategy + publish_date."""
         if not os.path.exists(self.account_file):
             raise RuntimeError(f"cookie文件不存在，请先完成抖音登录: {self.account_file}")
         if not await cookie_auth(self.account_file):
@@ -503,7 +526,7 @@ class DouYinVideo(DouYinBaseUploader):
         self.desc = desc or ""
 
     async def validate_upload_args(self):
-        await self.validate_base_args()
+        await self.validate_login_and_strategy()
         if not self.title or not str(self.title).strip():
             raise ValueError("视频模式下，title 是必须的")
 
@@ -567,126 +590,132 @@ class DouYinVideo(DouYinBaseUploader):
         douyin_logger.info(_msg("🥳", "视频封面设置完成"))
         await page.wait_for_selector("div.extractFooter", state="detached")
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload_video_content(self, page: Page) -> str | None:
+        """上传视频内容(页面已通过 _browser_session 打开)。返回视频链接或 None。"""
+        douyin_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
+        douyin_logger.info(_msg("🧭", "小人正在赶往上传主页"))
+        await page.goto(DOUYIN_UPLOAD_URL)
+        await page.wait_for_url(DOUYIN_UPLOAD_URL)
+        await page.locator("div[class^='container'] input").set_input_files(self.file_path)
+
+        restriction_text = await _check_douyin_publish_restriction(page)
+        if restriction_text:
+            raise DouyinPublishRestrictedError(restriction_text)
+
+        while True:
+            try:
+                await page.wait_for_url(
+                    "https://creator.douyin.com/creator-micro/content/publish?enter_from=publish_page",
+                    timeout=3000,
+                )
+                douyin_logger.info(_msg("🥳", "已经进入 version_1 发布页面"))
+                break
+            except Exception:
+                try:
+                    await page.wait_for_url(
+                        "https://creator.douyin.com/creator-micro/content/post/video?enter_from=publish_page",
+                        timeout=3000,
+                    )
+                    douyin_logger.info(_msg("🥳", "已经进入 version_2 发布页面"))
+                    break
+                except Exception:
+                    douyin_logger.debug(_msg("🧍", "还没进到视频发布页面，小人继续等一会"))
+                    await asyncio.sleep(0.5)
+
+        await asyncio.sleep(1)
+        douyin_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
+        await self.fill_title_and_description(page, self.title, self.desc or self.title, self.tags)
+        douyin_logger.info(_msg("🏷️", f"小人一共贴了 {len(self.tags)} 个话题"))
+
+        while True:
+            try:
+                number = await page.locator('[class^="long-card"] div:has-text("重新上传")').count()
+                if number > 0:
+                    douyin_logger.success(_msg("🥳", "视频已经传完啦"))
+                    break
+                douyin_logger.info(_msg("🏃", "小人正在努力上传视频"))
+                await asyncio.sleep(2)
+                if await page.locator('div.progress-div > div:has-text("上传失败")').count():
+                    douyin_logger.error(_msg("😵", "检测到上传失败，小人准备重试"))
+                    await self.handle_upload_error(page)
+            except Exception:
+                douyin_logger.debug(_msg("🧍", "小人还在等视频上传完成"))
+                await asyncio.sleep(2)
+
+        if self.productLink and self.productTitle:
+            douyin_logger.info(_msg("🛒", "小人正在设置商品链接"))
+            await self.set_product_link(page, self.productLink, self.productTitle)
+            douyin_logger.info(_msg("🥳", "商品链接设置完成"))
+
+        await self.set_thumbnail(page)
+
+        third_part_element = '[class^="info"] > [class^="first-part"] div div.semi-switch'
+        if await page.locator(third_part_element).count():
+            if "semi-switch-checked" not in await page.eval_on_selector(third_part_element, "div => div.className"):
+                await page.locator(third_part_element).locator("input.semi-switch-native-control").click()
+
+        if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
+            await self.set_schedule_time_douyin(page, self.publish_date)
+
+        while True:
+            try:
+                publish_button = page.get_by_role("button", name="发布", exact=True)
+                if await publish_button.count():
+                    await publish_button.click()
+                await page.wait_for_url(
+                    "https://creator.douyin.com/creator-micro/content/manage**",
+                    timeout=3000,
+                )
+                douyin_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
+
+                # 发布成功后获取视频链接并写入Excel
+                video_link = await self._get_video_link(page)
+                if video_link:
+                    douyin_logger.info(_msg("🔗", f"视频链接: {video_link}"))
+                    excel_result = write_video_link(video_link=video_link)
+                    if excel_result["success"]:
+                        douyin_logger.success(_msg("📝", f"已写入Excel: {excel_result['filepath']}"))
+                    else:
+                        douyin_logger.warning(_msg("⚠️", f"写入Excel失败: {excel_result['message']}"))
+                else:
+                    douyin_logger.warning(_msg("⚠️", "未能获取视频链接"))
+
+                return video_link
+            except Exception:
+                await self.handle_auto_video_cover(page)
+                douyin_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
+                if self.debug:
+                    await page.screenshot(full_page=True)
+                await asyncio.sleep(0.5)
+
+    async def upload(self) -> PlatformResultExtras:
+        """主入口，返回 PlatformResultExtras。捕获 DouyinPublishRestrictedError 映射为 account_issue。"""
         douyin_logger.info(_msg("🧍", "小人先检查 cookie、视频文件、封面和发布时间"))
         await self.validate_upload_args()
         douyin_logger.info(_msg("🥳", "上传前检查通过"))
 
-        browser = await playwright.chromium.launch(headless=self.headless)
-        context = await browser.new_context(
-            storage_state=f"{self.account_file}",
-            permissions=["geolocation"],
-        )
-        context = await set_init_script(context)
+        result: PlatformResultExtras = {"success": False, "message": ""}
 
-        upload_success = False
         try:
-            page = await context.new_page()
-            await page.goto("https://creator.douyin.com/creator-micro/content/upload")
-            douyin_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
-            douyin_logger.info(_msg("🧭", "小人正在赶往上传主页"))
-            await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload")
-            await page.locator("div[class^='container'] input").set_input_files(self.file_path)
-
-            restriction_text = await _check_douyin_publish_restriction(page)
-            if restriction_text:
-                raise DouyinPublishRestrictedError(restriction_text)
-
-            while True:
-                try:
-                    await page.wait_for_url(
-                        "https://creator.douyin.com/creator-micro/content/publish?enter_from=publish_page",
-                        timeout=3000,
-                    )
-                    douyin_logger.info(_msg("🥳", "已经进入 version_1 发布页面"))
-                    break
-                except Exception:
-                    try:
-                        await page.wait_for_url(
-                            "https://creator.douyin.com/creator-micro/content/post/video?enter_from=publish_page",
-                            timeout=3000,
-                        )
-                        douyin_logger.info(_msg("🥳", "已经进入 version_2 发布页面"))
-                        break
-                    except Exception:
-                        douyin_logger.debug(_msg("🧍", "还没进到视频发布页面，小人继续等一会"))
-                        await asyncio.sleep(0.5)
-
-            await asyncio.sleep(1)
-            douyin_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
-            await self.fill_title_and_description(page, self.title, self.desc or self.title, self.tags)
-            douyin_logger.info(_msg("🏷️", f"小人一共贴了 {len(self.tags)} 个话题"))
-
-            while True:
-                try:
-                    number = await page.locator('[class^="long-card"] div:has-text("重新上传")').count()
-                    if number > 0:
-                        douyin_logger.success(_msg("🥳", "视频已经传完啦"))
-                        break
-                    douyin_logger.info(_msg("🏃", "小人正在努力上传视频"))
-                    await asyncio.sleep(2)
-                    if await page.locator('div.progress-div > div:has-text("上传失败")').count():
-                        douyin_logger.error(_msg("😵", "检测到上传失败，小人准备重试"))
-                        await self.handle_upload_error(page)
-                except Exception:
-                    douyin_logger.debug(_msg("🧍", "小人还在等视频上传完成"))
-                    await asyncio.sleep(2)
-
-            if self.productLink and self.productTitle:
-                douyin_logger.info(_msg("🛒", "小人正在设置商品链接"))
-                await self.set_product_link(page, self.productLink, self.productTitle)
-                douyin_logger.info(_msg("🥳", "商品链接设置完成"))
-
-            await self.set_thumbnail(page)
-
-            third_part_element = '[class^="info"] > [class^="first-part"] div div.semi-switch'
-            if await page.locator(third_part_element).count():
-                if "semi-switch-checked" not in await page.eval_on_selector(third_part_element, "div => div.className"):
-                    await page.locator(third_part_element).locator("input.semi-switch-native-control").click()
-
-            if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
-                await self.set_schedule_time_douyin(page, self.publish_date)
-
-            while True:
-                try:
-                    publish_button = page.get_by_role("button", name="发布", exact=True)
-                    if await publish_button.count():
-                        await publish_button.click()
-                    await page.wait_for_url(
-                        "https://creator.douyin.com/creator-micro/content/manage**",
-                        timeout=3000,
-                    )
-                    douyin_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
-
-                    # 发布成功后获取视频链接并写入Excel
-                    video_link = await self._get_video_link(page)
-                    if video_link:
-                        douyin_logger.info(_msg("🔗", f"视频链接: {video_link}"))
-                        # 写入Excel
-                        excel_result = write_video_link(video_link=video_link)
-                        if excel_result["success"]:
-                            douyin_logger.success(_msg("📝", f"已写入Excel: {excel_result['filepath']}"))
-                        else:
-                            douyin_logger.warning(_msg("⚠️", f"写入Excel失败: {excel_result['message']}"))
-                    else:
-                        douyin_logger.warning(_msg("⚠️", "未能获取视频链接"))
-
-                    break
-                except Exception:
-                    await self.handle_auto_video_cover(page)
-                    douyin_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
-                    if self.debug:
-                        await page.screenshot(full_page=True)
-                    await asyncio.sleep(0.5)
-
-            upload_success = True
-        finally:
-            if upload_success:
-                await context.storage_state(path=self.account_file)
+            async with self._browser_session() as page:
+                video_link = await self.upload_video_content(page)
                 douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
-                await asyncio.sleep(2)
-            await context.close()
-            await browser.close()
+                result["success"] = True
+                if video_link:
+                    result["result_url"] = video_link
+                    result["message"] = f"发布成功，视频链接: {video_link}"
+                else:
+                    result["message"] = "发布成功"
+        except DouyinPublishRestrictedError as exc:
+            result["message"] = f"账号被限制发布: {exc.toast_text}"
+            result["account_issue"] = True
+            result["issue_type"] = "publish_restricted"
+            douyin_logger.error(_msg("😢", f"账号被限制发布: {exc.toast_text}"))
+        except Exception as e:
+            result["message"] = str(e)
+            douyin_logger.error(_msg("❌", f"上传失败: {e}"))
+
+        return result
 
     async def _get_video_link(self, page: Page) -> str | None:
         """
@@ -723,12 +752,13 @@ class DouYinVideo(DouYinBaseUploader):
             douyin_logger.warning(_msg("⚠️", f"获取视频链接失败: {e}"))
             return None
 
-    async def douyin_upload_video(self):
-        async with async_playwright() as playwright:
-            await self.upload(playwright)
+    async def douyin_upload_video(self) -> PlatformResultExtras:
+        """Backward-compat wrapper - Task 9 删"""
+        return await self.upload()
 
-    async def main(self):
-        await self.douyin_upload_video()
+    async def main(self) -> PlatformResultExtras:
+        """别名 wrapper - Task 9 删"""
+        return await self.upload()
 
 
 class DouYinNote(DouYinBaseUploader):
@@ -757,7 +787,7 @@ class DouYinNote(DouYinBaseUploader):
         self.tags = tags or []
 
     async def validate_upload_args(self):
-        await self.validate_base_args()
+        await self.validate_login_and_strategy()
         if not self.title or not str(self.title).strip():
             raise ValueError("图文模式下，title 是必须的")
         if not self.image_paths:
@@ -822,35 +852,39 @@ class DouYinNote(DouYinBaseUploader):
                 douyin_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
                 await asyncio.sleep(0.5)
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self) -> PlatformResultExtras:
+        """主入口，返回 PlatformResultExtras。捕获 DouyinPublishRestrictedError 映射为 account_issue。"""
         douyin_logger.info(_msg("🧍", "小人先检查 cookie、图片和发布时间"))
         await self.validate_upload_args()
         douyin_logger.info(_msg("🥳", "图文上传前检查通过"))
 
-        browser = await playwright.chromium.launch(headless=self.headless)
-        context = await browser.new_context(
-            storage_state=f"{self.account_file}",
-            permissions=["geolocation"],
-        )
-        context = await set_init_script(context)
+        result: PlatformResultExtras = {"success": False, "message": ""}
 
-        upload_success = False
         try:
-            page = await context.new_page()
-            await page.goto("https://creator.douyin.com/creator-micro/content/upload")
-            douyin_logger.info(_msg("🧭", "小人正在赶往图文发布页"))
-            await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload")
+            async with self._browser_session() as page:
+                await page.goto(DOUYIN_UPLOAD_URL)
+                douyin_logger.info(_msg("🧭", "小人正在赶往图文发布页"))
+                await page.wait_for_url(DOUYIN_UPLOAD_URL)
 
-            await self.upload_note_content(page)
-            upload_success = True
-        finally:
-            if upload_success:
-                await context.storage_state(path=self.account_file)
+                await self.upload_note_content(page)
                 douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
-                await asyncio.sleep(2)
-            await context.close()
-            await browser.close()
+                result["success"] = True
+                result["message"] = "发布成功"
+        except DouyinPublishRestrictedError as exc:
+            result["message"] = f"账号被限制发布: {exc.toast_text}"
+            result["account_issue"] = True
+            result["issue_type"] = "publish_restricted"
+            douyin_logger.error(_msg("😢", f"账号被限制发布: {exc.toast_text}"))
+        except Exception as e:
+            result["message"] = str(e)
+            douyin_logger.error(_msg("❌", f"上传失败: {e}"))
 
-    async def douyin_upload_note(self):
-        async with async_playwright() as playwright:
-            await self.upload(playwright)
+        return result
+
+    async def douyin_upload_note(self) -> PlatformResultExtras:
+        """Backward-compat wrapper - Task 9 删"""
+        return await self.upload()
+
+    async def main(self) -> PlatformResultExtras:
+        """别名 wrapper - Task 9 删"""
+        return await self.upload()

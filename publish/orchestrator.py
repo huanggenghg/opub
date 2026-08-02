@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """发布编排:单视频发布、整体流程、入口函数"""
+import argparse
 import asyncio
 import os
+import sys
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 from conf import BASE_DIR
 from publish.config import (
@@ -233,6 +236,54 @@ def run_publish_sync(
     return asyncio.run(run_publish(config_file, overrides))
 
 
-async def main() -> int:
-    """主函数"""
-    return await run_publish()
+SCHEDULE_FORMAT = "%Y-%m-%d %H:%M"
+
+
+def _schedule_value(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, SCHEDULE_FORMAT)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Invalid schedule '{value}'. Expected format: {SCHEDULE_FORMAT}"
+        ) from exc
+
+
+def build_parser() -> argparse.ArgumentParser:
+    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
+    parser = argparse.ArgumentParser(
+        prog="hgsau",
+        description="CLI for social-auto-upload.",
+    )
+    parser.add_argument("--config", default="publish_config.ini", help="Config file path (default: publish_config.ini)")
+    parser.add_argument("--platforms", default=None, help="Override enabled platforms, comma-separated")
+    parser.add_argument("--video", default=None, help="Override video file/directory path")
+    parser.add_argument("--title", default=None, help="Override title")
+    parser.add_argument("--desc", default=None, help="Override description")
+    parser.add_argument("--tags", default=None, help="Override tags, comma-separated")
+    parser.add_argument("--schedule", type=_schedule_value, default=None, help=f"Override schedule time in {schedule_help}")
+    parser.add_argument("--start-from", type=int, default=None, help="Start from video index (1-based)")
+    parser.add_argument("--force", action="store_true", help="Force regenerate video config")
+    return parser
+
+
+def _build_overrides(args: argparse.Namespace) -> PublishOverrides:
+    return PublishOverrides(
+        platforms=args.platforms,
+        video=args.video,
+        title=args.title,
+        desc=args.desc,
+        tags=args.tags,
+        schedule=args.schedule,
+        start_from=args.start_from,
+        force=args.force,
+    )
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    try:
+        return asyncio.run(run_publish(args.config, _build_overrides(args)))
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        return 1

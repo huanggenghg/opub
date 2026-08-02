@@ -32,7 +32,7 @@ class PackageBuildTest(unittest.TestCase):
                 names = set(archive.namelist())
 
         self.assertIn("conf.py", names)
-        self.assertIn("hgsau_cli.py", names)
+        self.assertNotIn("hgsau_cli.py", names)
         self.assertIn("publish_all.py", names)
         self.assertNotIn("sau_cli.py", names)
 

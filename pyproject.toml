@@ -38,7 +38,7 @@ Repository = "https://github.com/huanggenghg/social-auto-upload"
 Issues = "https://github.com/huanggenghg/social-auto-upload/issues"
 
 [project.scripts]
-hgsau = "hgsau_cli:main"
+hgsau = "publish_all:main"
 
 [project.optional-dependencies]
 web = [
@@ -50,7 +50,7 @@ web = [
 package = true
 
 [tool.setuptools]
-py-modules = ["conf", "hgsau_cli", "publish_all"]
+py-modules = ["conf", "publish_all"]
 include-package-data = true
 
 [tool.setuptools.packages.find]

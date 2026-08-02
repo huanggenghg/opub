@@ -6,7 +6,6 @@
 - hgsau 控制台脚本(publish_all:main)
 - 测试 import 兼容(publish_all.X)
 """
-import asyncio
 import os
 import subprocess
 import sys
@@ -51,6 +50,7 @@ from publish.dispatch import (
     publish_to_xiaohongshu,
 )
 from publish.orchestrator import (
+    build_parser,
     main,
     publish_one_item,
     run_publish,
@@ -68,4 +68,4 @@ from publish.runtime import (
 )
 
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(main())

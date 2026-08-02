@@ -1,0 +1,93 @@
+import contextlib
+import io
+import unittest
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+import publish_all
+
+
+class PublishCliPackagingTests(unittest.TestCase):
+    def test_pyproject_exposes_hgsau_pointing_to_publish_all(self):
+        pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+        py_modules_line = next(
+            line for line in pyproject.splitlines() if line.startswith("py-modules = ")
+        )
+
+        self.assertIn('name = "hgsau"', pyproject)
+        self.assertIn('hgsau = "publish_all:main"', pyproject)
+        self.assertNotIn("hgsau_cli", pyproject)
+        self.assertEqual(py_modules_line, 'py-modules = ["conf", "publish_all"]')
+
+    def test_publish_all_exposes_build_parser_and_main(self):
+        self.assertTrue(hasattr(publish_all, "build_parser"))
+        self.assertTrue(hasattr(publish_all, "main"))
+
+    def test_parser_prog_is_hgsau(self):
+        parser = publish_all.build_parser()
+        self.assertEqual(parser.prog, "hgsau")
+
+
+class PublishCliParserTests(unittest.TestCase):
+    def test_parser_accepts_defaults_no_subcommand(self):
+        parser = publish_all.build_parser()
+        args = parser.parse_args([])
+
+        self.assertEqual(args.config, "publish_config.ini")
+        self.assertIsNone(args.platforms)
+        self.assertIsNone(args.video)
+
+    def test_parser_accepts_overrides(self):
+        parser = publish_all.build_parser()
+        args = parser.parse_args(
+            [
+                "--config", "my.ini",
+                "--platforms", "douyin,weibo",
+                "--video", "videos/demo.mp4",
+                "--title", "标题",
+                "--desc", "描述",
+                "--tags", "标签1,标签2",
+                "--schedule", "2026-05-30 21:30",
+                "--start-from", "3",
+                "--force",
+            ]
+        )
+
+        self.assertEqual(args.config, "my.ini")
+        self.assertEqual(args.platforms, "douyin,weibo")
+        self.assertEqual(args.video, "videos/demo.mp4")
+        self.assertEqual(args.title, "标题")
+        self.assertEqual(args.desc, "描述")
+        self.assertEqual(args.tags, "标签1,标签2")
+        self.assertEqual(args.schedule.strftime("%Y-%m-%d %H:%M"), "2026-05-30 21:30")
+        self.assertEqual(args.start_from, 3)
+        self.assertTrue(args.force)
+
+    def test_parser_rejects_unknown_subcommand(self):
+        parser = publish_all.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["douyin", "upload-video"])
+
+    def test_main_calls_run_publish_with_overrides(self):
+        with patch("publish.orchestrator.run_publish", new=AsyncMock(return_value=0)) as run_publish:
+            code = publish_all.main(["--platforms", "weibo", "--title", "标题"])
+
+        self.assertEqual(code, 0)
+        call = run_publish.await_args
+        self.assertEqual(call.args[0], "publish_config.ini")
+        self.assertEqual(call.args[1].platforms, "weibo")
+        self.assertEqual(call.args[1].title, "标题")
+
+    def test_main_returns_1_for_run_publish_exception(self):
+        stderr = io.StringIO()
+        with patch("publish.orchestrator.run_publish", new=AsyncMock(side_effect=RuntimeError("boom"))):
+            with contextlib.redirect_stderr(stderr):
+                code = publish_all.main([])
+
+        self.assertEqual(code, 1)
+        self.assertIn("boom", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

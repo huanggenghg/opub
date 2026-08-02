@@ -347,8 +347,8 @@ class AccountLoginFlowTests(unittest.TestCase):
 
     def test_publish_one_item_skips_login_for_unsupported_platforms(self):
         params = {
-            "enabled_platforms": ["tk"],
-            "platforms": {"tk_account": "cookies/tk.json"},
+            "enabled_platforms": ["fake_platform"],
+            "platforms": {"fake_platform_account": "cookies/fake.json"},
             "content_type": "video",
             "video_file": "videos/demo.mp4",
             "title": "标题",
@@ -363,8 +363,8 @@ class AccountLoginFlowTests(unittest.TestCase):
             results = publish_all.run_async_for_test(publish_all.publish_one_item(params))
 
         ensure_login.assert_not_awaited()
-        self.assertFalse(results["tk"]["success"])
-        self.assertIn("暂未实现", results["tk"]["message"])
+        self.assertFalse(results["fake_platform"]["success"])
+        self.assertIn("未知平台", results["fake_platform"]["message"])
 
 
 class PublishFailurePolicyTests(unittest.TestCase):

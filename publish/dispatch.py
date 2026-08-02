@@ -2,22 +2,9 @@
 """平台分发:登录校验与各平台发布实现"""
 import importlib
 import os
-from typing import TypedDict
 
 from publish.constants import PLATFORM_NAMES, TITLE_LIMITS
 from publish.content import resolve_path, truncate_title
-
-
-class PlatformResult(TypedDict):
-    success: bool
-    message: str
-
-
-class PlatformResultExtras(PlatformResult, total=False):
-    share_link: str
-    video_link: str
-    account_issue: bool
-    issue_type: str
 
 
 _PLATFORM_LOGIN = {
@@ -28,6 +15,7 @@ _PLATFORM_LOGIN = {
     "baijiahao":   ("uploader.baijiahao_uploader.main",   "cookie_auth", "baijiahao_setup"),
     "bilibili":    ("uploader.bilibili_uploader.main",    "cookie_auth", "bilibili_setup"),
     "weibo":       ("uploader.weibo_uploader.main",       "cookie_auth", "weibo_setup"),
+    "tk":          ("uploader.tk_uploader.main",          "cookie_auth", "tiktok_setup"),
 }
 
 
@@ -296,6 +284,33 @@ async def publish_to_weibo(params: dict) -> dict:
         return {"success": False, "message": str(e)}
 
 
+async def publish_to_tk(params: dict) -> dict:
+    """发布到 TikTok"""
+    from uploader.tk_uploader.main import TiktokVideo
+
+    account_file = resolve_path(params["account_file"])
+    title = truncate_title(params["title"], "tk")
+
+    if params["content_type"] != "video":
+        return {"success": False, "message": "TikTok 暂只支持视频发布"}
+
+    params = {**params, "video_file": resolve_path(params["video_file"])}
+
+    err = TiktokVideo.validate_base_args(params)
+    if err:
+        return err
+
+    try:
+        uploader = TiktokVideo(
+            title=title, file_path=params["video_file"], tags=params["tags"],
+            publish_date=params["publish_time"] or 0, account_file=account_file,
+            desc=params.get("desc", ""), publish_strategy=params["publish_strategy"],
+        )
+        return await uploader.upload()
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
 _PUBLISH_DISPATCH = {
     "douyin":      publish_to_douyin,
     "xiaohongshu": publish_to_xiaohongshu,
@@ -304,6 +319,7 @@ _PUBLISH_DISPATCH = {
     "baijiahao":   publish_to_baijiahao,
     "bilibili":    publish_to_bilibili,
     "weibo":       publish_to_weibo,
+    "tk":          publish_to_tk,
 }
 
 
@@ -312,6 +328,4 @@ async def publish_to_platform(platform: str, params: dict) -> dict:
     handler = _PUBLISH_DISPATCH.get(platform)
     if handler is not None:
         return await handler(params)
-    if platform == "tk":
-        return {"success": False, "message": "TikTok平台暂未实现"}
     return {"success": False, "message": f"未知平台: {platform}"}

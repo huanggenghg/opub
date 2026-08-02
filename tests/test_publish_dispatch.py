@@ -9,8 +9,8 @@ from publish.dispatch import (
 
 
 class PlatformLoginRegistryTests(unittest.TestCase):
-    def test_registry_covers_all_platforms_except_tk(self):
-        expected = {"douyin", "xiaohongshu", "kuaishou", "tencent", "baijiahao", "bilibili", "weibo"}
+    def test_registry_covers_all_platforms(self):
+        expected = {"douyin", "xiaohongshu", "kuaishou", "tencent", "baijiahao", "bilibili", "weibo", "tk"}
         self.assertEqual(set(_PLATFORM_LOGIN.keys()), expected)
 
     def test_registry_entries_are_three_tuples(self):
@@ -24,7 +24,7 @@ class PlatformLoginRegistryTests(unittest.TestCase):
     def test_platform_requires_account_login(self):
         self.assertTrue(platform_requires_account_login("douyin"))
         self.assertTrue(platform_requires_account_login("weibo"))
-        self.assertFalse(platform_requires_account_login("tk"))
+        self.assertTrue(platform_requires_account_login("tk"))
         self.assertFalse(platform_requires_account_login("unknown_platform"))
 
 
@@ -76,9 +76,9 @@ class EnsureLoginTests(unittest.TestCase):
 
 
 class PublishDispatchRegistryTests(unittest.TestCase):
-    def test_registry_covers_all_enabled_platforms(self):
+    def test_registry_covers_all_platforms(self):
         from publish.dispatch import _PUBLISH_DISPATCH
-        expected = {"douyin", "xiaohongshu", "kuaishou", "tencent", "baijiahao", "bilibili", "weibo"}
+        expected = {"douyin", "xiaohongshu", "kuaishou", "tencent", "baijiahao", "bilibili", "weibo", "tk"}
         self.assertEqual(set(_PUBLISH_DISPATCH.keys()), expected)
 
     def test_registry_values_are_callable(self):
@@ -97,17 +97,6 @@ class PublishDispatchRegistryTests(unittest.TestCase):
             )
         self.assertEqual(result, {"success": True, "message": "ok"})
         mock_handler.assert_awaited_once_with({"key": "val"})
-
-    def test_publish_to_platform_returns_stub_for_tk(self):
-        import asyncio
-        from publish.dispatch import publish_to_platform
-        with patch("publish.dispatch._PUBLISH_DISPATCH") as mock_reg:
-            mock_reg.get.return_value = None
-            result = asyncio.run(
-                publish_to_platform("tk", {})
-            )
-        self.assertFalse(result["success"])
-        self.assertIn("TikTok", result["message"])
 
     def test_publish_to_platform_returns_error_for_unknown(self):
         import asyncio

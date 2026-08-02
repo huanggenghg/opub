@@ -46,6 +46,7 @@ from publish.dispatch import (
     publish_to_kuaishou,
     publish_to_platform,
     publish_to_tencent,
+    publish_to_tk,
     publish_to_weibo,
     publish_to_xiaohongshu,
 )

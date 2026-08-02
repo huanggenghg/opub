@@ -19,7 +19,7 @@ TITLE_LIMITS = {
     "bilibili": 80,
     "tencent": 30,
     "baijiahao": 30,
-    "tk": 150,
+    "tk": 2200,
     "weibo": 2000,
 }
 

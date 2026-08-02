@@ -190,7 +190,7 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             account_file="account.json",
         )
 
-        with patch.object(app, "validate_base_args", new=AsyncMock(return_value=None)):
+        with patch.object(app, "validate_login_and_strategy", new=AsyncMock(return_value=None)):
             with self.assertRaises(ValueError):
                 asyncio.run(app.validate_upload_args())
 

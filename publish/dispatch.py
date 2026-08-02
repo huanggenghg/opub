@@ -193,45 +193,33 @@ async def publish_to_baijiahao(params: dict) -> dict:
     from utils.excel_writer import write_video_link
 
     account_file = resolve_path(params["account_file"])
-
     title = truncate_title(params["title"], "baijiahao")
-    tags = params["tags"]
-    publish_strategy = params["publish_strategy"]
-    publish_time = params["publish_time"]
-    content_type = params["content_type"]
+
+    if params["content_type"] == "video":
+        params = {**params, "video_file": resolve_path(params["video_file"])}
+    else:
+        return {"success": False, "message": "百家号不支持图文发布，请使用 convert_to_video=true 转为视频发布"}
+
+    err = BaiJiaHaoVideo.validate_base_args(params)
+    if err:
+        return err
 
     try:
-        if content_type == "video":
-            video_file = resolve_path(params["video_file"])
-            if not video_file or not os.path.exists(video_file):
-                return {"success": False, "message": f"视频文件不存在: {video_file}"}
-
-            uploader = BaiJiaHaoVideo(
-                title=title,
-                file_path=video_file,
-                tags=tags,
-                publish_date=publish_time or 0,
-                account_file=account_file,
-            )
-        else:
-            return {"success": False, "message": "百家号不支持图文发布，请使用 convert_to_video=true 转为视频发布"}
-
-        result = await uploader.main()
-        video_link = result.get("video_link", "") if result else ""
-
-        response = {"success": True, "message": "发布成功"}
-        if video_link:
-            response["video_link"] = video_link
+        uploader = BaiJiaHaoVideo(
+            title=title, file_path=params["video_file"], tags=params["tags"],
+            publish_date=params["publish_time"] or 0, account_file=account_file,
+        )
+        result = await uploader.upload()
+        if result["success"] and result.get("result_url"):
             try:
-                write_result = write_video_link(video_link)
+                write_result = write_video_link(result["result_url"])
                 if write_result["success"]:
-                    print(f"  📝 视频链接已写入 Excel: {video_link}")
+                    print(f"  📝 视频链接已写入 Excel: {result['result_url']}")
                 else:
                     print(f"  ⚠️ 写入 Excel 失败: {write_result['message']}")
             except Exception as e:
                 print(f"  ⚠️ 写入 Excel 异常: {e}")
-
-        return response
+        return result
     except Exception as e:
         return {"success": False, "message": str(e)}
 

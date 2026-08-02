@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import random
 from datetime import datetime
 
@@ -9,12 +11,26 @@ import asyncio
 import re
 
 from conf import LOCAL_CHROME_PATH, LOCAL_CHROME_HEADLESS
+from uploader.base_video import (
+    BaseBrowserUploader,
+    PlatformResultExtras,
+    PublishStrategy,
+    _build_login_result,
+    _msg,
+)
 from utils.base_social_media import set_init_script
 from utils.log import baijiahao_logger
 from utils.network import async_retry
 
 BAIJIAHAO_HOME_URL = "https://baijiahao.baidu.com/builder/rc/home"
+BAIJIAHAO_LOGIN_URL = "https://baijiahao.baidu.com/builder/theme/bjh/login"
+BAIJIAHAO_UPLOAD_EDIT_URL = "https://baijiahao.baidu.com/builder/rc/edit?type=videoV2&is_from_cms=1"
 BAIJIAHAO_LOGIN_URL_MARKERS = ("/login", "login")
+BAIJIAHAO_PUBLISH_MARKERS = [
+    "发布作品",
+    "发布",
+    "上传",
+]
 
 
 def _extract_bjh_public_url_from_preview_href(href: str | None) -> str | None:
@@ -23,60 +39,6 @@ def _extract_bjh_public_url_from_preview_href(href: str | None) -> str | None:
         return None
     m = re.search(r"[?&]id=(\d+)", href)
     return f"https://baijiahao.baidu.com/s?id={m.group(1)}" if m else None
-
-
-async def baijiahao_cookie_gen(account_file, poll_interval: int = 3, max_wait: int = 120) -> bool:
-    async with async_playwright() as playwright:
-        options = {
-            'args': ['--lang en-GB'],
-            'headless': LOCAL_CHROME_HEADLESS,
-        }
-        browser = await playwright.chromium.launch(**options)
-        try:
-            context = await browser.new_context()
-            context = await set_init_script(context)
-            page = await context.new_page()
-            await page.goto("https://baijiahao.baidu.com/builder/theme/bjh/login")
-            baijiahao_logger.info("请扫码登录百家号, 登录成功后脚本会自动继续")
-
-            start_time = time.time()
-            while time.time() - start_time < max_wait:
-                current_url = (page.url or "").lower()
-                if "login" not in current_url:
-                    baijiahao_logger.info(f"检测到页面跳转: {page.url}")
-                    await asyncio.sleep(2)
-                    await context.storage_state(path=account_file)
-                    baijiahao_logger.success("cookie 已保存")
-                    return True
-                await asyncio.sleep(poll_interval)
-
-            baijiahao_logger.error(f"等待登录超时 ({max_wait}秒), cookie 未保存")
-            return False
-        finally:
-            await browser.close()
-
-
-async def cookie_auth(account_file):
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
-        try:
-            context = await browser.new_context(storage_state=account_file)
-            context = await set_init_script(context)
-            page = await context.new_page()
-            try:
-                await page.goto(BAIJIAHAO_HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            except Exception as exc:
-                baijiahao_logger.warning(f"home 页 goto 异常(继续检测): {exc}")
-            await page.wait_for_timeout(timeout=5000)
-
-            if await _is_baijiahao_auth_page_valid(page):
-                baijiahao_logger.success("[+] cookie 有效")
-                return True
-
-            baijiahao_logger.error("等待5秒 cookie 失效")
-            return False
-        finally:
-            await browser.close()
 
 
 async def _is_baijiahao_locator_visible(locator) -> bool:
@@ -119,25 +81,120 @@ async def _is_baijiahao_auth_page_valid(page: Page) -> bool:
     return any([await _is_baijiahao_locator_present(marker) for marker in publish_markers])
 
 
-async def baijiahao_setup(account_file, handle=False):
-    if not os.path.exists(account_file) or not await cookie_auth(account_file):
-        if not handle:
-            return False
-        baijiahao_logger.error("cookie文件不存在或已失效，即将自动打开浏览器，请扫码登录，登陆后会自动生成cookie文件")
-        return await baijiahao_cookie_gen(account_file)
-    return True
+async def cookie_auth(account_file):
+    """验证 cookie 是否有效 - 委托 BaiJiaHaoVideo.cookie_auth"""
+    return await BaiJiaHaoVideo.cookie_auth(account_file)
 
-class BaiJiaHaoVideo(object):
-    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, proxy_setting=None):
-        self.title = title  # 视频标题
+
+async def baijiahao_setup(
+    account_file,
+    handle=False,
+    return_detail=False,
+    qrcode_callback=None,
+    headless: bool = LOCAL_CHROME_HEADLESS,
+):
+    """百家号登录设置 - 委托 BaiJiaHaoVideo.setup"""
+    return await BaiJiaHaoVideo.setup(account_file, handle, return_detail, qrcode_callback, headless)
+
+
+class BaiJiaHaoVideo(BaseBrowserUploader):
+    """百家号视频发布器 (1-tier, 直接继承 BaseBrowserUploader)。
+    保留 @async_retry 装饰器(uploading_video / publish_video)和 ai2video 辅助方法。"""
+
+    PLATFORM_NAME = "baijiahao"
+    UPLOAD_URL = BAIJIAHAO_HOME_URL
+    LOGIN_URL = BAIJIAHAO_LOGIN_URL
+    LOGIN_MARKERS = list(BAIJIAHAO_LOGIN_URL_MARKERS)
+    PUBLISH_MARKERS = list(BAIJIAHAO_PUBLISH_MARKERS)
+
+    BAIJIAHAO_USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/127.0.4324.150 Safari/537.36"
+    )
+
+    def __init__(
+        self,
+        title,
+        file_path,
+        tags,
+        publish_date: datetime,
+        account_file,
+        proxy_setting=None,
+        publish_strategy: str = PublishStrategy.IMMEDIATE,
+        headless: bool = LOCAL_CHROME_HEADLESS,
+    ):
+        self.title = title
         self.file_path = file_path
         self.tags = tags
         self.publish_date = publish_date
         self.account_file = account_file
-        self.date_format = '%Y年%m月%d日 %H:%M'
+        self.date_format = "%Y年%m月%d日 %H:%M"
         self.local_executable_path = LOCAL_CHROME_PATH
-        self.headless = LOCAL_CHROME_HEADLESS
+        self.headless = headless
         self.proxy_setting = proxy_setting
+        self.publish_strategy = publish_strategy
+
+    @classmethod
+    async def _init_context(cls, browser, account_file: str | None = None):
+        """Override: 百家号需要自定义 user_agent + geolocation 权限。"""
+        context_kwargs = {
+            "user_agent": cls.BAIJIAHAO_USER_AGENT,
+            "permissions": ["geolocation"],
+        }
+        if account_file and os.path.exists(account_file):
+            context_kwargs["storage_state"] = account_file
+        context = await browser.new_context(**context_kwargs)
+        return await set_init_script(context)
+
+    @classmethod
+    async def cookie_auth(cls, account_file: str) -> bool:
+        """Override: 百家号 cookie 校验需要 DOM marker 检查(_is_baijiahao_auth_page_valid)。"""
+        if not os.path.exists(account_file):
+            return False
+        async with async_playwright() as playwright:
+            browser = await cls._launch_browser(playwright, headless=LOCAL_CHROME_HEADLESS)
+            try:
+                context = await cls._init_context(browser, account_file)
+                page = await context.new_page()
+                try:
+                    await page.goto(cls.UPLOAD_URL, timeout=60000, wait_until="domcontentloaded")
+                except Exception as exc:
+                    baijiahao_logger.warning(f"home 页 goto 异常(继续检测): {exc}")
+                await page.wait_for_timeout(timeout=5000)
+
+                if await _is_baijiahao_auth_page_valid(page):
+                    baijiahao_logger.success(_msg("🥳", "cookie 有效"))
+                    return True
+
+                baijiahao_logger.error("等待5秒 cookie 失效")
+                return False
+            except Exception:
+                return False
+            finally:
+                await browser.close()
+
+    async def validate_login_and_strategy(self):
+        """检查 cookie 存在/有效 + publish_strategy + publish_date。
+        Renamed from validate_base_args(self) to avoid collision with
+        BasePlatformUploader.validate_base_args(params) staticmethod (called by dispatch)."""
+        if not os.path.exists(self.account_file):
+            raise RuntimeError(f"cookie文件不存在，请先完成百家号登录: {self.account_file}")
+        if not await cookie_auth(self.account_file):
+            raise RuntimeError(f"cookie文件已失效，请先完成百家号登录: {self.account_file}")
+        if self.publish_strategy not in {PublishStrategy.IMMEDIATE, PublishStrategy.SCHEDULED}:
+            raise ValueError(f"不支持的发布策略: {self.publish_strategy}")
+
+        if self.publish_strategy == PublishStrategy.SCHEDULED:
+            self.publish_date = self.validate_publish_date(self.publish_date)
+        else:
+            self.publish_date = 0
+
+    async def validate_upload_args(self):
+        await self.validate_login_and_strategy()
+        if not self.title or not str(self.title).strip():
+            raise ValueError("视频模式下，title 是必须的")
+        self.file_path = str(self.validate_video_file(self.file_path))
 
     async def set_schedule_time(self, page, publish_date):
         """
@@ -177,40 +234,25 @@ class BaiJiaHaoVideo(object):
         await page.wait_for_timeout(2000)
         await page.locator("button >> text=定时发布").click()
 
-
     async def handle_upload_error(self, page):
         # 日后实现，目前没遇到
         return
         print("视频出错了，重新上传中")
 
-    async def upload(self, playwright: Playwright) -> dict:
-        # 使用 Chromium 浏览器启动一个浏览器实例
-        launch_options = {"headless": self.headless}
-        if self.local_executable_path:
-            launch_options["executable_path"] = self.local_executable_path
-        if self.proxy_setting:
-            launch_options["proxy"] = self.proxy_setting
-        browser = await playwright.chromium.launch(**launch_options)
-        # 创建一个浏览器上下文，使用指定的 cookie 文件
-        context = await browser.new_context(storage_state=f"{self.account_file}", user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.4324.150 Safari/537.36')
-        # context = await set_init_script(context)
-        await context.grant_permissions(['geolocation'])
-
-        # 创建一个新的页面
-        page = await context.new_page()
+    async def upload_video_content(self, page: Page) -> str | None:
+        """上传视频内容(页面已通过 _browser_session 打开)。返回视频公开链接或 None。"""
         # 直接访问带 is_from_cms=1 参数的 URL
-        target_url = "https://baijiahao.baidu.com/builder/rc/edit?type=videoV2&is_from_cms=1"
-        await page.goto(target_url, timeout=60000)
+        await page.goto(BAIJIAHAO_UPLOAD_EDIT_URL, timeout=60000)
         baijiahao_logger.info(f"正在上传-------{self.title}.mp4")
-        baijiahao_logger.info(f'已打开页面: {page.url}')
+        baijiahao_logger.info(f"已打开页面: {page.url}")
 
         # 等待上传区域加载
-        baijiahao_logger.info('等待上传区域加载...')
+        baijiahao_logger.info("等待上传区域加载...")
         await page.wait_for_timeout(3000)
 
         # 检查 input 元素状态
         input_count = await page.locator("input[type=file]").count()
-        baijiahao_logger.info(f'找到 {input_count} 个 file input 元素')
+        baijiahao_logger.info(f"找到 {input_count} 个 file input 元素")
 
         # 打印每个 input 的详细信息
         for i in range(input_count):
@@ -218,20 +260,20 @@ class BaiJiaHaoVideo(object):
             accept = await input_elem.get_attribute("accept")
             multiple = await input_elem.get_attribute("multiple")
             visible = await input_elem.is_visible()
-            baijiahao_logger.info(f'Input {i}: accept={accept}, multiple={multiple}, visible={visible}')
+            baijiahao_logger.info(f"Input {i}: accept={accept}, multiple={multiple}, visible={visible}")
 
         # 设置文件
         await page.locator("input[type=file]").set_input_files(self.file_path)
-        baijiahao_logger.info('视频文件已选择')
+        baijiahao_logger.info("视频文件已选择")
 
         # 等待上传开始（页面会显示上传进度）
-        baijiahao_logger.info('等待上传开始...')
+        baijiahao_logger.info("等待上传开始...")
         await asyncio.sleep(3)
 
         # 检查上传是否已经开始
         uploading = await page.locator('div .cover-overlay:has-text("上传中")').count()
         upload_progress = await page.locator('div[class*="progress"]').count()
-        baijiahao_logger.info(f'上传中状态: {uploading}, 进度条: {upload_progress}')
+        baijiahao_logger.info(f"上传中状态: {uploading}, 进度条: {upload_progress}")
 
         # 等待页面跳转到视频发布页面（上传过程中会自动跳转）
         max_wait_time = 120  # 最多等待120秒
@@ -327,14 +369,31 @@ class BaiJiaHaoVideo(object):
         else:
             baijiahao_logger.info("定时发布,跳过内容链接抓取")
 
-        await context.storage_state(path=self.account_file)  # 保存cookie
-        baijiahao_logger.info('cookie更新完毕！')
-        await asyncio.sleep(2)  # 这里延迟是为了方便眼睛直观的观看
-        # 关闭浏览器上下文和浏览器实例
-        await context.close()
-        await browser.close()
-        return {"video_link": video_link}
+        return video_link
 
+    async def upload(self) -> PlatformResultExtras:
+        """主入口，返回 PlatformResultExtras。"""
+        baijiahao_logger.info(_msg("🧍", "小人先检查 cookie 和视频文件"))
+        await self.validate_upload_args()
+        baijiahao_logger.info(_msg("🥳", "上传前检查通过"))
+
+        result: PlatformResultExtras = {"success": False, "message": ""}
+
+        try:
+            async with self._browser_session() as page:
+                video_link = await self.upload_video_content(page)
+                baijiahao_logger.success(_msg("🥳", "cookie 更新完毕"))
+                result["success"] = True
+                if video_link:
+                    result["result_url"] = video_link
+                    result["message"] = f"发布成功，视频链接: {video_link}"
+                else:
+                    result["message"] = "发布成功"
+        except Exception as e:
+            result["message"] = str(e)
+            baijiahao_logger.error(_msg("❌", f"上传失败: {e}"))
+
+        return result
 
     async def _capture_content_url(self, page: Page) -> str | None:
         """跳转内容管理页,取第一条列表项的公开链接。抓不到返回 None。"""
@@ -500,9 +559,9 @@ class BaiJiaHaoVideo(object):
             pass
         baijiahao_logger.success("创作声明已选为'无需声明'")
 
-    async def main(self):
-        async with async_playwright() as playwright:
-            return await self.upload(playwright)
+    async def main(self) -> PlatformResultExtras:
+        """别名 wrapper - Task 9 删"""
+        return await self.upload()
 
 
 
@@ -545,10 +604,10 @@ class BaiJiaHaoVideo(object):
         # 初始化LocalStorage
         await page.evaluate(f"""
                    if (!localStorage.getItem("{processed_key}")) {{
-                       localStorage.setItem("{processed_key}", JSON.stringify([]));                   
+                       localStorage.setItem("{processed_key}", JSON.stringify([]));
                    }}
                    if (!localStorage.getItem("{batch_key}")) {{
-                       localStorage.setItem("{batch_key}", JSON.stringify([]));                   
+                       localStorage.setItem("{batch_key}", JSON.stringify([]));
                    }}
                """)
 
@@ -588,34 +647,34 @@ class BaiJiaHaoVideo(object):
                 # 等待30秒
                 # await page.wait_for_timeout(30000)
                 print(f"[等待完成] {title}")
-                
+
                 # 监听"一键成片"按钮
                 print(f"[开始监听] 一键成片按钮")
                 should_exit_while_loop = False  # 添加标志变量
                 while True:
                     # 定位"一键成片"按钮
                     one_key_button = page.locator("button:has-text('一键成片')")
-                    
+
                     # 检查按钮是否存在
                     if await one_key_button.count() > 0:
                         # 检查按钮是否有disabled属性
                         is_disabled = await one_key_button.get_attribute("disabled")
-                        
+
                         if is_disabled is None:
                             # 按钮不再被禁用，点击它
                             print(f"[发现可点击按钮] 一键成片")
                             await one_key_button.click()  # 先点击一键成片按钮
-                            
+
                             # 等待可能出现的"温馨提示"窗口
                             print(f"[检查] 是否出现温馨提示窗口")
                             await page.wait_for_timeout(2000)  # 等待2秒，让窗口有时间显示
-                            
+
                             try:
                                 # 检查是否存在"温馨提示"窗口，设置较短的超时时间
                                 tip_window = page.locator("div:has-text('温馨提示') >> visible=true")
                                 if await tip_window.count() > 0:
                                     print(f"[发现] 温馨提示窗口")
-                                    
+
                                     # 定位并点击"知道了"按钮，设置较短的超时时间
                                     know_button = page.locator("button:has-text('知道了')")
                                     if await know_button.count() > 0:
@@ -632,10 +691,10 @@ class BaiJiaHaoVideo(object):
                             except Exception as e:
                                 print(f"[警告] 处理温馨提示窗口时出错: {str(e)}")
                                 # 继续执行，不要因为这个错误中断流程
-                                
+
                             # 记录到LocalStorage前打印日志
                             print(f"[开始记录] 准备将标题 '{title}' 记录到LocalStorage")
-                            
+
                             # 记录到LocalStorage
                             await page.evaluate(
                                 f"""
@@ -657,23 +716,23 @@ class BaiJiaHaoVideo(object):
                                         """,
                                 title, processed_key, batch_key
                             )
-                            
+
                             # 记录完成后打印日志
                             print(f"[记录完成] 标题 '{title}' 已成功记录到LocalStorage")
 
                             print(f"[记录完成] {title}")
-                            
+
                             # 监听新打开的标签页
                             print(f"[监听] 等待新标签页打开")
                             # 获取当前所有页面
                             current_pages = context.pages
                             current_page_count = len(current_pages)
-                            
+
                             # 等待新标签页打开（最多等待10秒）
                             new_page = None
                             max_wait_time = 10  # 最大等待时间（秒）
                             start_time = time.time()
-                            
+
                             while time.time() - start_time < max_wait_time:
                                 # 获取最新的页面列表
                                 pages = context.pages
@@ -685,7 +744,7 @@ class BaiJiaHaoVideo(object):
                                     break
                                 # 短暂等待后再次检查
                                 await asyncio.sleep(0.5)
-                            
+
                             # 如果找到新标签页，获取其标题和URL并保存
                             if new_page:
                                 # 等待页面加载完成
@@ -694,16 +753,16 @@ class BaiJiaHaoVideo(object):
                                     # 获取页面标题和URL
                                     page_title = await new_page.title()
                                     page_url = new_page.url
-                                    
+
                                     print(f"[获取] 标题: {page_title}")
                                     print(f"[获取] URL: {page_url}")
-                                    
+
                                     # 将标题和URL保存到url.txt文件
                                     with open("url.txt", "a", encoding="utf-8") as f:
                                         f.write(f"{page_title}\n{page_url}\n\n")
-                                    
+
                                     print(f"[保存] 标题和URL已保存到url.txt")
-                                    
+
                                     # 等待5秒后关闭新标签页
                                     print(f"[等待] 5秒后将关闭新标签页")
                                     await asyncio.sleep(5)
@@ -719,19 +778,19 @@ class BaiJiaHaoVideo(object):
                                         pass
                             else:
                                 print(f"[警告] 未检测到新标签页打开")
-                            
+
                             # 跳出整个while循环
                             print(f"[操作] 跳出所有循环，不再处理其他新闻")
                             should_exit_while_loop = True  # 设置标志变量
                             break  # 跳出while循环
-                    
+
                     # 检查是否需要跳出while循环
                     if should_exit_while_loop:
                         break
-                        
+
                     # 每秒检查一次按钮状态
                     await page.wait_for_timeout(1000)
-                
+
                 # 检查是否需要跳出for循环
                 if should_exit_while_loop:
                     print(f"[操作] 跳出for循环，完全结束处理")

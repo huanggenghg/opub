@@ -356,7 +356,11 @@ class BaiJiaHaoVideo(object):
             baijiahao_logger.warning("内容管理页未出现列表项,跳过链接抓取")
             return None
 
-        href = await item_locator.first.locator('a[href*="builder/preview/s?id="]').first.get_attribute("href")
+        try:
+            href = await item_locator.first.locator('a[href*="builder/preview/s?id="]').first.get_attribute("href")
+        except Exception as e:
+            baijiahao_logger.warning(f"未找到预览链接(继续): {e}")
+            return None
         public_url = _extract_bjh_public_url_from_preview_href(href)
         if public_url:
             baijiahao_logger.success(f"已抓取内容公开链接: {public_url}")

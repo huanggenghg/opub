@@ -1,0 +1,475 @@
+# -*- coding: utf-8 -*-
+"""平台分发:登录校验与各平台发布实现"""
+import os
+from typing import TypedDict
+
+from publish.constants import PLATFORM_NAMES, TITLE_LIMITS
+from publish.content import resolve_path, truncate_title
+
+
+class PlatformResult(TypedDict):
+    success: bool
+    message: str
+
+
+class PlatformResultExtras(PlatformResult, total=False):
+    share_link: str
+    video_link: str
+    account_issue: bool
+    issue_type: str
+
+
+async def ensure_login(platform: str, account_file: str) -> bool:
+    """确保平台已登录，未登录则触发登录流程"""
+    account_file = resolve_path(account_file)
+
+    # 文件不存在，直接触发登录
+    if not os.path.exists(account_file):
+        pass
+    else:
+        # 文件存在，先检查 cookie 是否有效
+        check_map = {
+            "douyin": ("uploader.douyin_uploader.main", "cookie_auth"),
+            "xiaohongshu": ("uploader.xiaohongshu_uploader.main", "cookie_auth"),
+            "kuaishou": ("uploader.ks_uploader.main", "cookie_auth"),
+            "weibo": ("uploader.weibo_uploader.main", "cookie_auth"),
+            "tencent": ("uploader.tencent_uploader.main", "cookie_auth"),
+            "baijiahao": ("uploader.baijiahao_uploader.main", "cookie_auth"),
+            "bilibili": ("uploader.bilibili_uploader.main", "cookie_auth"),
+            "tk": ("uploader.tk_uploader.main", "cookie_auth"),
+        }
+
+        check_entry = check_map.get(platform)
+        if check_entry:
+            import importlib
+            module_path, func_name = check_entry
+            module = importlib.import_module(module_path)
+            check_func = getattr(module, func_name)
+            if await check_func(account_file):
+                return True
+
+    # cookie 无效，触发登录（保留原有的 setup 调用逻辑）
+    if platform == "douyin":
+        from uploader.douyin_uploader.main import douyin_setup
+        return await douyin_setup(account_file, handle=True)
+    elif platform == "xiaohongshu":
+        from uploader.xiaohongshu_uploader.main import xiaohongshu_setup
+        return await xiaohongshu_setup(account_file, handle=True)
+    elif platform == "kuaishou":
+        from uploader.ks_uploader.main import ks_setup
+        return await ks_setup(account_file, handle=True)
+    elif platform == "tencent":
+        from uploader.tencent_uploader.main import tencent_setup
+        return await tencent_setup(account_file, handle=True)
+    elif platform == "baijiahao":
+        from uploader.baijiahao_uploader.main import baijiahao_setup
+        return await baijiahao_setup(account_file, handle=True)
+    elif platform == "bilibili":
+        from uploader.bilibili_uploader.main import bilibili_setup
+        return await bilibili_setup(account_file, handle=True)
+    elif platform == "weibo":
+        from uploader.weibo_uploader.main import weibo_setup
+        return await weibo_setup(account_file, handle=True)
+    else:
+        return False
+
+
+async def ensure_account_login(platform: str, account_file: str) -> bool:
+    resolved_account = resolve_path(account_file)
+    return await ensure_login(platform, resolved_account)
+
+
+def platform_requires_account_login(platform: str) -> bool:
+    return platform not in {"tk"}
+
+
+async def publish_to_douyin(params: dict) -> dict:
+    """发布到抖音"""
+    from uploader.douyin_uploader.main import DouYinVideo, DouYinNote, DouyinPublishRestrictedError
+
+    account_file = resolve_path(params["account_file"])
+
+    title = truncate_title(params["title"], "douyin")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = DouYinVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+            await uploader.main()
+            return {"success": True, "message": "发布成功"}
+        else:
+            images = params["images"]
+            if not images:
+                return {"success": False, "message": "图文模式需要提供图片"}
+
+            image_paths = [resolve_path(img) for img in images]
+            for img_path in image_paths:
+                if not os.path.exists(img_path):
+                    return {"success": False, "message": f"图片文件不存在: {img_path}"}
+
+            uploader = DouYinNote(
+                image_paths=image_paths,
+                note=params["desc"],
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                title=title,
+                publish_strategy=publish_strategy,
+            )
+            await uploader.douyin_upload_note()
+            return {"success": True, "message": "发布成功"}
+    except DouyinPublishRestrictedError as exc:
+        return {
+            "success": False,
+            "message": f"账号被限制发布: {exc.toast_text}",
+            "account_issue": True,
+            "issue_type": "publish_restricted",
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_xiaohongshu(params: dict) -> dict:
+    """发布到小红书"""
+    from uploader.xiaohongshu_uploader.main import XiaoHongShuVideo, XiaoHongShuNote
+
+    account_file = resolve_path(params["account_file"])
+
+    title = truncate_title(params["title"], "xiaohongshu")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = XiaoHongShuVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+        else:
+            images = params["images"]
+            if not images:
+                return {"success": False, "message": "图文模式需要提供图片"}
+
+            image_paths = [resolve_path(img) for img in images]
+            for img_path in image_paths:
+                if not os.path.exists(img_path):
+                    return {"success": False, "message": f"图片文件不存在: {img_path}"}
+
+            uploader = XiaoHongShuNote(
+                image_paths=image_paths,
+                note=params["desc"],
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                title=title,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+
+        result = await uploader.main()
+        share_link = result.get("share_link", "") if result else ""
+        note_id = result.get("note_id", "") if result else ""
+
+        response = {"success": True, "message": "发布成功"}
+        if share_link:
+            response["share_link"] = share_link
+        if note_id:
+            response["note_id"] = note_id
+
+        return response
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_kuaishou(params: dict) -> dict:
+    """发布到快手"""
+    from uploader.ks_uploader.main import KSVideo, KSNote
+
+    account_file = resolve_path(params["account_file"])
+
+    title = truncate_title(params["title"], "kuaishou")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = KSVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+        else:
+            images = params["images"]
+            if not images:
+                return {"success": False, "message": "图文模式需要提供图片"}
+
+            image_paths = [resolve_path(img) for img in images]
+            for img_path in image_paths:
+                if not os.path.exists(img_path):
+                    return {"success": False, "message": f"图片文件不存在: {img_path}"}
+
+            uploader = KSNote(
+                image_paths=image_paths,
+                note=params["desc"],
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                title=title,
+                publish_strategy=publish_strategy,
+            )
+
+        result = await uploader.main()
+        share_link = result.get("share_link", "") if result else ""
+        video_id = result.get("video_id", "") if result else ""
+
+        response = {"success": True, "message": "发布成功"}
+        if share_link:
+            response["share_link"] = share_link
+        if video_id:
+            response["video_id"] = video_id
+
+        return response
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_tencent(params: dict) -> dict:
+    """发布到微信视频号"""
+    from uploader.tencent_uploader.main import TencentVideo
+
+    account_file = resolve_path(params["account_file"])
+
+    title = truncate_title(params["title"], "tencent")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = TencentVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+        else:
+            return {"success": False, "message": "微信视频号不支持图文发布，请使用 convert_to_video=true 转为视频发布"}
+
+        await uploader.main()
+        return {"success": True, "message": "发布成功"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_baijiahao(params: dict) -> dict:
+    """发布到百家号"""
+    from uploader.baijiahao_uploader.main import BaiJiaHaoVideo
+    from utils.excel_writer import write_video_link
+
+    account_file = resolve_path(params["account_file"])
+
+    title = truncate_title(params["title"], "baijiahao")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = BaiJiaHaoVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+            )
+        else:
+            return {"success": False, "message": "百家号不支持图文发布，请使用 convert_to_video=true 转为视频发布"}
+
+        result = await uploader.main()
+        video_link = result.get("video_link", "") if result else ""
+
+        response = {"success": True, "message": "发布成功"}
+        if video_link:
+            response["video_link"] = video_link
+            try:
+                write_result = write_video_link(video_link)
+                if write_result["success"]:
+                    print(f"  📝 视频链接已写入 Excel: {video_link}")
+                else:
+                    print(f"  ⚠️ 写入 Excel 失败: {write_result['message']}")
+            except Exception as e:
+                print(f"  ⚠️ 写入 Excel 异常: {e}")
+
+        return response
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_bilibili(params: dict) -> dict:
+    """发布到 B站 (via biliup CLI)"""
+    from uploader.bilibili_uploader.main import upload as biliup_upload
+
+    account_file = resolve_path(params["account_file"])
+
+    title = truncate_title(params["title"], "bilibili")
+    tags = params["tags"]
+    content_type = params["content_type"]
+
+    if content_type != "video":
+        return {"success": False, "message": "B站暂只支持视频发布"}
+
+    video_file = resolve_path(params["video_file"])
+    if not video_file or not os.path.exists(video_file):
+        return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+    try:
+        result = await biliup_upload(
+            account_file=account_file,
+            video_file=video_file,
+            title=title,
+            desc=params["desc"],
+            tags=tags,
+        )
+        return result
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_weibo(params: dict) -> dict:
+    """发布到微博"""
+    from uploader.weibo_uploader.main import WeiboVideo, WeiboNote
+    from utils.excel_writer import write_video_link
+
+    account_file = resolve_path(params["account_file"])
+
+    title = truncate_title(params["title"], "weibo")
+    tags = params["tags"]
+    publish_strategy = params["publish_strategy"]
+    publish_time = params["publish_time"]
+    content_type = params["content_type"]
+
+    try:
+        if content_type == "video":
+            video_file = resolve_path(params["video_file"])
+            if not video_file or not os.path.exists(video_file):
+                return {"success": False, "message": f"视频文件不存在: {video_file}"}
+
+            uploader = WeiboVideo(
+                title=title,
+                file_path=video_file,
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                desc=params["desc"],
+                publish_strategy=publish_strategy,
+            )
+        else:
+            images = params["images"]
+            if not images:
+                return {"success": False, "message": "图文模式需要提供图片"}
+
+            image_paths = [resolve_path(img) for img in images]
+            for img_path in image_paths:
+                if not os.path.exists(img_path):
+                    return {"success": False, "message": f"图片文件不存在: {img_path}"}
+
+            uploader = WeiboNote(
+                image_paths=image_paths,
+                note=params["desc"],
+                tags=tags,
+                publish_date=publish_time or 0,
+                account_file=account_file,
+                title=title,
+                publish_strategy=publish_strategy,
+            )
+
+        result = await uploader.main()
+        video_link = result.get("video_link", "") if result else ""
+
+        response = {"success": True, "message": "发布成功"}
+        if video_link:
+            response["video_link"] = video_link
+            # 写入 Excel
+            try:
+                write_result = write_video_link(video_link)
+                if write_result["success"]:
+                    print(f"  📝 视频链接已写入 Excel: {video_link}")
+                else:
+                    print(f"  ⚠️ 写入 Excel 失败: {write_result['message']}")
+            except Exception as e:
+                print(f"  ⚠️ 写入 Excel 异常: {e}")
+
+        return response
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+async def publish_to_platform(platform: str, params: dict) -> dict:
+    """发布到指定平台"""
+    if platform == "douyin":
+        return await publish_to_douyin(params)
+    elif platform == "xiaohongshu":
+        return await publish_to_xiaohongshu(params)
+    elif platform == "kuaishou":
+        return await publish_to_kuaishou(params)
+    elif platform == "bilibili":
+        return await publish_to_bilibili(params)
+    elif platform == "tencent":
+        return await publish_to_tencent(params)
+    elif platform == "baijiahao":
+        return await publish_to_baijiahao(params)
+    elif platform == "tk":
+        return {"success": False, "message": "TikTok平台暂未实现"}
+    elif platform == "weibo":
+        return await publish_to_weibo(params)
+    else:
+        return {"success": False, "message": f"未知平台: {platform}"}

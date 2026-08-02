@@ -124,7 +124,7 @@ class PublishEngineTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("publish_all.run_publish_with_params", new=AsyncMock(return_value=0)):
+            with patch("publish.orchestrator.run_publish_with_params", new=AsyncMock(return_value=0)):
                 code = publish_all.run_publish_sync(str(config_path))
 
             text = config_path.read_text(encoding="utf-8")
@@ -145,7 +145,7 @@ class PublishEngineTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             missing_config = Path(tmpdir) / "missing.ini"
-            with patch("publish_all.run_publish_with_params", new=AsyncMock(return_value=0)) as run_params:
+            with patch("publish.orchestrator.run_publish_with_params", new=AsyncMock(return_value=0)) as run_params:
                 code = publish_all.run_publish_sync(str(missing_config), overrides)
 
         self.assertEqual(code, 0)
@@ -173,10 +173,10 @@ class PublishEngineTests(unittest.TestCase):
             "force": True,
         }
 
-        with patch("publish_all.runtime_preflight", new=AsyncMock(return_value=True)):
-            with patch("publish_all.get_video_files", return_value=["videos/demo.mp4"]):
-                with patch("publish_all.get_video_content", return_value=("标题", "描述")) as get_video_content:
-                    with patch("publish_all.publish_one_item", new=AsyncMock(return_value={})) as publish_one_item:
+        with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)):
+            with patch("publish.orchestrator.get_video_files", return_value=["videos/demo.mp4"]):
+                with patch("publish.orchestrator.get_video_content", return_value=("标题", "描述")) as get_video_content:
+                    with patch("publish.orchestrator.publish_one_item", new=AsyncMock(return_value={})) as publish_one_item:
                         code = asyncio.run(publish_all.run_publish_with_params(params))
 
         self.assertEqual(code, 0)
@@ -205,7 +205,7 @@ class PublishEngineTests(unittest.TestCase):
             "start_from": 1,
         }
 
-        with patch("publish_all.runtime_preflight", new=AsyncMock(return_value=True)) as preflight:
+        with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)) as preflight:
             code = asyncio.run(publish_all.run_publish_with_params(params))
 
         self.assertEqual(code, 1)
@@ -248,25 +248,25 @@ class RuntimePreflightTests(unittest.TestCase):
         self.assertIn(fake_home / "AppData" / "Local" / "ms-playwright", cache_dirs)
 
     def test_runtime_preflight_installs_missing_chromium(self):
-        with patch("publish_all.patchright_available", return_value=True), \
-             patch("publish_all.patchright_chromium_installed", return_value=False), \
-             patch("publish_all.install_patchright_chromium", return_value=True) as install:
+        with patch("publish.runtime.patchright_available", return_value=True), \
+             patch("publish.runtime.patchright_chromium_installed", return_value=False), \
+             patch("publish.runtime.install_patchright_chromium", return_value=True) as install:
             ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
 
         self.assertTrue(ok)
         install.assert_called_once()
 
     def test_runtime_preflight_fails_when_chromium_install_fails(self):
-        with patch("publish_all.patchright_available", return_value=True), \
-             patch("publish_all.patchright_chromium_installed", return_value=False), \
-             patch("publish_all.install_patchright_chromium", return_value=False):
+        with patch("publish.runtime.patchright_available", return_value=True), \
+             patch("publish.runtime.patchright_chromium_installed", return_value=False), \
+             patch("publish.runtime.install_patchright_chromium", return_value=False):
             ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
 
         self.assertFalse(ok)
 
     def test_runtime_preflight_fails_without_patchright_and_does_not_install(self):
-        with patch("publish_all.patchright_available", return_value=False), \
-             patch("publish_all.install_patchright_chromium", return_value=True) as install:
+        with patch("publish.runtime.patchright_available", return_value=False), \
+             patch("publish.runtime.install_patchright_chromium", return_value=True) as install:
             ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
 
         self.assertFalse(ok)
@@ -312,8 +312,8 @@ class AccountLoginFlowTests(unittest.TestCase):
             "convert_to_video": False,
         }
 
-        with patch("publish_all.ensure_account_login", new=AsyncMock(return_value=True)) as ensure_login, \
-             patch("publish_all.publish_to_platform", new=AsyncMock(return_value={"success": True, "message": "发布成功"})) as publish:
+        with patch("publish.orchestrator.ensure_account_login", new=AsyncMock(return_value=True)) as ensure_login, \
+             patch("publish.orchestrator.publish_to_platform", new=AsyncMock(return_value={"success": True, "message": "发布成功"})) as publish:
             results = publish_all.run_async_for_test(publish_all.publish_one_item(params))
 
         ensure_login.assert_awaited_once_with("douyin", "cookies/douyin.json")
@@ -334,8 +334,8 @@ class AccountLoginFlowTests(unittest.TestCase):
             "convert_to_video": False,
         }
 
-        with patch("publish_all.ensure_account_login", new=AsyncMock(return_value=False)), \
-             patch("publish_all.publish_to_platform", new=AsyncMock(return_value={"success": True, "message": "发布成功"})) as publish:
+        with patch("publish.orchestrator.ensure_account_login", new=AsyncMock(return_value=False)), \
+             patch("publish.orchestrator.publish_to_platform", new=AsyncMock(return_value={"success": True, "message": "发布成功"})) as publish:
             results = publish_all.run_async_for_test(publish_all.publish_one_item(params))
 
         publish.assert_not_awaited()
@@ -356,7 +356,7 @@ class AccountLoginFlowTests(unittest.TestCase):
             "convert_to_video": False,
         }
 
-        with patch("publish_all.ensure_account_login", new=AsyncMock()) as ensure_login:
+        with patch("publish.orchestrator.ensure_account_login", new=AsyncMock()) as ensure_login:
             results = publish_all.run_async_for_test(publish_all.publish_one_item(params))
 
         ensure_login.assert_not_awaited()
@@ -387,8 +387,8 @@ class PublishFailurePolicyTests(unittest.TestCase):
                 return {"success": False, "message": "发布失败"}
             return {"success": True, "message": "发布成功"}
 
-        with patch("publish_all.ensure_account_login", new=AsyncMock(return_value=True)), \
-             patch("publish_all.publish_to_platform", new=AsyncMock(side_effect=fake_publish)):
+        with patch("publish.orchestrator.ensure_account_login", new=AsyncMock(return_value=True)), \
+             patch("publish.orchestrator.publish_to_platform", new=AsyncMock(side_effect=fake_publish)):
             results = publish_all.run_async_for_test(publish_all.publish_one_item(params))
 
         self.assertFalse(results["douyin"]["success"])
@@ -414,9 +414,9 @@ class PublishFailurePolicyTests(unittest.TestCase):
                 "start_from": 1,
             }
 
-            with patch("publish_all.runtime_preflight", new=AsyncMock(return_value=True)), \
-                 patch("publish_all.get_video_content", return_value=("标题", "描述")), \
-                 patch("publish_all.publish_one_item", new=AsyncMock(return_value={"douyin": {"success": False, "message": "发布失败"}})) as publish_one_item:
+            with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)), \
+                 patch("publish.orchestrator.get_video_content", return_value=("标题", "描述")), \
+                 patch("publish.orchestrator.publish_one_item", new=AsyncMock(return_value={"douyin": {"success": False, "message": "发布失败"}})) as publish_one_item:
                 code = publish_all.run_async_for_test(publish_all.run_publish_with_params(params))
 
         publish_one_item.assert_awaited_once()

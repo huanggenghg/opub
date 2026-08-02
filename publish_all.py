@@ -9,8 +9,12 @@
 import asyncio
 import os
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
+
+# 添加项目根目录到 Python 路径
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from publish.config import (
     PublishOverrides,

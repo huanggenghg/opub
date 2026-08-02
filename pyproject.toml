@@ -54,7 +54,7 @@ py-modules = ["conf", "hgsau_cli", "publish_all"]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["uploader*", "utils*", "myUtils*"]
+include = ["uploader*", "utils*", "myUtils*", "publish*"]
 
 [tool.setuptools.package-data]
 utils = ["stealth.min.js"]

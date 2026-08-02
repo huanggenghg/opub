@@ -306,10 +306,6 @@ class BaiJiaHaoVideo(object):
         try:
             await page.wait_for_url("https://baijiahao.baidu.com/builder/rc/clue**", timeout=30000)
             baijiahao_logger.success("视频发布成功")
-            if self.publish_date == 0:
-                video_link = await self._capture_content_url(page)
-            else:
-                baijiahao_logger.info("定时发布,跳过内容链接抓取")
         except Exception:
             current_url = page.url
             baijiahao_logger.warning(f"未跳转到 clue 页, 当前 URL: {current_url}")
@@ -321,6 +317,15 @@ class BaiJiaHaoVideo(object):
             else:
                 baijiahao_logger.error(f"发布可能失败, body 文本前 500 字: {body_text[:500]}")
                 raise Exception(f"发布后未跳转 clue 页, 当前 URL: {current_url}")
+
+        if self.publish_date == 0:
+            try:
+                video_link = await self._capture_content_url(page)
+            except Exception as e:
+                baijiahao_logger.warning(f"内容链接抓取异常(不算发布失败): {e}")
+                video_link = None
+        else:
+            baijiahao_logger.info("定时发布,跳过内容链接抓取")
 
         await context.storage_state(path=self.account_file)  # 保存cookie
         baijiahao_logger.info('cookie更新完毕！')

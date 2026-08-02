@@ -1,19 +1,23 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import asyncio
-import inspect
 import os
 from datetime import datetime
 from pathlib import Path
 
 from patchright.async_api import Page
-from patchright.async_api import Playwright
-from patchright.async_api import async_playwright
 
-from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
-from uploader.base_video import BaseVideoUploader
-from utils.base_social_media import set_init_script
+from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS
+from uploader.base_video import (
+    BaseBrowserUploader,
+    PlatformResultExtras,
+    PublishStrategy,
+    _build_launch_kwargs,
+    _build_login_result,
+    _emit_qrcode_callback,
+    _get_qrcode_utils,
+    _msg,
+)
 from utils.log import weibo_logger
 
 WEIBO_MAIN_URL = "https://weibo.com/"  # 微博主站，发布入口在首页
@@ -25,10 +29,6 @@ WEIBO_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 WEIBO_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 
 
-def _msg(emoji: str, text: str) -> str:
-    return f"{emoji} {text}"
-
-
 def _resolve_account_file(account_file: str | Path) -> str:
     path = Path(account_file).expanduser()
     if path.is_absolute():
@@ -38,84 +38,6 @@ def _resolve_account_file(account_file: str | Path) -> str:
         return str((Path(BASE_DIR) / "cookies" / "weibo_uploader" / path).resolve())
 
     return str(path.resolve())
-
-
-async def _emit_qrcode_callback(qrcode_callback, payload: dict):
-    if not qrcode_callback:
-        return
-
-    callback_result = qrcode_callback(payload)
-    if inspect.isawaitable(callback_result):
-        await callback_result
-
-
-def _build_login_result(
-    success: bool,
-    status: str,
-    message: str,
-    account_file: str,
-    qrcode: dict | None = None,
-    current_url: str = "",
-) -> dict:
-    return {
-        "success": success,
-        "status": status,
-        "message": message,
-        "account_file": str(account_file),
-        "qrcode": qrcode,
-        "current_url": current_url,
-    }
-
-
-def _build_launch_kwargs(headless: bool) -> dict:
-    launch_kwargs = {"headless": headless}
-    if LOCAL_CHROME_PATH:
-        launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
-    else:
-        launch_kwargs["channel"] = "chrome"
-    return launch_kwargs
-
-
-def _get_qrcode_utils():
-    from utils.login_qrcode import build_login_qrcode_path
-    from utils.login_qrcode import decode_qrcode_from_path
-    from utils.login_qrcode import print_terminal_qrcode
-    from utils.login_qrcode import remove_qrcode_file
-    from utils.login_qrcode import save_data_url_image
-
-    return {
-        "build_login_qrcode_path": build_login_qrcode_path,
-        "decode_qrcode_from_path": decode_qrcode_from_path,
-        "print_terminal_qrcode": print_terminal_qrcode,
-        "remove_qrcode_file": remove_qrcode_file,
-        "save_data_url_image": save_data_url_image,
-    }
-
-
-async def cookie_auth(account_file):
-    """验证 cookie 是否有效"""
-    account_file = _resolve_account_file(account_file)
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=True))
-        try:
-            context = await browser.new_context(storage_state=account_file)
-            context = await set_init_script(context)
-            page = await context.new_page()
-            # 访问实际发布入口，并要求看到上传按钮，避免旧 cookie 跳到校验页后被误判为有效。
-            await page.goto(WEIBO_UPLOAD_CHANNEL_URL)
-            await page.wait_for_timeout(3000)
-
-            if await _is_weibo_auth_page_valid(page):
-                weibo_logger.success(_msg("🥳", "cookie 有效"))
-                return True
-
-            weibo_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
-            return False
-        except Exception as exc:
-            weibo_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
-            return False
-        finally:
-            await browser.close()
 
 
 async def _is_visible(locator) -> bool:
@@ -169,6 +91,12 @@ async def _is_weibo_login_completed(page: Page) -> bool:
     return True
 
 
+async def cookie_auth(account_file):
+    """验证 cookie 是否有效 - 委托 WeiboBaseUploader.cookie_auth"""
+    account_file = _resolve_account_file(account_file)
+    return await WeiboBaseUploader.cookie_auth(account_file)
+
+
 async def weibo_cookie_gen(
     account_file,
     qrcode_callback=None,
@@ -176,60 +104,9 @@ async def weibo_cookie_gen(
     max_checks: int = 100,
     headless: bool = LOCAL_CHROME_HEADLESS,
 ):
-    """生成微博登录 cookie"""
+    """生成微博登录 cookie - 委托 WeiboBaseUploader.cookie_gen"""
     account_file = _resolve_account_file(account_file)
-    Path(account_file).parent.mkdir(parents=True, exist_ok=True)
-
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=headless))
-        context = await browser.new_context()
-        context = await set_init_script(context)
-        result = _build_login_result(False, "failed", "微博登录失败", account_file)
-
-        try:
-            page = await context.new_page()
-            weibo_logger.info(_msg("🧭", f"正在访问登录页面: {WEIBO_LOGIN_URL}"))
-            await page.goto(WEIBO_LOGIN_URL)
-            await page.wait_for_timeout(3000)
-
-            weibo_logger.info(_msg("🔍", f"当前页面 URL: {page.url}"))
-            weibo_logger.info(_msg("🧍", "请扫码，等待登录完成..."))
-
-            # 等待登录完成
-            for _ in range(max_checks):
-                if await _is_weibo_login_completed(page):
-                    weibo_logger.info(_msg("🥳", f"扫码成功，已跳转到: {page.url}"))
-                    result = _build_login_result(True, "success", "微博扫码登录成功", account_file, None, page.url)
-                    break
-
-                await page.wait_for_timeout(poll_interval * 1000)
-            else:
-                result = _build_login_result(False, "timeout", "等待微博扫码登录超时", account_file, None, page.url)
-
-            # 登录成功后保存 cookie
-            if result["success"]:
-                await page.wait_for_timeout(2000)
-                await context.storage_state(path=account_file)
-                # 验证 cookie
-                if not await cookie_auth(account_file):
-                    result = _build_login_result(
-                        False,
-                        "cookie_invalid",
-                        "微博扫码流程结束，但 cookie 校验失败",
-                        account_file,
-                        None,
-                        page.url,
-                    )
-
-        except Exception as exc:
-            result = _build_login_result(False, "failed", str(exc), account_file, current_url=page.url if "page" in locals() else "")
-        finally:
-            if not result["success"]:
-                weibo_logger.error(_msg("😢", f"登录失败: {result['message']}"))
-            await context.close()
-            await browser.close()
-
-        return result
+    return await WeiboBaseUploader.cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
 
 
 async def weibo_setup(
@@ -239,32 +116,27 @@ async def weibo_setup(
     qrcode_callback=None,
     headless: bool = LOCAL_CHROME_HEADLESS,
 ):
-    """微博登录设置"""
+    """微博登录设置 - 委托 WeiboBaseUploader.setup"""
     account_file = _resolve_account_file(account_file)
-
-    if not os.path.exists(account_file) or not await cookie_auth(account_file):
-        if not handle:
-            result = _build_login_result(False, "cookie_invalid", "cookie文件不存在或已失效", account_file)
-            return result if return_detail else False
-
-        weibo_logger.info(_msg("🥹", "cookie 失效了，准备打开浏览器重新登录"))
-        result = await weibo_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
-        return result if return_detail else result["success"]
-
-    result = _build_login_result(True, "cookie_valid", "cookie有效", account_file)
-    return result if return_detail else True
+    return await WeiboBaseUploader.setup(account_file, handle, return_detail, qrcode_callback, headless)
 
 
-class WeiboBaseUploader(BaseVideoUploader):
-    """微博上传器基类"""
+class WeiboBaseUploader(BaseBrowserUploader):
+    """微博上传器基类 - hook layer for BaseBrowserUploader."""
+
+    PLATFORM_NAME = "weibo"
+    UPLOAD_URL = WEIBO_UPLOAD_CHANNEL_URL
+    LOGIN_URL = WEIBO_LOGIN_URL
+    LOGIN_MARKERS = list(WEIBO_LOGIN_URL_MARKERS)
+    PUBLISH_MARKERS = []
 
     def __init__(
         self,
-        publish_date: datetime | int,
+        publish_date,
         account_file,
-        publish_strategy: str = WEIBO_PUBLISH_STRATEGY_IMMEDIATE,
-        debug: bool = DEBUG_MODE,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        publish_strategy=PublishStrategy.IMMEDIATE,
+        debug=DEBUG_MODE,
+        headless=LOCAL_CHROME_HEADLESS,
     ):
         self.publish_date = publish_date
         self.account_file = _resolve_account_file(account_file)
@@ -273,19 +145,23 @@ class WeiboBaseUploader(BaseVideoUploader):
         self.date_format = "%Y年%m月%d日 %H:%M"
         self.headless = headless
 
-    async def validate_base_args(self):
+    @classmethod
+    async def is_login_completed(cls, page):
+        return await _is_weibo_login_completed(page)
+
+    async def validate_login_and_strategy(self):
+        """Renamed from `validate_base_args(self)` to avoid collision with
+        `BasePlatformUploader.validate_base_args(params)` staticmethod (called by dispatch).
+        Checks cookie existence/validity + publish_strategy + publish_date."""
         if not os.path.exists(self.account_file):
             raise RuntimeError(f"cookie文件不存在，请先完成微博登录: {self.account_file}")
         if not await cookie_auth(self.account_file):
             raise RuntimeError(f"cookie文件已失效，请先完成微博登录: {self.account_file}")
 
-        if self.publish_strategy not in {
-            WEIBO_PUBLISH_STRATEGY_IMMEDIATE,
-            WEIBO_PUBLISH_STRATEGY_SCHEDULED,
-        }:
+        if self.publish_strategy not in {PublishStrategy.IMMEDIATE, PublishStrategy.SCHEDULED}:
             raise ValueError(f"不支持的发布策略: {self.publish_strategy}")
 
-        if self.publish_strategy == WEIBO_PUBLISH_STRATEGY_SCHEDULED:
+        if self.publish_strategy == PublishStrategy.SCHEDULED:
             self.publish_date = self.validate_publish_date(self.publish_date)
         else:
             self.publish_date = 0
@@ -367,7 +243,7 @@ class WeiboVideo(WeiboBaseUploader):
         self.desc = desc or ""
 
     async def validate_upload_args(self):
-        await self.validate_base_args()
+        await self.validate_login_and_strategy()
         if not self.title or not str(self.title).strip():
             raise ValueError("视频发布需要提供标题")
 
@@ -641,82 +517,33 @@ class WeiboVideo(WeiboBaseUploader):
         weibo_logger.warning(_msg("⚠️", "未检测到明确的发布成功提示，请手动确认发布状态"))
         return None
 
-    async def upload(self, playwright: Playwright) -> dict:
-        """
-        上传视频
-
-        Returns:
-            dict: {"success": bool, "video_link": str|None, "message": str}
-        """
+    async def upload(self) -> PlatformResultExtras:
+        """主入口，返回 PlatformResultExtras"""
         weibo_logger.info(_msg("🧍", "检查 cookie 和视频文件..."))
         await self.validate_upload_args()
         weibo_logger.info(_msg("🥳", "上传前检查通过"))
 
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
-        context = await browser.new_context(storage_state=self.account_file)
-        context = await set_init_script(context)
-
-        result = {"success": False, "video_link": None, "message": ""}
+        result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            page = await context.new_page()
-
-            # 监听页面错误和弹窗
-            page_errors = []
-
-            def on_pageerror(error):
-                msg = f"页面JS错误: {error}"
-                page_errors.append(msg)
-                weibo_logger.error(_msg("🔴", msg))
-
-            def on_dialog(dialog):
-                msg = f"页面弹窗[{dialog.type}]: {dialog.message}"
-                page_errors.append(msg)
-                weibo_logger.error(_msg("🔴", msg))
-                dialog.accept()
-
-            def on_response(response):
-                # 捕获失败的 API 请求
-                if response.status >= 400:
-                    url = response.url
-                    if 'weibo' in url or 'sina' in url:
-                        weibo_logger.error(_msg("🔴", f"API错误 [{response.status}] {url[:200]}"))
-
-            def on_console(msg):
-                # 捕获控制台错误和警告
-                if msg.type in ('error', 'warning'):
-                    text = msg.text or ''
-                    if any(kw in text for kw in ['参数', 'error', 'Error', '失败', '非法', 'invalid', 'axios']):
-                        weibo_logger.error(_msg("🔴", f"控制台[{msg.type}]: {text[:300]}"))
-
-            page.on("pageerror", on_pageerror)
-            page.on("dialog", on_dialog)
-            page.on("response", on_response)
-            page.on("console", on_console)
-
-            video_link = await self.upload_video_content(page)
-            await context.storage_state(path=self.account_file)
-            weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
-
-            result["success"] = True
-            result["video_link"] = video_link
-            if video_link:
-                result["message"] = f"发布成功，视频链接: {video_link}"
-            else:
-                result["message"] = "发布成功，但未获取到视频链接"
+            async with self._browser_session() as page:
+                video_link = await self.upload_video_content(page)
+                weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
+                result["success"] = True
+                if video_link:
+                    result["result_url"] = video_link
+                    result["message"] = f"发布成功，视频链接: {video_link}"
+                else:
+                    result["message"] = "发布成功，但未获取到视频链接"
         except Exception as e:
             result["message"] = str(e)
             weibo_logger.error(_msg("❌", f"上传失败: {e}"))
-        finally:
-            await context.close()
-            await browser.close()
 
         return result
 
     async def main(self) -> dict:
-        """主入口，返回发布结果"""
-        async with async_playwright() as playwright:
-            return await self.upload(playwright)
+        """别名 wrapper - Task 9 删"""
+        return await self.upload()
 
 
 class WeiboNote(WeiboBaseUploader):
@@ -747,7 +574,7 @@ class WeiboNote(WeiboBaseUploader):
         self.title = title or note[:50] if note else ""
 
     async def validate_upload_args(self):
-        await self.validate_base_args()
+        await self.validate_login_and_strategy()
         if not self.image_paths:
             raise ValueError("图文发布需要提供图片")
 
@@ -818,24 +645,26 @@ class WeiboNote(WeiboBaseUploader):
         else:
             weibo_logger.info(_msg("✅", "发布请求已提交"))
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self) -> PlatformResultExtras:
+        """主入口，返回 PlatformResultExtras"""
         weibo_logger.info(_msg("🧍", "检查 cookie 和图片文件..."))
         await self.validate_upload_args()
         weibo_logger.info(_msg("🥳", "上传前检查通过"))
 
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
-        context = await browser.new_context(storage_state=self.account_file)
-        context = await set_init_script(context)
+        result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            page = await context.new_page()
-            await self.upload_note_content(page)
-            await context.storage_state(path=self.account_file)
-            weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
-        finally:
-            await context.close()
-            await browser.close()
+            async with self._browser_session() as page:
+                await self.upload_note_content(page)
+                weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
+                result["success"] = True
+                result["message"] = "发布成功"
+        except Exception as e:
+            result["message"] = str(e)
+            weibo_logger.error(_msg("❌", f"上传失败: {e}"))
 
-    async def main(self):
-        async with async_playwright() as playwright:
-            await self.upload(playwright)
+        return result
+
+    async def main(self) -> dict:
+        """别名 wrapper - Task 9 删"""
+        return await self.upload()

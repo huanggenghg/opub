@@ -15,7 +15,6 @@ from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
     PublishStrategy,
-    _build_login_result,
     _msg,
 )
 from utils.base_social_media import set_init_script

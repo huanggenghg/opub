@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from uploader.base_video import AccountRestrictedError, BaseBrowserUploader, PublishStrategy
+from uploader.base_video import BaseBrowserUploader, PublishStrategy
 from uploader.douyin_uploader.main import (
     DouYinBaseUploader, DouYinVideo, DouYinNote,
     cookie_auth, douyin_setup, DouyinPublishRestrictedError,

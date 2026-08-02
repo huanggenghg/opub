@@ -12,10 +12,6 @@ from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
     PublishStrategy,
-    _build_launch_kwargs,
-    _build_login_result,
-    _emit_qrcode_callback,
-    _get_qrcode_utils,
     _msg,
 )
 from utils.log import weibo_logger

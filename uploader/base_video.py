@@ -10,7 +10,7 @@ from typing import Optional, TypedDict
 
 from patchright.async_api import Page, Playwright, async_playwright
 
-from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from utils.base_social_media import set_init_script
 
 
@@ -326,12 +326,3 @@ class BaseCliUploader(BasePlatformUploader):
 
     async def upload(self) -> PlatformResultExtras:
         raise NotImplementedError
-
-    @staticmethod
-    def run_subprocess(cmd: list):
-        import subprocess
-        return subprocess.run(cmd, capture_output=True, text=True)
-
-    @staticmethod
-    def parse_cli_output(output: str) -> dict:
-        return {"raw": output}

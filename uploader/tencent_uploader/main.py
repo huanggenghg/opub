@@ -9,7 +9,7 @@ from pathlib import Path
 from patchright.async_api import Page
 from patchright.async_api import async_playwright
 
-from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS
 from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
@@ -389,7 +389,6 @@ class TencentBaseUploader(BaseBrowserUploader):
         self.publish_strategy = publish_strategy
         self.debug = debug
         self.headless = headless
-        self.local_executable_path = LOCAL_CHROME_PATH
 
     @classmethod
     async def cookie_auth(cls, account_file: str) -> bool:

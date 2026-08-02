@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import AsyncMock, patch
 
 from uploader.base_video import BaseCliUploader
 from uploader.bilibili_uploader.main import BilibiliUploader, cookie_auth, bilibili_setup

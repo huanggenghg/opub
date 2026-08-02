@@ -12,7 +12,7 @@ from urllib.parse import urlparse, parse_qs
 from patchright.async_api import Page
 from patchright.async_api import async_playwright
 
-from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS
 from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
@@ -312,7 +312,6 @@ class DouYinBaseUploader(BaseBrowserUploader):
         self.publish_strategy = publish_strategy
         self.debug = debug
         self.date_format = "%Y年%m月%d日 %H:%M"
-        self.local_executable_path = LOCAL_CHROME_PATH
         self.headless = headless
 
     @classmethod

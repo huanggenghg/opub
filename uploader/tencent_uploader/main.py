@@ -2,18 +2,23 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import os
 from datetime import datetime
 from pathlib import Path
 
 from patchright.async_api import Page
-from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
 
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
-from uploader.base_video import BaseVideoUploader
-from utils.base_social_media import set_init_script
+from uploader.base_video import (
+    BaseBrowserUploader,
+    PlatformResultExtras,
+    _build_launch_kwargs,
+    _build_login_result,
+    _emit_qrcode_callback,
+    _get_qrcode_utils,
+    _msg,
+)
 from utils.log import tencent_logger
 
 TENCENT_LOGIN_URL = "https://channels.weixin.qq.com"
@@ -21,10 +26,6 @@ TENCENT_UPLOAD_URL = "https://channels.weixin.qq.com/platform/post/create"
 TENCENT_MANAGE_URL = "https://channels.weixin.qq.com/platform/post/list"
 TENCENT_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 TENCENT_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
-
-
-def _msg(emoji: str, text: str) -> str:
-    return f"{emoji} {text}"
 
 
 def _resolve_account_file(account_file: str | Path) -> str:
@@ -38,58 +39,6 @@ def _resolve_account_file(account_file: str | Path) -> str:
     return str(path.resolve())
 
 
-async def _emit_qrcode_callback(qrcode_callback, payload: dict):
-    if not qrcode_callback:
-        return
-
-    callback_result = qrcode_callback(payload)
-    if inspect.isawaitable(callback_result):
-        await callback_result
-
-
-def _build_login_result(
-    success: bool,
-    status: str,
-    message: str,
-    account_file: str,
-    qrcode: dict | None = None,
-    current_url: str = "",
-) -> dict:
-    return {
-        "success": success,
-        "status": status,
-        "message": message,
-        "account_file": str(account_file),
-        "qrcode": qrcode,
-        "current_url": current_url,
-    }
-
-
-def _build_launch_kwargs(headless: bool) -> dict:
-    launch_kwargs = {"headless": headless}
-    if LOCAL_CHROME_PATH:
-        launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
-    else:
-        launch_kwargs["channel"] = "chrome"
-    return launch_kwargs
-
-
-def _get_qrcode_utils():
-    from utils.login_qrcode import build_login_qrcode_path
-    from utils.login_qrcode import decode_qrcode_from_path
-    from utils.login_qrcode import print_terminal_qrcode
-    from utils.login_qrcode import remove_qrcode_file
-    from utils.login_qrcode import save_data_url_image
-
-    return {
-        "build_login_qrcode_path": build_login_qrcode_path,
-        "decode_qrcode_from_path": decode_qrcode_from_path,
-        "print_terminal_qrcode": print_terminal_qrcode,
-        "remove_qrcode_file": remove_qrcode_file,
-        "save_data_url_image": save_data_url_image,
-    }
-
-
 def format_str_for_short_title(origin_title: str) -> str:
     allowed_special_chars = "《》“”:+?%°"
     filtered_chars = [char if char.isalnum() or char in allowed_special_chars else " " if char == "," else "" for char in origin_title]
@@ -101,38 +50,6 @@ def format_str_for_short_title(origin_title: str) -> str:
         formatted_string += " " * (6 - len(formatted_string))
 
     return formatted_string
-
-
-async def cookie_auth(account_file):
-    account_file = _resolve_account_file(account_file)
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=LOCAL_CHROME_HEADLESS))
-        try:
-            context = await browser.new_context(storage_state=account_file)
-            context = await set_init_script(context)
-            page = await context.new_page()
-            await page.goto(TENCENT_UPLOAD_URL, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_url(TENCENT_UPLOAD_URL, timeout=5000)
-
-            # 等 publish marker 出现(页面 JS 渲染需要时间,_is_tencent_login_completed 立即 check 会误判失效)
-            try:
-                await page.locator('div:has-text("发表视频")').first.wait_for(state="visible", timeout=15000)
-                tencent_logger.success(_msg("🥳", "cookie 有效"))
-                return True
-            except Exception:
-                pass
-
-            if await _is_tencent_login_completed(page):
-                tencent_logger.success(_msg("🥳", "cookie 有效"))
-                return True
-
-            tencent_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
-            return False
-        except Exception as exc:
-            tencent_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
-            return False
-        finally:
-            await browser.close()
 
 
 async def _extract_tencent_qrcode_src(page: Page) -> str:
@@ -341,6 +258,12 @@ async def _wait_for_tencent_login(
     return _build_login_result(False, "timeout", "等待视频号扫码登录超时", account_file, qrcode_info, page.url)
 
 
+async def cookie_auth(account_file):
+    """验证 cookie 是否有效 - 委托 TencentBaseUploader.cookie_auth"""
+    account_file = _resolve_account_file(account_file)
+    return await TencentBaseUploader.cookie_auth(account_file)
+
+
 async def tencent_cookie_gen(
     account_file,
     qrcode_callback=None,
@@ -409,6 +332,7 @@ async def tencent_setup(
     qrcode_callback=None,
     headless: bool = LOCAL_CHROME_HEADLESS,
 ):
+    """微信视频号登录设置 - 校验 cookie，失效时触发扫码登录"""
     account_file = _resolve_account_file(account_file)
     if not os.path.exists(account_file) or not await cookie_auth(account_file):
         if not handle:
@@ -443,7 +367,15 @@ async def weixin_setup(
     )
 
 
-class TencentBaseUploader(BaseVideoUploader):
+class TencentBaseUploader(BaseBrowserUploader):
+    """微信视频号上传器基类 - hook layer for BaseBrowserUploader."""
+
+    PLATFORM_NAME = "tencent"
+    UPLOAD_URL = TENCENT_UPLOAD_URL
+    LOGIN_URL = TENCENT_LOGIN_URL
+    LOGIN_MARKERS = ["login.html"]
+    PUBLISH_MARKERS = []
+
     def __init__(
         self,
         publish_date: datetime | int,
@@ -459,7 +391,55 @@ class TencentBaseUploader(BaseVideoUploader):
         self.headless = headless
         self.local_executable_path = LOCAL_CHROME_PATH
 
-    async def validate_base_args(self):
+    @classmethod
+    async def cookie_auth(cls, account_file: str) -> bool:
+        """Override base to use LOCAL_CHROME_HEADLESS (not hardcoded True) and
+        wait for publish marker before checking login status.
+
+        Preserves the headless bug fix documented in
+        project_tencent_cookie_auth_headless_bug.md: 微信视频号会检测 headless
+        模式,用 headless=True 加载 storage_state 导航到上传页时,即使 cookie
+        有效也会被重定向到 login.html,导致 cookie_auth 误判失效。"""
+        if not os.path.exists(account_file):
+            return False
+        async with async_playwright() as playwright:
+            browser = await cls._launch_browser(playwright, headless=LOCAL_CHROME_HEADLESS)
+            try:
+                context = await cls._init_context(browser, account_file)
+                page = await context.new_page()
+                await page.goto(cls.UPLOAD_URL, wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_url(cls.UPLOAD_URL, timeout=5000)
+
+                # 等 publish marker 出现(页面 JS 渲染需要时间,
+                # _is_tencent_login_completed 立即 check 会误判失效)
+                try:
+                    await page.locator('div:has-text("发表视频")').first.wait_for(state="visible", timeout=15000)
+                    tencent_logger.success(_msg("🥳", "cookie 有效"))
+                    return True
+                except Exception:
+                    pass
+
+                if await _is_tencent_login_completed(page):
+                    tencent_logger.success(_msg("🥳", "cookie 有效"))
+                    return True
+
+                tencent_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
+                return False
+            except Exception as exc:
+                tencent_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
+                return False
+            finally:
+                await browser.close()
+
+    @classmethod
+    async def is_login_completed(cls, page: Page) -> bool:
+        """Override hook: 视频号登录完成判断(基于 DOM marker,不是 URL)。"""
+        return await _is_tencent_login_completed(page)
+
+    async def validate_login_and_strategy(self):
+        """Renamed from `validate_base_args(self)` to avoid collision with
+        `BasePlatformUploader.validate_base_args(params)` staticmethod (called by dispatch).
+        Checks cookie existence/validity + publish_strategy + publish_date."""
         if not os.path.exists(self.account_file):
             raise RuntimeError(f"cookie文件不存在，请先完成视频号登录: {self.account_file}")
         if not await cookie_auth(self.account_file):
@@ -661,7 +641,7 @@ class TencentVideo(TencentBaseUploader):
         self.short_title = short_title
 
     async def validate_upload_args(self):
-        await self.validate_base_args()
+        await self.validate_login_and_strategy()
         if not self.title or not str(self.title).strip():
             raise ValueError("视频模式下，title 是必须的")
         self.file_path = str(self.validate_video_file(self.file_path))
@@ -740,42 +720,50 @@ class TencentVideo(TencentBaseUploader):
         await self.apply_collection(page)
         await self.apply_original_statement(page)
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload_video_content(self, page: Page) -> None:
+        """上传视频内容(页面已通过 _browser_session 打开)。"""
+        await self.open_upload_page(page)
+        tencent_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}"))
+
+        await self.upload_video_file(page, self.file_path)
+        await self.prepare_video_for_publish(page)
+        await self.wait_for_upload_complete(page)
+        await self.set_thumbnail(page)
+
+        if self.publish_strategy == TENCENT_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
+            await self.set_schedule_time_tencent(page, self.publish_date)
+
+        await self.set_short_title(page, self.title, self.short_title)
+        await self.submit_publish(page)
+
+    async def upload(self) -> PlatformResultExtras:
+        """主入口，返回 PlatformResultExtras。
+        微信视频号不暴露已发布视频 URL，故 result 不含 result_url。"""
         tencent_logger.info(_msg("🧍", "小人先检查 cookie、视频文件和发布时间"))
         await self.validate_upload_args()
         tencent_logger.info(_msg("🥳", "上传前检查通过"))
 
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
-        context = await browser.new_context(storage_state=self.account_file)
+        result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            page = await context.new_page()
-            await self.open_upload_page(page)
-            tencent_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}"))
+            async with self._browser_session() as page:
+                await self.upload_video_content(page)
+                tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
+                result["success"] = True
+                result["message"] = "发布成功"
+        except Exception as e:
+            result["message"] = str(e)
+            tencent_logger.error(_msg("❌", f"上传失败: {e}"))
 
-            await self.upload_video_file(page, self.file_path)
-            await self.prepare_video_for_publish(page)
-            await self.wait_for_upload_complete(page)
-            await self.set_thumbnail(page)
-
-            if self.publish_strategy == TENCENT_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
-                await self.set_schedule_time_tencent(page, self.publish_date)
-
-            await self.set_short_title(page, self.title, self.short_title)
-            await self.submit_publish(page)
-
-            await context.storage_state(path=self.account_file)
-            tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
-        finally:
-            await context.close()
-            await browser.close()
+        return result
 
     async def tencent_upload_video(self):
-        async with async_playwright() as playwright:
-            await self.upload(playwright)
+        """Backward-compat wrapper - Task 9 删"""
+        return await self.upload()
 
-    async def main(self):
-        await self.tencent_upload_video()
+    async def main(self) -> PlatformResultExtras:
+        """别名 wrapper - Task 9 删"""
+        return await self.upload()
 
 
 class TencentNote(TencentBaseUploader):
@@ -806,7 +794,7 @@ class TencentNote(TencentBaseUploader):
         self.is_draft = is_draft
 
     async def validate_upload_args(self):
-        await self.validate_base_args()
+        await self.validate_login_and_strategy()
         if not self.title or not str(self.title).strip():
             raise ValueError("图文模式下，title 是必须的")
         if not self.image_paths:
@@ -843,36 +831,40 @@ class TencentNote(TencentBaseUploader):
         await self.upload_note_images(page)
         await self.prepare_note_for_publish(page)
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self) -> PlatformResultExtras:
+        """主入口，返回 PlatformResultExtras。
+        TencentNote 是 stub(多数方法 NotImplementedError)，upload() 会捕获异常返回失败。"""
         tencent_logger.info(_msg("🧍", "小人先检查 cookie、图文图片和发布时间"))
         await self.validate_upload_args()
         tencent_logger.info(_msg("🥳", "图文上传前检查通过"))
 
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
-        context = await browser.new_context(storage_state=self.account_file)
-        context = await set_init_script(context)
+        result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            page = await context.new_page()
-            await self.open_upload_page(page)
-            tencent_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
+            async with self._browser_session() as page:
+                await self.open_upload_page(page)
+                tencent_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
 
-            await self.upload_note_content(page)
+                await self.upload_note_content(page)
 
-            if self.publish_strategy == TENCENT_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
-                await self.set_schedule_time_tencent(page, self.publish_date)
+                if self.publish_strategy == TENCENT_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
+                    await self.set_schedule_time_tencent(page, self.publish_date)
 
-            await self.submit_publish(page)
+                await self.submit_publish(page)
 
-            await context.storage_state(path=self.account_file)
-            tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
-        finally:
-            await context.close()
-            await browser.close()
+                tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
+                result["success"] = True
+                result["message"] = "发布成功"
+        except Exception as e:
+            result["message"] = str(e)
+            tencent_logger.error(_msg("❌", f"上传失败: {e}"))
+
+        return result
 
     async def tencent_upload_note(self):
-        async with async_playwright() as playwright:
-            await self.upload(playwright)
+        """Backward-compat wrapper - Task 9 删"""
+        return await self.upload()
 
-    async def main(self):
-        await self.tencent_upload_note()
+    async def main(self) -> PlatformResultExtras:
+        """别名 wrapper - Task 9 删"""
+        return await self.upload()

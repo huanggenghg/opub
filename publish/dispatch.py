@@ -192,33 +192,24 @@ async def publish_to_tencent(params: dict) -> dict:
     from uploader.tencent_uploader.main import TencentVideo
 
     account_file = resolve_path(params["account_file"])
-
     title = truncate_title(params["title"], "tencent")
-    tags = params["tags"]
-    publish_strategy = params["publish_strategy"]
-    publish_time = params["publish_time"]
-    content_type = params["content_type"]
+
+    if params["content_type"] == "video":
+        params = {**params, "video_file": resolve_path(params["video_file"])}
+    else:
+        return {"success": False, "message": "微信视频号不支持图文发布，请使用 convert_to_video=true 转为视频发布"}
+
+    err = TencentVideo.validate_base_args(params)
+    if err:
+        return err
 
     try:
-        if content_type == "video":
-            video_file = resolve_path(params["video_file"])
-            if not video_file or not os.path.exists(video_file):
-                return {"success": False, "message": f"视频文件不存在: {video_file}"}
-
-            uploader = TencentVideo(
-                title=title,
-                file_path=video_file,
-                tags=tags,
-                publish_date=publish_time or 0,
-                account_file=account_file,
-                desc=params["desc"],
-                publish_strategy=publish_strategy,
-            )
-        else:
-            return {"success": False, "message": "微信视频号不支持图文发布，请使用 convert_to_video=true 转为视频发布"}
-
-        await uploader.main()
-        return {"success": True, "message": "发布成功"}
+        uploader = TencentVideo(
+            title=title, file_path=params["video_file"], tags=params["tags"],
+            publish_date=params["publish_time"] or 0, account_file=account_file,
+            desc=params["desc"], publish_strategy=params["publish_strategy"],
+        )
+        return await uploader.upload()
     except Exception as e:
         return {"success": False, "message": str(e)}
 

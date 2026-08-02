@@ -818,6 +818,7 @@ async def publish_to_tencent(params: dict) -> dict:
 async def publish_to_baijiahao(params: dict) -> dict:
     """发布到百家号"""
     from uploader.baijiahao_uploader.main import BaiJiaHaoVideo
+    from utils.excel_writer import write_video_link
 
     account_file = resolve_path(params["account_file"])
 
@@ -843,8 +844,22 @@ async def publish_to_baijiahao(params: dict) -> dict:
         else:
             return {"success": False, "message": "百家号不支持图文发布，请使用 convert_to_video=true 转为视频发布"}
 
-        await uploader.main()
-        return {"success": True, "message": "发布成功"}
+        result = await uploader.main()
+        video_link = result.get("video_link", "") if result else ""
+
+        response = {"success": True, "message": "发布成功"}
+        if video_link:
+            response["video_link"] = video_link
+            try:
+                write_result = write_video_link(video_link)
+                if write_result["success"]:
+                    print(f"  📝 视频链接已写入 Excel: {video_link}")
+                else:
+                    print(f"  ⚠️ 写入 Excel 失败: {write_result['message']}")
+            except Exception as e:
+                print(f"  ⚠️ 写入 Excel 异常: {e}")
+
+        return response
     except Exception as e:
         return {"success": False, "message": str(e)}
 

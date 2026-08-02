@@ -24,7 +24,7 @@ from publish.dispatch import (
     platform_requires_account_login,
     publish_to_platform,
 )
-from publish.reporter import print_header, print_results
+from publish.reporter import print_header, print_results, print_summary
 from publish.runtime import runtime_preflight
 
 
@@ -172,32 +172,8 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
         all_results[video_file] = await publish_one_item(video_params)
 
     # 打印总体汇总
-    print("\n========== 总体发布汇总 ==========")
-    success_count = sum(1 for results in all_results.values() for result in results.values() if result["success"])
+    print_summary(all_results)
     fail_count = sum(1 for results in all_results.values() for result in results.values() if not result["success"])
-    print(f"成功: {success_count} 次")
-    print(f"失败: {fail_count} 次")
-
-    # 账号异常反馈：汇总所有标记为 account_issue 的失败，提醒用户处理
-    seen_issues = set()
-    account_issues = []
-    for results in all_results.values():
-        for result_key, result in results.items():
-            if not result.get("account_issue"):
-                continue
-            if result_key in seen_issues:
-                continue
-            seen_issues.add(result_key)
-            platform_name = PLATFORM_NAMES.get(result_key.split("_")[0], result_key)
-            account_issues.append((result_key, platform_name, result.get("message", "")))
-
-    if account_issues:
-        print("\n========== ⚠️ 账号异常反馈 ==========")
-        for result_key, platform_name, message in account_issues:
-            print(f"  [{result_key}] {platform_name}: {message}")
-        print("\n以上账号可能已失效、被限制或登录异常，请前往对应平台检查账号状态，")
-        print("必要时重新扫码登录或联系平台客服。")
-
     return 0 if fail_count == 0 else 1
 
 

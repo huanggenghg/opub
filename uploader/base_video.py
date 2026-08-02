@@ -103,10 +103,6 @@ class BasePlatformUploader:
         return None
 
 
-# Backward-compat alias (Task 9 deletes this)
-BaseVideoUploader = BasePlatformUploader
-
-
 def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
 

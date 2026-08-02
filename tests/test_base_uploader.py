@@ -10,7 +10,6 @@ from uploader.base_video import (
     BaseBrowserUploader,
     BaseCliUploader,
     BasePlatformUploader,
-    BaseVideoUploader,
     PlatformResult,
     PlatformResultExtras,
     PublishStrategy,
@@ -54,11 +53,6 @@ class AccountRestrictedErrorTests(unittest.TestCase):
     def test_carries_message(self):
         exc = AccountRestrictedError("风控限制")
         self.assertEqual(str(exc), "风控限制")
-
-
-class BaseVideoUploaderAliasTests(unittest.TestCase):
-    def test_alias_points_to_base_platform_uploader(self):
-        self.assertIs(BaseVideoUploader, BasePlatformUploader)
 
 
 class ValidateBaseArgsTests(unittest.TestCase):
@@ -114,7 +108,7 @@ class ValidateBaseArgsTests(unittest.TestCase):
 
 class ValidateVideoFileTests(unittest.TestCase):
     def test_existing_validation_preserved(self):
-        # inherited from old BaseVideoUploader, must still work via BasePlatformUploader
+        # validate_video_file inherited from BasePlatformUploader, must still work
         import tempfile
         import os
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:

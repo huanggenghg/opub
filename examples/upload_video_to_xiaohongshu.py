@@ -122,8 +122,13 @@ def upload_video_to_xiaohongshu():
         publish_strategy=publish_strategy,
         thumbnail_path=str(thumbnail) if thumbnail else None,
     )
-    result = asyncio.run(app.xiaohongshu_upload_video())
-    print(f"\n上传结果: {result}")
+    result = asyncio.run(app.upload())
+    if result.get("success"):
+        print(f"✅ 发布成功" + (f",链接: {result['result_url']}" if result.get("result_url") else ""))
+    else:
+        print(f"❌ 发布失败: {result.get('message')}")
+        if result.get("account_issue"):
+            print(f"   账号问题: {result.get('issue_type')}")
 
 
 def upload_note_to_xiaohongshu():
@@ -178,8 +183,13 @@ def upload_note_to_xiaohongshu():
         publish_strategy=publish_strategy,
         title=note_title,
     )
-    result = asyncio.run(app.xiaohongshu_upload_note())
-    print(f"\n上传结果: {result}")
+    result = asyncio.run(app.upload())
+    if result.get("success"):
+        print(f"✅ 发布成功" + (f",链接: {result['result_url']}" if result.get("result_url") else ""))
+    else:
+        print(f"❌ 发布失败: {result.get('message')}")
+        if result.get("account_issue"):
+            print(f"   账号问题: {result.get('issue_type')}")
 
 
 if __name__ == "__main__":

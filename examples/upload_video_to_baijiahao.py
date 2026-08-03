@@ -24,4 +24,10 @@ if __name__ == '__main__':
         print(f"标题：{title}")
         print(f"Hashtag：{tags}")
         app = BaiJiaHaoVideo(title, file, tags, publish_datetimes[index], account_file)
-        asyncio.run(app.main(), debug=False)
+        result = asyncio.run(app.upload())
+        if result.get("success"):
+            print(f"✅ 发布成功" + (f",链接: {result['result_url']}" if result.get("result_url") else ""))
+        else:
+            print(f"❌ 发布失败: {result.get('message')}")
+            if result.get("account_issue"):
+                print(f"   账号问题: {result.get('issue_type')}")

@@ -39,7 +39,13 @@ def upload_video_to_kuaishou():
         thumbnail_path=thumbnail_path if thumbnail_path.exists() else None,
         publish_strategy=publish_strategy,
     )
-    asyncio.run(app.main())
+    result = asyncio.run(app.upload())
+    if result.get("success"):
+        print(f"✅ 发布成功" + (f",链接: {result['result_url']}" if result.get("result_url") else ""))
+    else:
+        print(f"❌ 发布失败: {result.get('message')}")
+        if result.get("account_issue"):
+            print(f"   账号问题: {result.get('issue_type')}")
 
 
 def upload_note_to_kuaishou():
@@ -64,7 +70,13 @@ def upload_note_to_kuaishou():
         account_file=account_file,
         publish_strategy=publish_strategy,
     )
-    asyncio.run(app.main())
+    result = asyncio.run(app.upload())
+    if result.get("success"):
+        print(f"✅ 发布成功" + (f",链接: {result['result_url']}" if result.get("result_url") else ""))
+    else:
+        print(f"❌ 发布失败: {result.get('message')}")
+        if result.get("account_issue"):
+            print(f"   账号问题: {result.get('issue_type')}")
 
 
 if __name__ == '__main__':

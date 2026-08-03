@@ -18,7 +18,7 @@ from publish.config import (
     reset_publish_task_fields,
 )
 from publish.constants import PLATFORM_NAMES
-from publish.content import get_video_content, get_video_files
+from publish.content import fill_empty_content, get_video_content, get_video_files
 from publish.dispatch import (
     ensure_account_login,
     platform_requires_account_login,
@@ -123,6 +123,30 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
         except Exception as e:
             print(f"[ERROR] 图片转视频失败: {e}")
             return 1
+
+    # 图文模式(不转视频):不依赖 video_file,直接以 images 发布
+    if params["content_type"] == "note":
+        if not params["images"]:
+            print("❌ 错误: 图文模式需要提供图片")
+            return 1
+
+        if not await runtime_preflight():
+            print("❌ 错误: 运行环境检查失败")
+            return 1
+
+        title, desc = fill_empty_content(params["title"], params["desc"])
+        note_params = {**params, "title": title, "desc": desc}
+        print(f"\n========== 图文发布 ==========")
+        print(f"标题: {title}")
+        if params["tags"]:
+            print(f"标签: {params['tags']}")
+        print(f"图片数: {len(params['images'])}")
+        print(f"启用平台: {', '.join(params['enabled_platforms'])}\n")
+
+        all_results = {"note": await publish_one_item(note_params)}
+        print_summary(all_results)
+        fail_count = sum(1 for results in all_results.values() for result in results.values() if not result["success"])
+        return 0 if fail_count == 0 else 1
 
     # 获取视频文件列表
     video_files = get_video_files(params["video_file"])

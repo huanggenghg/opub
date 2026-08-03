@@ -211,6 +211,58 @@ class PublishEngineTests(unittest.TestCase):
         self.assertEqual(code, 1)
         preflight.assert_not_awaited()
 
+    def test_run_publish_with_params_note_mode_without_conversion_publishes_via_images(self):
+        params = {
+            "content_type": "note",
+            "title": "标题",
+            "desc": "描述",
+            "tags": [],
+            "video_file": "",
+            "images": ["videos/demo.png"],
+            "publish_strategy": "immediate",
+            "publish_time": None,
+            "enabled_platforms": ["kuaishou"],
+            "platforms": {},
+            "convert_to_video": False,
+            "video_duration": 5,
+            "start_from": 1,
+        }
+
+        with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)):
+            with patch("publish.orchestrator.get_video_files", return_value=[]) as get_video_files:
+                with patch("publish.orchestrator.publish_one_item", new=AsyncMock(return_value={"kuaishou": {"success": True, "message": "ok"}})) as publish_one_item:
+                    code = asyncio.run(publish_all.run_publish_with_params(params))
+
+        self.assertEqual(code, 0)
+        get_video_files.assert_not_called()
+        publish_one_item.assert_awaited_once()
+        called_params = publish_one_item.call_args.args[0]
+        self.assertEqual(called_params["images"], ["videos/demo.png"])
+        self.assertEqual(called_params["content_type"], "note")
+
+    def test_run_publish_with_params_note_mode_without_images_returns_error(self):
+        params = {
+            "content_type": "note",
+            "title": "标题",
+            "desc": "描述",
+            "tags": [],
+            "video_file": "",
+            "images": [],
+            "publish_strategy": "immediate",
+            "publish_time": None,
+            "enabled_platforms": ["kuaishou"],
+            "platforms": {},
+            "convert_to_video": False,
+            "video_duration": 5,
+            "start_from": 1,
+        }
+
+        with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)) as preflight:
+            code = asyncio.run(publish_all.run_publish_with_params(params))
+
+        self.assertEqual(code, 1)
+        preflight.assert_not_awaited()
+
     def test_publish_to_douyin_marks_restriction_as_account_issue(self):
         params = {
             "account_file": "cookies/douyin_uploader/account.json",

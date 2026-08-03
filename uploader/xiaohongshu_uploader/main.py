@@ -10,15 +10,12 @@ from pathlib import Path
 from patchright.async_api import Page
 from patchright.async_api import async_playwright
 
-from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS
 from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
-    PublishStrategy,
-    _build_launch_kwargs,
     _build_login_result,
     _emit_qrcode_callback,
-    _get_qrcode_utils,
     _msg,
 )
 from utils.base_social_media import set_init_script
@@ -426,7 +423,6 @@ class XiaoHongShuBaseUploader(BaseBrowserUploader):
         self.publish_strategy = publish_strategy
         self.debug = debug
         self.date_format = "%Y年%m月%d日 %H:%M"
-        self.local_executable_path = LOCAL_CHROME_PATH
         self.headless = headless
 
     @classmethod

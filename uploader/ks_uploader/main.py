@@ -412,7 +412,6 @@ class KSBaseUploader(BaseBrowserUploader):
         self.publish_strategy = publish_strategy
         self.debug = debug
         self.headless = headless
-        self.local_executable_path = LOCAL_CHROME_PATH
         self.date_format = "%Y-%m-%d %H:%M"
 
     @classmethod

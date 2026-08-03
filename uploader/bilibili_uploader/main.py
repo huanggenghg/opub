@@ -36,7 +36,6 @@ class BilibiliUploader(BaseCliUploader):
         self.tags = tags if tags is not None else []
         self.account_file = account_file
         self.desc = desc
-        self.publish_strategy = publish_strategy
         self.tid = tid
 
     @classmethod
@@ -73,7 +72,11 @@ class BilibiliUploader(BaseCliUploader):
         qrcode_callback=None,
         headless: bool = True,
     ):
-        """5-param signature for dispatch compatibility. qrcode_callback/headless ignored (CLI)."""
+        """5-param signature for dispatch compatibility.
+
+        return_detail/qrcode_callback/headless are ignored (CLI platform -
+        biliup doesn't support QR callbacks or headless mode).
+        """
         if not os.path.exists(account_file) or not await cls.cookie_auth(account_file):
             if not handle:
                 return False
@@ -82,7 +85,11 @@ class BilibiliUploader(BaseCliUploader):
         return True
 
     async def upload(self) -> PlatformResultExtras:
-        """用 biliup 上传视频到 B站。"""
+        """用 biliup 上传视频到 B站。
+
+        Returns PlatformResultExtras without raw_output (biliup stdout
+        is logged but not returned - no consumer in the codebase).
+        """
         tag_str = ",".join(self.tags) if isinstance(self.tags, list) else str(self.tags)
         if not os.path.exists(self.file_path):
             return {"success": False, "message": f"视频文件不存在: {self.file_path}"}

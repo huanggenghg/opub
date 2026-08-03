@@ -16,7 +16,6 @@ from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS
 from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
-    PublishStrategy,
     _build_launch_kwargs,
     _build_login_result,
     _emit_qrcode_callback,

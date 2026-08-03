@@ -103,6 +103,39 @@ class WeiboLogTimingTests(unittest.TestCase):
             if args and "cookie 更新完毕" in str(args[0]):
                 self.fail("cookie 更新完毕 log was printed on failure - should only print on success")
 
+    def test_log_printed_on_success(self):
+        """On success, 'cookie 更新完毕' log fires. Complements the failure-path
+        test (verifies log does NOT fire on failure) and the ordering test in
+        test_base_uploader_session.py (verifies storage_state saves before code
+        after async with runs)."""
+        import asyncio
+        uploader = WeiboVideo(
+            title="test", file_path="/fake.mp4", tags=[],
+            publish_date=0, account_file="/fake.json",
+        )
+        with patch.object(uploader, "validate_upload_args", AsyncMock()), \
+             patch.object(uploader, "_browser_session") as mock_session, \
+             patch.object(WeiboVideo, "upload_video_content", AsyncMock(return_value="https://weibo.com/v/123")), \
+             patch("uploader.weibo_uploader.main.weibo_logger") as mock_logger:
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def fake_session():
+                class FakePage:
+                    url = "https://weibo.com/upload"
+                yield FakePage()
+
+            mock_session.return_value = fake_session()
+            result = asyncio.run(uploader.upload())
+        self.assertTrue(result["success"])
+        # "cookie 更新完毕" log must be called on success
+        success_calls = []
+        for call in mock_logger.success.call_args_list:
+            args, kwargs = call
+            if args and "cookie 更新完毕" in str(args[0]):
+                success_calls.append(call)
+        self.assertEqual(len(success_calls), 1)
+
 
 class ModuleWrapperTests(unittest.TestCase):
     def test_cookie_auth_delegates_to_classmethod(self):

@@ -66,6 +66,7 @@ from publish.runtime import (
     playwright_browser_cache_dirs,
     run_async_for_test,
     runtime_preflight,
+    sync_python_dependencies,
 )
 
 if __name__ == "__main__":

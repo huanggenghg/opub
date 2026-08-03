@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -305,7 +306,8 @@ class RuntimePreflightTests(unittest.TestCase):
     def test_runtime_preflight_installs_missing_chromium(self):
         with patch("publish.runtime.patchright_available", return_value=True), \
              patch("publish.runtime.patchright_chromium_installed", return_value=False), \
-             patch("publish.runtime.install_patchright_chromium", return_value=True) as install:
+             patch("publish.runtime.install_patchright_chromium", return_value=True) as install, \
+             patch("publish.runtime.sync_python_dependencies", return_value=True):
             ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
 
         self.assertTrue(ok)
@@ -314,18 +316,52 @@ class RuntimePreflightTests(unittest.TestCase):
     def test_runtime_preflight_fails_when_chromium_install_fails(self):
         with patch("publish.runtime.patchright_available", return_value=True), \
              patch("publish.runtime.patchright_chromium_installed", return_value=False), \
-             patch("publish.runtime.install_patchright_chromium", return_value=False):
+             patch("publish.runtime.install_patchright_chromium", return_value=False), \
+             patch("publish.runtime.sync_python_dependencies", return_value=True):
             ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
 
         self.assertFalse(ok)
 
     def test_runtime_preflight_fails_without_patchright_and_does_not_install(self):
         with patch("publish.runtime.patchright_available", return_value=False), \
-             patch("publish.runtime.install_patchright_chromium", return_value=True) as install:
+             patch("publish.runtime.install_patchright_chromium", return_value=True) as install, \
+             patch("publish.runtime.sync_python_dependencies", return_value=True) as sync:
             ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
 
         self.assertFalse(ok)
         install.assert_not_called()
+        sync.assert_not_called()
+
+    def test_runtime_preflight_fails_when_dep_sync_fails(self):
+        with patch("publish.runtime.patchright_available", return_value=True), \
+             patch("publish.runtime.sync_python_dependencies", return_value=False) as sync, \
+             patch("publish.runtime.patchright_chromium_installed", return_value=True) as chromium_check:
+            ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
+
+        self.assertFalse(ok)
+        sync.assert_called_once()
+        chromium_check.assert_not_called()
+
+    def test_sync_python_dependencies_calls_pip_install_with_requirements_path(self):
+        with patch("publish.runtime.subprocess.run") as run, \
+             patch("publish.runtime.Path.exists", return_value=True):
+            run.return_value.returncode = 0
+
+            ok = publish_all.sync_python_dependencies()
+
+        self.assertTrue(ok)
+        args = run.call_args.args[0]
+        self.assertEqual(args[0:3], [sys.executable, "-m", "pip"])
+        self.assertIn("install", args)
+        self.assertTrue(any("requirements.txt" in str(a) for a in args))
+
+    def test_sync_python_dependencies_returns_true_when_requirements_missing(self):
+        with patch("publish.runtime.Path.exists", return_value=False), \
+             patch("publish.runtime.subprocess.run") as run:
+            ok = publish_all.sync_python_dependencies()
+
+        self.assertTrue(ok)
+        run.assert_not_called()
 
     def test_install_patchright_chromium_defaults_to_playwright_cdn_for_chromium(self):
         with patch.dict("publish_all.os.environ", {}, clear=True):

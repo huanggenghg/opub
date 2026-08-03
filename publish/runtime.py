@@ -80,6 +80,19 @@ def install_patchright_chromium() -> bool:
     return result.returncode == 0
 
 
+def sync_python_dependencies() -> bool:
+    """同步 requirements.txt 里的 python 依赖。已装且版本匹配的包会跳过,缺失/版本不符的会装。"""
+    req_path = Path(__file__).resolve().parent.parent / "requirements.txt"
+    if not req_path.exists():
+        return True
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-r", str(req_path), "--quiet"],
+        cwd=str(req_path.parent),
+    )
+    return result.returncode == 0
+
+
 async def runtime_preflight() -> bool:
     print("运行环境预检")
 
@@ -90,6 +103,11 @@ async def runtime_preflight() -> bool:
     if not patchright_available():
         print("运行环境检查失败: 未安装 patchright", file=sys.stderr)
         return False
+
+    if not sync_python_dependencies():
+        print("运行环境检查失败: 依赖同步失败,请手动运行 pip install -r requirements.txt", file=sys.stderr)
+        return False
+    print("Python 依赖已同步")
 
     if patchright_chromium_installed():
         print("Patchright Chromium 已安装")

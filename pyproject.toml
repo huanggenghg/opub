@@ -54,7 +54,7 @@ py-modules = ["conf", "publish_all"]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["uploader*", "utils*", "myUtils*", "publish*"]
+include = ["uploader*", "utils*", "publish*"]
 
 [tool.setuptools.package-data]
 utils = ["stealth.min.js"]

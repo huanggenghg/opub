@@ -201,7 +201,7 @@ class BaseBrowserUploader(BasePlatformUploader):
         if not os.path.exists(account_file):
             return False
         async with async_playwright() as playwright:
-            browser = await cls._launch_browser(playwright, headless=True)
+            browser = await cls._launch_browser(playwright, headless=LOCAL_CHROME_HEADLESS)
             try:
                 context = await cls._init_context(browser, account_file)
                 page = await context.new_page()

@@ -48,6 +48,30 @@ class WeiboVideoUploadTests(unittest.TestCase):
         self.assertEqual(result["result_url"], "https://weibo.com/v/123")
 
 
+class WeiboNoteUploadTests(unittest.TestCase):
+    def test_upload_returns_platform_result_extras(self):
+        import asyncio
+        uploader = WeiboNote(
+            image_paths=["/fake.jpg"], note="test note", tags=[],
+            publish_date=0, account_file="/fake.json",
+        )
+        with patch.object(uploader, "_browser_session") as mock_session, \
+             patch.object(uploader, "validate_upload_args", AsyncMock()), \
+             patch.object(WeiboNote, "upload_note_content", AsyncMock()):
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def fake_session():
+                class FakePage:
+                    url = "https://weibo.com/upload/channel"
+                yield FakePage()
+
+            mock_session.return_value = fake_session()
+            result = asyncio.run(uploader.upload())
+        self.assertTrue(result["success"])
+        self.assertEqual(result["message"], "发布成功")
+
+
 class ModuleWrapperTests(unittest.TestCase):
     def test_cookie_auth_delegates_to_classmethod(self):
         import asyncio

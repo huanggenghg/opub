@@ -129,6 +129,52 @@ class CookieGenTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertTrue(fake_context.storage_state_saved)
 
+    def test_cookie_gen_returns_timeout_when_login_never_completes(self):
+        """cookie_gen polls 100 times; if is_login_completed never returns True, returns timeout result."""
+        with patch("uploader.base_video.async_playwright") as mock_ap, \
+             patch("uploader.base_video.set_init_script", side_effect=lambda ctx: ctx), \
+             patch.object(FakeUploader, "is_login_completed", AsyncMock(return_value=False)):
+            # FakeContext returns login URL for all gotos - is_login_completed mocked to always False
+            fake_context = FakeContext("https://example.com/login", "https://example.com/login")
+            fake_pw = FakePlaywright(fake_context)
+            mock_ap.return_value = fake_pw
+            with patch.object(FakeUploader, "cookie_auth", AsyncMock(return_value=True)):
+                result = asyncio.run(FakeUploader.cookie_gen("/fake.json"))
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "timeout")
+
+    def test_cookie_gen_invokes_qrcode_callback(self):
+        """cookie_gen calls qrcode_callback with QR code src when extract_qrcode_src returns a URL."""
+        callback_calls = []
+
+        async def fake_callback(data):
+            callback_calls.append(data)
+
+        with patch("uploader.base_video.async_playwright") as mock_ap, \
+             patch("uploader.base_video.set_init_script", side_effect=lambda ctx: ctx), \
+             patch.object(FakeUploader, "is_login_completed", AsyncMock(side_effect=[False, True])):
+            fake_context = FakeContext("https://example.com/login", "https://example.com/upload")
+            fake_pw = FakePlaywright(fake_context)
+            mock_ap.return_value = fake_pw
+            with patch.object(FakeUploader, "cookie_auth", AsyncMock(return_value=True)):
+                result = asyncio.run(FakeUploader.cookie_gen("/fake.json", qrcode_callback=fake_callback))
+        self.assertTrue(callback_calls, "qrcode_callback should have been called")
+        self.assertIn("qrcode", callback_calls[0])
+
+    def test_cookie_gen_handles_exception(self):
+        """cookie_gen catches exceptions during the login flow and returns failed result."""
+        with patch("uploader.base_video.async_playwright") as mock_ap, \
+             patch("uploader.base_video.set_init_script", side_effect=lambda ctx: ctx):
+            fake_context = FakeContext("https://example.com/login", "https://example.com/upload")
+            fake_pw = FakePlaywright(fake_context)
+            mock_ap.return_value = fake_pw
+            # Make page.goto raise an exception
+            with patch.object(FakePage, "goto", AsyncMock(side_effect=RuntimeError("network error"))):
+                result = asyncio.run(FakeUploader.cookie_gen("/fake.json"))
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("network error", result["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

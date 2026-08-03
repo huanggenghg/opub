@@ -39,6 +39,30 @@ class KSVideUploadTests(unittest.TestCase):
         self.assertEqual(result["result_id"], "vid123")
 
 
+class KSNoteUploadTests(unittest.TestCase):
+    def test_upload_returns_unified_dict(self):
+        import asyncio
+        uploader = KSNote(
+            image_paths=["/fake.jpg"], note="test note", tags=[],
+            publish_date=0, account_file="/fake.json",
+        )
+        with patch.object(KSNote, "upload_note_content", AsyncMock(return_value={"share_link": "https://kuaishou.com/n/abc", "video_id": "nid123"})), \
+             patch.object(uploader, "validate_upload_args", AsyncMock()):
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def fake_session():
+                class FakePage:
+                    url = "https://cp.kuaishou.com"
+                yield FakePage()
+
+            with patch.object(uploader, "_browser_session", return_value=fake_session()):
+                result = asyncio.run(uploader.upload())
+        self.assertTrue(result["success"])
+        self.assertEqual(result["result_url"], "https://kuaishou.com/n/abc")
+        self.assertEqual(result["result_id"], "nid123")
+
+
 class ModuleWrapperTests(unittest.TestCase):
     def test_setup_signature_is_5_params(self):
         import inspect

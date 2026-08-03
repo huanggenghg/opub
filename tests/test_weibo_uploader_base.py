@@ -72,6 +72,39 @@ class WeiboNoteUploadTests(unittest.TestCase):
         self.assertEqual(result["message"], "发布成功")
 
 
+class WeiboLogTimingTests(unittest.TestCase):
+    def test_log_not_printed_when_upload_raises_exception(self):
+        """When upload() raises an exception, 'cookie 更新完毕' log must NOT fire.
+        Log is now after the async with block (after storage_state save),
+        so exceptions skip it."""
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        uploader = WeiboVideo(
+            title="test", file_path="/fake.mp4", tags=[],
+            publish_date=0, account_file="/fake.json",
+        )
+        with patch.object(uploader, "validate_upload_args", AsyncMock()), \
+             patch.object(uploader, "_browser_session") as mock_session, \
+             patch.object(uploader, "upload_video_content", AsyncMock(side_effect=RuntimeError("upload failed"))), \
+             patch("uploader.weibo_uploader.main.weibo_logger") as mock_logger:
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def fake_session():
+                class FakePage:
+                    url = "https://weibo.com/upload"
+                yield FakePage()
+
+            mock_session.return_value = fake_session()
+            result = asyncio.run(uploader.upload())
+        self.assertFalse(result["success"])
+        # "cookie 更新完毕" log must NOT be called when upload fails
+        for call in mock_logger.success.call_args_list:
+            args, kwargs = call
+            if args and "cookie 更新完毕" in str(args[0]):
+                self.fail("cookie 更新完毕 log was printed on failure - should only print on success")
+
+
 class ModuleWrapperTests(unittest.TestCase):
     def test_cookie_auth_delegates_to_classmethod(self):
         import asyncio

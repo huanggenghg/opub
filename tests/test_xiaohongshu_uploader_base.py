@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from uploader.base_video import BaseBrowserUploader, PublishStrategy
 from uploader.xiaohongshu_uploader.main import (
     XiaoHongShuBaseUploader, XiaoHongShuVideo, XiaoHongShuNote,
+    XhsPublishRestrictedError,
     cookie_auth, xiaohongshu_setup,
 )
 
@@ -43,6 +44,52 @@ class XiaoHongShuVideoUploadTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["result_url"], "https://xhs.link/abc")
         self.assertEqual(result["result_id"], "xyz")
+
+    def test_video_upload_maps_restriction_to_account_issue(self):
+        import asyncio
+        uploader = XiaoHongShuVideo(
+            title="t", file_path="/fake.mp4", tags=[], publish_date=0,
+            account_file="/fake.json", desc="", publish_strategy=PublishStrategy.IMMEDIATE,
+        )
+        with patch.object(uploader, "validate_upload_args", AsyncMock()):
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def fake_session():
+                class FakePage:
+                    url = "https://creator.xiaohongshu.com"
+                yield FakePage()
+
+            with patch.object(uploader, "_browser_session", return_value=fake_session()), \
+                 patch.object(XiaoHongShuVideo, "upload_video_content", AsyncMock(side_effect=XhsPublishRestrictedError("因违反社区规范禁止发笔记"))):
+                result = asyncio.run(uploader.upload())
+        self.assertFalse(result["success"])
+        self.assertTrue(result["account_issue"])
+        self.assertEqual(result["issue_type"], "publish_restricted")
+
+
+class XiaoHongShuNoteUploadTests(unittest.TestCase):
+    def test_note_upload_maps_restriction_to_account_issue(self):
+        import asyncio
+        uploader = XiaoHongShuNote(
+            image_paths=["/fake.jpg"], note="test note", tags=[],
+            publish_date=0, account_file="/fake.json",
+        )
+        with patch.object(uploader, "validate_upload_args", AsyncMock()):
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def fake_session():
+                class FakePage:
+                    url = "https://creator.xiaohongshu.com"
+                yield FakePage()
+
+            with patch.object(uploader, "_browser_session", return_value=fake_session()), \
+                 patch.object(XiaoHongShuNote, "upload_note_content", AsyncMock(side_effect=XhsPublishRestrictedError("因违反社区规范禁止发笔记"))):
+                result = asyncio.run(uploader.upload())
+        self.assertFalse(result["success"])
+        self.assertTrue(result["account_issue"])
+        self.assertEqual(result["issue_type"], "publish_restricted")
 
 
 class ModuleWrapperTests(unittest.TestCase):

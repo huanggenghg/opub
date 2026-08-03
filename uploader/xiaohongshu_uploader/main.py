@@ -39,6 +39,24 @@ XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 XHS_USER_PROFILE_URL = "https://www.xiaohongshu.com/user/profile/678a98cc000000000d00891b"
 
 
+class XhsPublishRestrictedError(Exception):
+    """小红书账号被限制发布(如违反社区规范)时抛出。"""
+    def __init__(self, toast_text: str):
+        self.toast_text = toast_text
+        super().__init__(f"账号被限制发布: {toast_text}")
+
+
+async def _check_xhs_publish_restriction(page: Page, timeout_ms: int = 1500) -> str | None:
+    """点击发布按钮后检测是否出现限制 toast。返回 toast 文本,无则 None。"""
+    toast_desc = page.locator('div.d-new-toast span.d-toast-description').first
+    try:
+        await toast_desc.wait_for(state="visible", timeout=timeout_ms)
+        text = await toast_desc.inner_text()
+        return text.strip() or None
+    except Exception:
+        return None
+
+
 def _resolve_account_file(account_file: str | Path) -> str:
     path = Path(account_file).expanduser()
     if path.is_absolute():
@@ -707,12 +725,19 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                     await page.locator('button:has-text("定时发布")').click()
                 else:
                     await page.locator('button:has-text("发布")').click()
+
+                restriction_text = await _check_xhs_publish_restriction(page, timeout_ms=1500)
+                if restriction_text:
+                    raise XhsPublishRestrictedError(restriction_text)
+
                 await page.wait_for_url(
                     "https://creator.xiaohongshu.com/publish/success?**",
                     timeout=3000
                 )
                 xiaohongshu_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
                 break
+            except XhsPublishRestrictedError:
+                raise
             except Exception:
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
                 if self.debug:
@@ -764,6 +789,11 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                     share_msg = share_result.get("message", "") if share_result else ""
                     result["message"] = f"发布成功，但获取分享链接失败: {share_msg}"
             xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except XhsPublishRestrictedError as exc:
+            result["message"] = f"账号被限制发布: {exc.toast_text}"
+            result["account_issue"] = True
+            result["issue_type"] = "publish_restricted"
+            xiaohongshu_logger.error(_msg("😢", f"账号被限制发布: {exc.toast_text}"))
         except Exception as e:
             result["message"] = str(e)
             xiaohongshu_logger.error(_msg("❌", f"上传失败: {e}"))
@@ -858,12 +888,19 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                     await page.locator('button:has-text("定时发布")').click()
                 else:
                     await page.locator('button:has-text("发布")').click()
+
+                restriction_text = await _check_xhs_publish_restriction(page, timeout_ms=1500)
+                if restriction_text:
+                    raise XhsPublishRestrictedError(restriction_text)
+
                 await page.wait_for_url(
                     XHS_PUBLISH_SUCCESS_URL_PATTERN,
                     timeout=3000
                 )
                 xiaohongshu_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
                 break
+            except XhsPublishRestrictedError:
+                raise
             except Exception:
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
                 if self.debug:
@@ -915,6 +952,11 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                     share_msg = share_result.get("message", "") if share_result else ""
                     result["message"] = f"发布成功，但获取分享链接失败: {share_msg}"
             xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except XhsPublishRestrictedError as exc:
+            result["message"] = f"账号被限制发布: {exc.toast_text}"
+            result["account_issue"] = True
+            result["issue_type"] = "publish_restricted"
+            xiaohongshu_logger.error(_msg("😢", f"账号被限制发布: {exc.toast_text}"))
         except Exception as e:
             result["message"] = str(e)
             xiaohongshu_logger.error(_msg("❌", f"上传失败: {e}"))

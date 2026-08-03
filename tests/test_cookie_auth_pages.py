@@ -17,6 +17,7 @@ import uploader.douyin_uploader.main as douyin_main
 import uploader.ks_uploader.main as ks_main
 import uploader.tencent_uploader.main as tencent_main
 import uploader.tk_uploader.main as tk_main
+import uploader.xiaohongshu_uploader.main as xhs_main
 
 
 class FakeLocator:
@@ -180,6 +181,42 @@ class DouyinRestrictionDetectorTests(unittest.TestCase):
         )
 
         result = asyncio.run(douyin_main._check_douyin_publish_restriction(page, timeout_ms=500))
+
+        self.assertIsNone(result)
+
+
+class XhsRestrictionDetectorTests(unittest.TestCase):
+    def test_detector_returns_text_when_toast_visible(self):
+        page = FakePage(
+            "https://creator.xiaohongshu.com/publish/publish?source=official&target=image",
+            {
+                "div.d-new-toast span.d-toast-description": FakeLocator(
+                    count=1, visible=True, text="因违反社区规范禁止发笔记"
+                )
+            },
+        )
+
+        result = asyncio.run(xhs_main._check_xhs_publish_restriction(page, timeout_ms=500))
+
+        self.assertEqual(result, "因违反社区规范禁止发笔记")
+
+    def test_detector_returns_none_when_toast_not_visible(self):
+        page = FakePage(
+            "https://creator.xiaohongshu.com/publish/publish?source=official&target=image",
+            {"div.d-new-toast span.d-toast-description": FakeLocator(count=0, visible=False)},
+        )
+
+        result = asyncio.run(xhs_main._check_xhs_publish_restriction(page, timeout_ms=500))
+
+        self.assertIsNone(result)
+
+    def test_detector_returns_none_on_unexpected_error(self):
+        page = FakePage(
+            "https://creator.xiaohongshu.com/publish/publish?source=official&target=image",
+            {"div.d-new-toast span.d-toast-description": FakeLocator(wait_raises=RuntimeError("oops"))},
+        )
+
+        result = asyncio.run(xhs_main._check_xhs_publish_restriction(page, timeout_ms=500))
 
         self.assertIsNone(result)
 

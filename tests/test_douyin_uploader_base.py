@@ -87,6 +87,32 @@ class DouYinNoteUploadTests(unittest.TestCase):
                 result = asyncio.run(uploader.upload())
         self.assertTrue(result["success"])
 
+    def test_note_upload_maps_restriction_to_account_issue(self):
+        import asyncio
+        uploader = DouYinNote(
+            image_paths=["/fake.jpg"], note="test note", tags=[],
+            publish_date=0, account_file="/fake.json",
+        )
+        with patch.object(uploader, "validate_upload_args", AsyncMock()):
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def fake_session():
+                class FakePage:
+                    url = "https://creator.douyin.com"
+                    async def goto(self, url):
+                        pass
+                    async def wait_for_url(self, url):
+                        pass
+                yield FakePage()
+
+            with patch.object(uploader, "_browser_session", return_value=fake_session()), \
+                 patch.object(DouYinNote, "upload_note_content", AsyncMock(side_effect=DouyinPublishRestrictedError("限制"))):
+                result = asyncio.run(uploader.upload())
+        self.assertFalse(result["success"])
+        self.assertTrue(result["account_issue"])
+        self.assertEqual(result["issue_type"], "publish_restricted")
+
 
 class ModuleWrapperTests(unittest.TestCase):
     def test_setup_signature_is_5_params(self):

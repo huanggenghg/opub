@@ -78,7 +78,6 @@ class WeiboLogTimingTests(unittest.TestCase):
         Log is now after the async with block (after storage_state save),
         so exceptions skip it."""
         import asyncio
-        from unittest.mock import AsyncMock, patch
         uploader = WeiboVideo(
             title="test", file_path="/fake.mp4", tags=[],
             publish_date=0, account_file="/fake.json",

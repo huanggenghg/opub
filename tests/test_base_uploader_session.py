@@ -168,7 +168,44 @@ class BrowserSessionTests(unittest.TestCase):
             mock_ap.return_value = FakePlaywright(FakeContext())
             with patch.object(FakeUploader, "_launch_browser", side_effect=fake_launch_browser):
                 asyncio.run(FakeUploader.cookie_auth("/fake.json"))
+        # FakePage lacks goto(), so cookie_auth's page.goto() raises
+        # AttributeError which is swallowed by cookie_auth's broad
+        # except Exception: return False (base_video.py:216-217).
+        # captured_headless is populated before that error, which is
+        # what this test asserts on.
         self.assertEqual(captured_headless, [LOCAL_CHROME_HEADLESS])
+
+    def test_storage_state_saved_before_code_after_async_with(self):
+        """storage_state (saved in finally) must complete before code after
+        the async with block runs. This ordering invariant is what makes
+        placing the 'cookie 更新完毕' log after async with accurate - the
+        log only fires after storage_state has been persisted."""
+        uploader = FakeUploader.__new__(FakeUploader)
+        uploader.account_file = "/fake/account.json"
+        uploader.headless = True
+        fake_context = FakeContext()
+        call_order = []
+
+        async def track_storage_state(path=None):
+            fake_context.storage_state_calls.append(path)
+            call_order.append("storage_state")
+
+        fake_context.storage_state = track_storage_state
+
+        with patch("uploader.base_video.async_playwright") as mock_ap, \
+             patch("uploader.base_video.set_init_script", side_effect=lambda ctx: ctx), \
+             patch("uploader.base_video.os.path.exists", return_value=True):
+            mock_ap.return_value = FakePlaywright(fake_context)
+
+            async def run():
+                async with uploader._browser_session() as page:
+                    pass  # success
+                # Code here runs AFTER async with exits (after finally block)
+                call_order.append("after_async_with")
+            asyncio.run(run())
+
+        # storage_state must be called before code after async with
+        self.assertEqual(call_order, ["storage_state", "after_async_with"])
 
 
 if __name__ == "__main__":

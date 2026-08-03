@@ -559,6 +559,8 @@ class KSVideo(KSBaseUploader):
         await page.goto(KUAISHOU_UPLOAD_URL)
         await page.wait_for_url(KUAISHOU_UPLOAD_URL_PATTERN)
 
+        await self.close_guide_overlay(page)
+
         upload_button = page.locator("button[class^='_upload-btn']")
         await upload_button.wait_for(state="visible", timeout=10000)
 
@@ -744,6 +746,8 @@ class KSNote(KSBaseUploader):
 
         await page.locator('div[role="tablist"] div[role="tab"]:has-text("图文")').click()
         await page.wait_for_timeout(1000)
+
+        await self.close_guide_overlay(page)
 
         kuaishou_logger.info(_msg("📤", "小人正在上传图片"))
         upload_button = page.locator("button[class^='_upload-btn']").filter(has_text="上传图片")

@@ -731,7 +731,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            async with self._browser_session() as page:
+            async with self._browser_session(save_on_success_only=True) as page:
                 share_result = await self.upload_video_content(page)
 
                 share_link = share_result.get("share_link", "") if share_result else ""
@@ -879,7 +879,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            async with self._browser_session() as page:
+            async with self._browser_session(save_on_success_only=True) as page:
                 share_result = await self.upload_note_content(page)
 
                 share_link = share_result.get("share_link", "") if share_result else ""

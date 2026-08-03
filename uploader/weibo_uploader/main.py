@@ -522,7 +522,7 @@ class WeiboVideo(WeiboBaseUploader):
         result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            async with self._browser_session() as page:
+            async with self._browser_session(save_on_success_only=True) as page:
                 video_link = await self.upload_video_content(page)
                 result["success"] = True
                 if video_link:
@@ -646,7 +646,7 @@ class WeiboNote(WeiboBaseUploader):
         result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            async with self._browser_session() as page:
+            async with self._browser_session(save_on_success_only=True) as page:
                 await self.upload_note_content(page)
                 result["success"] = True
                 result["message"] = "发布成功"

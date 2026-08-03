@@ -695,7 +695,7 @@ class DouYinVideo(DouYinBaseUploader):
         result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            async with self._browser_session() as page:
+            async with self._browser_session(save_on_success_only=True) as page:
                 video_link = await self.upload_video_content(page)
                 result["success"] = True
                 if video_link:
@@ -851,7 +851,7 @@ class DouYinNote(DouYinBaseUploader):
         result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            async with self._browser_session() as page:
+            async with self._browser_session(save_on_success_only=True) as page:
                 await page.goto(DOUYIN_UPLOAD_URL)
                 douyin_logger.info(_msg("🧭", "小人正在赶往图文发布页"))
                 await page.wait_for_url(DOUYIN_UPLOAD_URL)

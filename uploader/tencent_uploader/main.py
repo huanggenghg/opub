@@ -745,7 +745,7 @@ class TencentVideo(TencentBaseUploader):
         result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            async with self._browser_session() as page:
+            async with self._browser_session(save_on_success_only=True) as page:
                 await self.upload_video_content(page)
                 result["success"] = True
                 result["message"] = "发布成功"
@@ -832,7 +832,7 @@ class TencentNote(TencentBaseUploader):
         result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            async with self._browser_session() as page:
+            async with self._browser_session(save_on_success_only=True) as page:
                 await self.open_upload_page(page)
                 tencent_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
 

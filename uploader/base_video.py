@@ -294,20 +294,24 @@ class BaseBrowserUploader(BasePlatformUploader):
             return result
 
     @asynccontextmanager
-    async def _browser_session(self, headless: Optional[bool] = None):
+    async def _browser_session(self, headless: Optional[bool] = None, save_on_success_only: bool = False):
         """Launch browser + context with stored cookies, yield page.
-        Saves storage_state on exit (finally). Ensures cleanup."""
+        Saves storage_state on exit. If save_on_success_only=True, skips save
+        when the yielded block raised an exception."""
         async with async_playwright() as playwright:
             browser = await self._launch_browser(playwright, headless if headless is not None else self.headless)
             context = await self._init_context(browser, self.account_file)
             page = await context.new_page()
+            success = False
             try:
                 yield page
+                success = True
             finally:
-                try:
-                    await context.storage_state(path=self.account_file)
-                except Exception:
-                    pass
+                if not save_on_success_only or success:
+                    try:
+                        await context.storage_state(path=self.account_file)
+                    except Exception:
+                        pass
                 await context.close()
                 await browser.close()
 

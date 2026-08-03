@@ -747,9 +747,9 @@ class TencentVideo(TencentBaseUploader):
         try:
             async with self._browser_session() as page:
                 await self.upload_video_content(page)
-                tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
                 result["success"] = True
                 result["message"] = "发布成功"
+            tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
         except Exception as e:
             result["message"] = str(e)
             tencent_logger.error(_msg("❌", f"上传失败: {e}"))
@@ -843,9 +843,9 @@ class TencentNote(TencentBaseUploader):
 
                 await self.submit_publish(page)
 
-                tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
                 result["success"] = True
                 result["message"] = "发布成功"
+            tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
         except Exception as e:
             result["message"] = str(e)
             tencent_logger.error(_msg("❌", f"上传失败: {e}"))

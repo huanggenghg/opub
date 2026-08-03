@@ -697,13 +697,13 @@ class DouYinVideo(DouYinBaseUploader):
         try:
             async with self._browser_session() as page:
                 video_link = await self.upload_video_content(page)
-                douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
                 result["success"] = True
                 if video_link:
                     result["result_url"] = video_link
                     result["message"] = f"发布成功，视频链接: {video_link}"
                 else:
                     result["message"] = "发布成功"
+            douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
         except DouyinPublishRestrictedError as exc:
             result["message"] = f"账号被限制发布: {exc.toast_text}"
             result["account_issue"] = True
@@ -857,9 +857,9 @@ class DouYinNote(DouYinBaseUploader):
                 await page.wait_for_url(DOUYIN_UPLOAD_URL)
 
                 await self.upload_note_content(page)
-                douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
                 result["success"] = True
                 result["message"] = "发布成功"
+            douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
         except DouyinPublishRestrictedError as exc:
             result["message"] = f"账号被限制发布: {exc.toast_text}"
             result["account_issue"] = True

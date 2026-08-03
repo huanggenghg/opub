@@ -524,13 +524,13 @@ class WeiboVideo(WeiboBaseUploader):
         try:
             async with self._browser_session() as page:
                 video_link = await self.upload_video_content(page)
-                weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
                 result["success"] = True
                 if video_link:
                     result["result_url"] = video_link
                     result["message"] = f"发布成功，视频链接: {video_link}"
                 else:
                     result["message"] = "发布成功，但未获取到视频链接"
+            weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
         except Exception as e:
             result["message"] = str(e)
             weibo_logger.error(_msg("❌", f"上传失败: {e}"))
@@ -648,9 +648,9 @@ class WeiboNote(WeiboBaseUploader):
         try:
             async with self._browser_session() as page:
                 await self.upload_note_content(page)
-                weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
                 result["success"] = True
                 result["message"] = "发布成功"
+            weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
         except Exception as e:
             result["message"] = str(e)
             weibo_logger.error(_msg("❌", f"上传失败: {e}"))

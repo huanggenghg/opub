@@ -733,7 +733,6 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         try:
             async with self._browser_session() as page:
                 share_result = await self.upload_video_content(page)
-                xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
 
                 share_link = share_result.get("share_link", "") if share_result else ""
                 note_id = share_result.get("note_id", "") if share_result else ""
@@ -761,6 +760,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                 if not share_link:
                     share_msg = share_result.get("message", "") if share_result else ""
                     result["message"] = f"发布成功，但获取分享链接失败: {share_msg}"
+            xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
         except Exception as e:
             result["message"] = str(e)
             xiaohongshu_logger.error(_msg("❌", f"上传失败: {e}"))
@@ -881,7 +881,6 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         try:
             async with self._browser_session() as page:
                 share_result = await self.upload_note_content(page)
-                xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
 
                 share_link = share_result.get("share_link", "") if share_result else ""
                 note_id = share_result.get("note_id", "") if share_result else ""
@@ -909,6 +908,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                 if not share_link:
                     share_msg = share_result.get("message", "") if share_result else ""
                     result["message"] = f"发布成功，但获取分享链接失败: {share_msg}"
+            xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
         except Exception as e:
             result["message"] = str(e)
             xiaohongshu_logger.error(_msg("❌", f"上传失败: {e}"))

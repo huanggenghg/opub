@@ -667,7 +667,6 @@ class KSVideo(KSBaseUploader):
         try:
             async with self._browser_session() as page:
                 share_result = await self.upload_video_content(page)
-                kuaishou_logger.success(_msg("🥳", "cookie 更新完毕"))
 
                 share_link = share_result.get("share_link", "") if share_result else ""
                 video_id = share_result.get("video_id", "") if share_result else ""
@@ -683,6 +682,7 @@ class KSVideo(KSBaseUploader):
 
                 if not share_link:
                     result["message"] = "发布成功，但获取分享链接失败"
+            kuaishou_logger.success(_msg("🥳", "cookie 更新完毕"))
         except Exception as e:
             result["message"] = str(e)
             kuaishou_logger.error(_msg("❌", f"上传失败: {e}"))
@@ -851,7 +851,6 @@ class KSNote(KSBaseUploader):
         try:
             async with self._browser_session() as page:
                 share_result = await self.upload_note_content(page)
-                kuaishou_logger.success(_msg("🥳", "cookie 更新完毕"))
 
                 share_link = share_result.get("share_link", "") if share_result else ""
                 video_id = share_result.get("video_id", "") if share_result else ""
@@ -867,6 +866,7 @@ class KSNote(KSBaseUploader):
 
                 if not share_link:
                     result["message"] = "发布成功，但获取分享链接失败"
+            kuaishou_logger.success(_msg("🥳", "cookie 更新完毕"))
         except Exception as e:
             result["message"] = str(e)
             kuaishou_logger.error(_msg("❌", f"上传失败: {e}"))

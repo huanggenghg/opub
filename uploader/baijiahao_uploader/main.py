@@ -381,13 +381,13 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
         try:
             async with self._browser_session() as page:
                 video_link = await self.upload_video_content(page)
-                baijiahao_logger.success(_msg("🥳", "cookie 更新完毕"))
                 result["success"] = True
                 if video_link:
                     result["result_url"] = video_link
                     result["message"] = f"发布成功，视频链接: {video_link}"
                 else:
                     result["message"] = "发布成功"
+            baijiahao_logger.success(_msg("🥳", "cookie 更新完毕"))
         except Exception as e:
             result["message"] = str(e)
             baijiahao_logger.error(_msg("❌", f"上传失败: {e}"))

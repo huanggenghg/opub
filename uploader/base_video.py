@@ -238,6 +238,15 @@ class BaseBrowserUploader(BasePlatformUploader):
         return result if return_detail else True
 
     @classmethod
+    async def _save_state_and_validate(cls, context, account_file, page):
+        """Save storage state and validate cookie. Returns login result dict."""
+        await page.wait_for_timeout(2000)
+        await context.storage_state(path=account_file)
+        if await cls.cookie_auth(account_file):
+            return _build_login_result(True, "success", f"{cls.PLATFORM_NAME}扫码登录成功", account_file, None, page.url)
+        return _build_login_result(False, "cookie_invalid", f"{cls.PLATFORM_NAME}扫码完成但 cookie 校验失败", account_file, None, page.url)
+
+    @classmethod
     async def cookie_gen(
         cls,
         account_file: str,
@@ -263,12 +272,7 @@ class BaseBrowserUploader(BasePlatformUploader):
                 # so this branch is skipped and the QR flow runs normally.
                 pre_url = (page.url or "").strip()
                 if pre_url and pre_url != "about:blank" and await cls.is_login_completed(page):
-                    await page.wait_for_timeout(2000)
-                    await context.storage_state(path=account_file)
-                    if await cls.cookie_auth(account_file):
-                        result = _build_login_result(True, "success", f"{cls.PLATFORM_NAME}扫码登录成功", account_file, None, page.url)
-                    else:
-                        result = _build_login_result(False, "cookie_invalid", f"{cls.PLATFORM_NAME}扫码完成但 cookie 校验失败", account_file, None, page.url)
+                    result = await cls._save_state_and_validate(context, account_file, page)
                 else:
                     await page.goto(cls.LOGIN_URL)
                     await page.wait_for_timeout(3000)
@@ -277,12 +281,7 @@ class BaseBrowserUploader(BasePlatformUploader):
                         await _emit_qrcode_callback(qrcode_callback, {"qrcode": qrcode_src, "account_file": account_file})
                     for _ in range(100):
                         if await cls.is_login_completed(page):
-                            await page.wait_for_timeout(2000)
-                            await context.storage_state(path=account_file)
-                            if await cls.cookie_auth(account_file):
-                                result = _build_login_result(True, "success", f"{cls.PLATFORM_NAME}扫码登录成功", account_file, None, page.url)
-                            else:
-                                result = _build_login_result(False, "cookie_invalid", f"{cls.PLATFORM_NAME}扫码完成但 cookie 校验失败", account_file, None, page.url)
+                            result = await cls._save_state_and_validate(context, account_file, page)
                             break
                         await page.wait_for_timeout(3000)
                     else:

@@ -100,7 +100,6 @@ AI的发展毋庸置疑，希望你遇到这种安装和使用，不要再怯场
 - CLI 使用请看：[CLI 使用说明](./docs/CLI.md)
 - 如果你准备在 `OpenClaw`、`Codex`、`Claude Code / cc` 里使用本项目，先看：[Agent Bootstrap Prompt](./docs/agent-bootstrap.md)
 - agent / skill 请看：[hgsau CLI Skill](./skills/hgsau-cli/SKILL.md)
-- 历史 Web 说明请看：[历史 Web 版本说明](./docs/legacy-web.md)
 - 不再维护单平台独立 CLI skill，agent 统一走 `hgsau publish`
 - `requirements.txt` 目前主要用于历史兼容路径，普通用户不需要优先使用它
 - 本项目不维护国际化文档，当前文档以中文优先。

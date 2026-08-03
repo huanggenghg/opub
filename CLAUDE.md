@@ -1,29 +1,14 @@
+## Hard Constraints (MUST follow every session)
+
+*   **禁止截屏定位 UI**:不要通过 `page.screenshot` 截图、或任何把图片发给模型 API 的方式来定位 UI 控件或分析页面。需要页面信息时,从 DOM/页面源码定位(`page.content()`、`page.evaluate`、`page.locator` + selector,或保存 HTML 后用 grep/python 分析);信息不足以判断时,直接告知用户需要协助,不要靠猜,也不要截图。
+*   **禁止非文本文件调用大模型 API**:调用大模型 API 时,输入只限纯文本。不要发送图片、PDF、音频、视频或任何二进制/多模态 payload —— 当前环境不具备多模态能力,这类调用无意义且浪费资源。
+*   **例外**:`page.screenshot` 仅作为调试留证(保存到 `output/` 不发给模型)是可接受的,但不能用作定位手段,也不能作为模型 API 输入。
+
 ## Project Overview
 
 This project, `social-auto-upload`, is a powerful automation tool designed to help content creators and operators efficiently publish video content to multiple domestic and international mainstream social media platforms in one click. The project implements video upload, scheduled release and other functions for platforms such as `Douyin`, `Bilibili`, `Xiaohongshu`, `Kuaishou`, `WeChat Channel`, `Baijiahao` and `TikTok`.
 
-The project consists of a Python backend and a Vue.js frontend.
-
-**Backend:**
-
-*   Framework: Flask
-*   Core Functionality:
-    *   Handles file uploads and management.
-    *   Interacts with a SQLite database to store information about files and user accounts.
-    *   Uses `playwright` for browser automation to interact with social media platforms.
-    *   Provides a RESTful API for the frontend to consume.
-    *   Uses Server-Sent Events (SSE) for real-time communication with the frontend during the login process.
-
-**Frontend:**
-
-*   Framework: Vue.js
-*   Build Tool: Vite
-*   UI Library: Element Plus
-*   State Management: Pinia
-*   Routing: Vue Router
-*   Core Functionality:
-    *   Provides a web interface for managing social media accounts, video files, and publishing videos.
-    *   Communicates with the backend via a RESTful API.
+The project consists of a Python CLI tool and uploader modules.
 
 **Command-line Interface:**
 
@@ -35,7 +20,7 @@ Platform, account, media, metadata, and schedule settings should be configured i
 
 ## Building and Running
 
-### Backend
+### Setup
 
 1.  **Install dependencies:**
     ```bash
@@ -52,35 +37,6 @@ Platform, account, media, metadata, and schedule settings should be configured i
     *   macOS: `brew install ffmpeg`
     *   Ubuntu/Debian: `sudo apt-get install ffmpeg`
     *   Windows: download from https://ffmpeg.org/download.html and add to PATH
-
-4.  **Initialize the database:**
-    ```bash
-    python db/createTable.py
-    ```
-
-5.  **Run the backend server:**
-    ```bash
-    python hgsau_backend.py
-    ```
-    The backend server will start on `http://localhost:5409`.
-
-### Frontend
-
-1.  **Navigate to the frontend directory:**
-    ```bash
-    cd hgsau_frontend
-    ```
-
-2.  **Install dependencies:**
-    ```bash
-    npm install
-    ```
-
-3.  **Run the development server:**
-    ```bash
-    npm run dev
-    ```
-    The frontend development server will start on `http://localhost:5173`.
 
 ### Command-line Interface
 
@@ -99,9 +55,6 @@ hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 
 ## Development Conventions
 
-*   The backend code is located in the root directory and the `myUtils` and `uploader` directories.
-*   The frontend code is located in the `hgsau_frontend` directory.
-*   The project uses a SQLite database for data storage. The database file is located at `db/database.db`.
+*   The code is located in the root directory and the `uploader` directory.
 *   The `conf.example.py` file should be copied to `conf.py` and configured with the appropriate settings.
 *   The `requirements.txt` file lists the Python dependencies.
-*   The `package.json` file in the `hgsau_frontend` directory lists the frontend dependencies.

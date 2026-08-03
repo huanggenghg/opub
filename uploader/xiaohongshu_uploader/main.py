@@ -700,7 +700,8 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_xiaohongshu(page, self.publish_date)
 
-        while True:
+        max_publish_retries = 60
+        for _publish_attempt in range(max_publish_retries):
             try:
                 if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED:
                     await page.locator('button:has-text("定时发布")').click()
@@ -717,6 +718,8 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                 if self.debug:
                     await page.screenshot(full_page=True)
                 await asyncio.sleep(0.5)
+        else:
+            raise TimeoutError(f"视频发布重试 {max_publish_retries} 次后仍未跳转到成功页")
 
         # 发布成功后获取分享链接
         share_result = await get_share_link(page)
@@ -848,7 +851,8 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_xiaohongshu(page, self.publish_date)
 
-        while True:
+        max_publish_retries = 60
+        for _publish_attempt in range(max_publish_retries):
             try:
                 if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED:
                     await page.locator('button:has-text("定时发布")').click()
@@ -865,6 +869,8 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                 if self.debug:
                     await page.screenshot(full_page=True)
                 await asyncio.sleep(0.5)
+        else:
+            raise TimeoutError(f"图文发布重试 {max_publish_retries} 次后仍未跳转到成功页")
 
         # 发布成功后获取分享链接
         share_result = await get_share_link(page)

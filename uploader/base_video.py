@@ -294,10 +294,13 @@ class BaseBrowserUploader(BasePlatformUploader):
             return result
 
     @asynccontextmanager
-    async def _browser_session(self, headless: Optional[bool] = None, save_on_success_only: bool = False):
+    async def _browser_session(self, headless: Optional[bool] = None, save_on_success_only: bool = False, save_state: bool = True):
         """Launch browser + context with stored cookies, yield page.
         Saves storage_state on exit. If save_on_success_only=True, skips save
-        when the yielded block raised an exception."""
+        when the yielded block raised an exception. If save_state=False, skips
+        save entirely (for platforms whose cookies expire mid-session, e.g.
+        tencent video channel where storage_state at end of upload would
+        overwrite the complete cookie file with only sessionid/wxuin)."""
         async with async_playwright() as playwright:
             browser = await self._launch_browser(playwright, headless if headless is not None else self.headless)
             context = await self._init_context(browser, self.account_file)
@@ -307,7 +310,7 @@ class BaseBrowserUploader(BasePlatformUploader):
                 yield page
                 success = True
             finally:
-                if not save_on_success_only or success:
+                if save_state and (not save_on_success_only or success):
                     try:
                         await context.storage_state(path=self.account_file)
                     except Exception:

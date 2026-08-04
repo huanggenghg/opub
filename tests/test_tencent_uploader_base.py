@@ -35,8 +35,191 @@ class TencentVideoUploadTests(unittest.TestCase):
                  patch.object(TencentVideo, "upload_video_content", AsyncMock()):
                 result = asyncio.run(uploader.upload())
         self.assertTrue(result["success"])
-        # tencent doesn't expose URL
+        # result_url only present when _fetch_published_video_short_url succeeds
+        # (upload_video_content is mocked here, so no URL captured)
         self.assertNotIn("result_url", result)
+
+    def test_upload_does_not_save_cookie_state_on_success(self):
+        """微信视频号 cookie 文件不应该被 publish 流程覆盖。
+
+        publish 流程结束后 storage_state 只剩 sessionid/wxuin 2 个 cookie
+        (其他在 ~30s 上传过程中过期),覆盖会让下次 cookie_auth 必然失败。
+        upload() 应该用 save_state=False 调用 _browser_session。
+        """
+        import asyncio
+        from contextlib import asynccontextmanager
+
+        captured_kwargs = {}
+
+        @asynccontextmanager
+        async def fake_session(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            class FakePage:
+                url = "https://channels.weixin.qq.com"
+            yield FakePage()
+
+        uploader = TencentVideo(
+            title="t", file_path="/fake.mp4", tags=[], publish_date=0,
+            account_file="/fake.json", desc="", publish_strategy=PublishStrategy.IMMEDIATE,
+        )
+        with patch.object(uploader, "validate_upload_args", AsyncMock()), \
+             patch.object(uploader, "_browser_session", side_effect=fake_session), \
+             patch.object(TencentVideo, "upload_video_content", AsyncMock()):
+            asyncio.run(uploader.upload())
+
+        self.assertFalse(
+            captured_kwargs.get("save_state", True),
+            f"upload() 应该传 save_state=False 防止 cookie 文件被覆盖,实际收到: {captured_kwargs}",
+        )
+
+
+class TencentCookieGenTests(unittest.TestCase):
+    """扫码 QR 提取失败时,tencent_cookie_gen 不应该 abort,而是继续等登录。
+
+    场景:微信视频号登录页的 QR 在 qrconnect iframe 里,img.qrcode 的 src 是
+    相对 URL(不是 data:image/),_extract_tencent_qrcode_src 会抛 RuntimeError。
+    用户在 headless=False 浏览器里手动扫码后,脚本应该继续 poll 登录完成,
+    而不是直接关闭浏览器报"未获取到视频号登录二维码地址"。
+    """
+
+    def test_continues_to_wait_for_login_when_qrcode_extraction_fails(self):
+        import asyncio
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def fake_playwright():
+            class FakePage:
+                url = "https://channels.weixin.qq.com/platform/post/create"
+
+                async def goto(self, *args, **kwargs):
+                    pass
+
+            class FakeContext:
+                async def new_page(self):
+                    return FakePage()
+
+                async def storage_state(self, *args, **kwargs):
+                    pass
+
+                async def close(self):
+                    pass
+
+            class FakeBrowser:
+                async def new_context(self, *args, **kwargs):
+                    return FakeContext()
+
+                async def close(self):
+                    pass
+
+            class FakeChromium:
+                async def launch(self, *args, **kwargs):
+                    return FakeBrowser()
+
+            class FakePlaywright:
+                chromium = FakeChromium()
+
+            yield FakePlaywright()
+
+        async def run():
+            success_result = {
+                "success": True, "status": "success", "message": "ok",
+                "account_file": "/tmp/test.json", "qrcode": None, "current_url": "",
+            }
+            with patch("uploader.tencent_uploader.main.async_playwright", fake_playwright), \
+                 patch(
+                     "uploader.tencent_uploader.main._save_tencent_qrcode",
+                     AsyncMock(side_effect=RuntimeError("未获取到视频号登录二维码地址")),
+                 ) as save_mock, \
+                 patch(
+                     "uploader.tencent_uploader.main._wait_for_tencent_login",
+                     AsyncMock(return_value=success_result),
+                 ) as wait_mock, \
+                 patch("uploader.tencent_uploader.main.cookie_auth", AsyncMock(return_value=True)):
+                from uploader.tencent_uploader.main import tencent_cookie_gen
+                result = await tencent_cookie_gen("/tmp/test.json", headless=False)
+            return result, save_mock, wait_mock
+
+        result, save_mock, wait_mock = asyncio.run(run())
+        self.assertTrue(
+            result["success"],
+            f"QR 提取失败时应继续等登录,但结果为: {result}",
+        )
+        save_mock.assert_called_once()
+        wait_mock.assert_called_once()
+
+
+class TencentRedundantCookieAuthTests(unittest.TestCase):
+    """tencent sessionid 在新浏览器上下文里 22 秒失效,任何 cookie_auth 调用都会开新浏览器,
+    导致后续 cookie_auth 误判失效。所以:
+    1. TencentBaseUploader.cookie_auth 不应开浏览器,只检查文件存在性(实际校验交给 _browser_session)
+    2. tencent_setup(handle=True) 应该总是扫码 -- ensure_login 调到 tencent_setup 就说明
+       cookie_auth 已判定失效,这时 return True 会让 upload() 用失效 cookie 进 _browser_session 失败
+    3. validate_login_and_strategy 不应调 cookie_auth -- ensure_login 已验过"""
+
+    def test_tencent_setup_scans_when_handle_true_even_if_file_exists(self):
+        """handle=True + 文件存在时,tencent_setup 也应扫码,不 return True。
+        因为 ensure_login 调到 tencent_setup 就说明 cookie 已失效。"""
+        import asyncio
+        import tempfile
+
+        async def run():
+            with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
+                with patch("uploader.tencent_uploader.main.cookie_auth", AsyncMock(return_value=True)) as auth_mock, \
+                     patch("uploader.tencent_uploader.main.tencent_cookie_gen", AsyncMock(return_value={"success": True})) as gen_mock:
+                    from uploader.tencent_uploader.main import tencent_setup
+                    return await tencent_setup(tmp.name, handle=True), auth_mock, gen_mock
+
+        result, auth_mock, gen_mock = asyncio.run(run())
+        auth_mock.assert_not_called()
+        gen_mock.assert_called_once()
+
+    def test_tencent_setup_scans_when_handle_true_and_file_missing(self):
+        """handle=True + 文件不存在时,tencent_setup 直接扫码。"""
+        import asyncio
+
+        async def run():
+            with patch("uploader.tencent_uploader.main.cookie_auth", AsyncMock(return_value=True)) as auth_mock, \
+                 patch("uploader.tencent_uploader.main.tencent_cookie_gen", AsyncMock(return_value={"success": True})) as gen_mock:
+                from uploader.tencent_uploader.main import tencent_setup
+                return await tencent_setup("/nonexistent/fake.json", handle=True), auth_mock, gen_mock
+
+        result, auth_mock, gen_mock = asyncio.run(run())
+        auth_mock.assert_not_called()
+        gen_mock.assert_called_once()
+
+    def test_validate_login_and_strategy_skips_cookie_auth(self):
+        """validate_login_and_strategy 不应调 cookie_auth -- ensure_login 已验过,
+        再开浏览器会让 sessionid 失效。只检查文件存在性 + strategy。"""
+        import asyncio
+        import tempfile
+
+        uploader = TencentVideo(
+            title="t", file_path="/fake.mp4", tags=[], publish_date=0,
+            account_file="/fake.json", desc="", publish_strategy=PublishStrategy.IMMEDIATE,
+        )
+        with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
+            uploader.account_file = tmp.name
+            with patch("uploader.tencent_uploader.main.cookie_auth", AsyncMock(return_value=True)) as auth_mock:
+                asyncio.run(uploader.validate_login_and_strategy())
+        auth_mock.assert_not_called()
+
+    def test_cookie_auth_checks_file_existence_only(self):
+        """TencentBaseUploader.cookie_auth 只检查文件存在性,不开浏览器。
+        tencent sessionid 在新浏览器上下文里 22 秒失效,主动开浏览器校验会让有效 cookie 误判失效。"""
+        import asyncio
+        import tempfile
+
+        async def run():
+            with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
+                with patch("uploader.tencent_uploader.main.async_playwright") as pw_mock:
+                    exists_result = await TencentBaseUploader.cookie_auth(tmp.name)
+                    not_exists_result = await TencentBaseUploader.cookie_auth("/nonexistent/fake.json")
+                    return exists_result, not_exists_result, pw_mock
+
+        exists_result, not_exists_result, pw_mock = asyncio.run(run())
+        self.assertTrue(exists_result)
+        self.assertFalse(not_exists_result)
+        pw_mock.assert_not_called()
 
 
 class ModuleWrapperTests(unittest.TestCase):

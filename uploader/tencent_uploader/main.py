@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -230,7 +232,7 @@ async def _wait_for_tencent_login(
     poll_interval: int = 3,
     max_checks: int = 100,
 ) -> dict:
-    qrcode_path = Path(qrcode_info["image_path"])
+    qrcode_path = Path(qrcode_info["image_path"]) if qrcode_info.get("image_path") else None
     scanned_logged = False
     for _ in range(max_checks):
         if await _is_tencent_login_completed(page):
@@ -245,13 +247,16 @@ async def _wait_for_tencent_login(
             tencent_logger.warning(_msg("😵", "二维码失效了，小人马上去刷新"))
             await _refresh_tencent_qrcode(page)
             await asyncio.sleep(1)
-            qrcode_info = await _save_tencent_qrcode(
-                page,
-                account_file,
-                previous_qrcode_path=qrcode_path,
-                qrcode_callback=qrcode_callback,
-            )
-            qrcode_path = Path(qrcode_info["image_path"])
+            try:
+                qrcode_info = await _save_tencent_qrcode(
+                    page,
+                    account_file,
+                    previous_qrcode_path=qrcode_path,
+                    qrcode_callback=qrcode_callback,
+                )
+                qrcode_path = Path(qrcode_info["image_path"]) if qrcode_info.get("image_path") else None
+            except Exception as refresh_exc:
+                tencent_logger.warning(_msg("⚠️", f"二维码刷新失败,继续用浏览器内可见二维码: {refresh_exc}"))
 
         await asyncio.sleep(poll_interval)
 
@@ -282,8 +287,15 @@ async def tencent_cookie_gen(
         try:
             page = await context.new_page()
             await page.goto(TENCENT_LOGIN_URL)
-            qrcode_info = await _save_tencent_qrcode(page, account_file, qrcode_callback=qrcode_callback)
-            qrcode_path = Path(qrcode_info["image_path"])
+            try:
+                qrcode_info = await _save_tencent_qrcode(page, account_file, qrcode_callback=qrcode_callback)
+                qrcode_path = Path(qrcode_info["image_path"]) if qrcode_info.get("image_path") else None
+            except Exception as extract_exc:
+                tencent_logger.warning(
+                    _msg("⚠️", f"二维码提取失败,请在打开的浏览器里直接扫码: {extract_exc}")
+                )
+                qrcode_info = {"image_path": "", "image_data_url": ""}
+                qrcode_path = None
             tencent_logger.info(_msg("🧍", "请扫码，小人正在耐心等待登录完成"))
             result = await _wait_for_tencent_login(
                 page,
@@ -332,19 +344,27 @@ async def tencent_setup(
     qrcode_callback=None,
     headless: bool = LOCAL_CHROME_HEADLESS,
 ):
-    """微信视频号登录设置 - 校验 cookie，失效时触发扫码登录"""
+    """微信视频号登录设置。
+
+    handle=False:只校验文件存在性(不调 cookie_auth,会开浏览器让 sessionid 失效)。
+    handle=True:总是扫码 -- ensure_login 调到这里说明 cookie 已失效(或文件不存在),
+    不能 return True,否则 upload() 会用失效 cookie 进 _browser_session 失败。
+
+    Why: tencent sessionid 在新浏览器上下文里 22 秒失效,cookie_auth 开新浏览器校验
+    反而让有效 cookie 误判失效。所以 cookie_auth 只检查文件存在性,实际校验交给
+    _browser_session 导航时暴露。
+    """
     account_file = _resolve_account_file(account_file)
-    if not os.path.exists(account_file) or not await cookie_auth(account_file):
-        if not handle:
-            result = _build_login_result(False, "cookie_invalid", "cookie文件不存在或已失效", account_file)
+    if not handle:
+        if not os.path.exists(account_file):
+            result = _build_login_result(False, "cookie_invalid", "cookie文件不存在", account_file)
             return result if return_detail else False
+        result = _build_login_result(True, "cookie_valid", "cookie文件存在", account_file)
+        return result if return_detail else True
 
-        tencent_logger.info(_msg("🥹", "cookie 失效了，准备打开浏览器重新登录"))
-        result = await tencent_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
-        return result if return_detail else result["success"]
-
-    result = _build_login_result(True, "cookie_valid", "cookie有效", account_file)
-    return result if return_detail else True
+    tencent_logger.info(_msg("🥹", "准备打开浏览器扫码登录"))
+    result = await tencent_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
+    return result if return_detail else result["success"]
 
 
 async def get_tencent_cookie(account_file, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):
@@ -387,48 +407,25 @@ class TencentBaseUploader(BaseBrowserUploader):
         self.publish_date = publish_date
         self.account_file = _resolve_account_file(account_file)
         self.publish_strategy = publish_strategy
+        self._result_url: str | None = None
         self.debug = debug
         self.headless = headless
 
     @classmethod
     async def cookie_auth(cls, account_file: str) -> bool:
-        """Override base to use LOCAL_CHROME_HEADLESS (not hardcoded True) and
-        wait for publish marker before checking login status.
+        """只检查文件存在性,不开浏览器。
 
-        Preserves the headless bug fix documented in
-        project_tencent_cookie_auth_headless_bug.md: 微信视频号会检测 headless
-        模式,用 headless=True 加载 storage_state 导航到上传页时,即使 cookie
-        有效也会被重定向到 login.html,导致 cookie_auth 误判失效。"""
-        if not os.path.exists(account_file):
-            return False
-        async with async_playwright() as playwright:
-            browser = await cls._launch_browser(playwright, headless=LOCAL_CHROME_HEADLESS)
-            try:
-                context = await cls._init_context(browser, account_file)
-                page = await context.new_page()
-                await page.goto(cls.UPLOAD_URL, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_url(cls.UPLOAD_URL, timeout=5000)
+        Why: tencent sessionid 在新浏览器上下文里 22 秒失效,主动开浏览器校验会让
+        有效 cookie 误判失效(实测:ensure_login cookie_auth 通过后 48 秒,upload 前的
+        cookie_auth 在新浏览器里失效)。实际校验交给 _browser_session 导航时暴露 --
+        如果 cookie 真失效,page.goto 会被重定向到 login.html,set_input_files 找不到
+        input,upload() 失败,用户重扫码即可。
 
-                # 等 publish marker 出现(页面 JS 渲染需要时间,
-                # _is_tencent_login_completed 立即 check 会误判失效)
-                try:
-                    await page.locator('div:has-text("发表视频")').first.wait_for(state="visible", timeout=15000)
-                    tencent_logger.success(_msg("🥳", "cookie 有效"))
-                    return True
-                except Exception:
-                    pass
-
-                if await _is_tencent_login_completed(page):
-                    tencent_logger.success(_msg("🥳", "cookie 有效"))
-                    return True
-
-                tencent_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
-                return False
-            except Exception as exc:
-                tencent_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
-                return False
-            finally:
-                await browser.close()
+        历史背景:之前版本会开浏览器等 "发表视频" marker,但这是 sessionid 失效的
+        根因之一。headless bug 修复(project_tencent_cookie_auth_headless_bug.md)
+        让单次校验能通过,但多次校验之间 sessionid 还是会失效,所以最终方案是不校验。
+        """
+        return os.path.exists(account_file)
 
     @classmethod
     async def is_login_completed(cls, page: Page) -> bool:
@@ -438,11 +435,14 @@ class TencentBaseUploader(BaseBrowserUploader):
     async def validate_login_and_strategy(self):
         """Renamed from `validate_base_args(self)` to avoid collision with
         `BasePlatformUploader.validate_base_args(params)` staticmethod (called by dispatch).
-        Checks cookie existence/validity + publish_strategy + publish_date."""
+        Checks cookie existence + publish_strategy + publish_date.
+
+        不主动调 cookie_auth:tencent sessionid 在新浏览器上下文里 22 秒失效,
+        ensure_login 已在 upload() 前验过,再开浏览器会让 sessionid 误判失效。
+        文件存在即认为有效,失效会在 _browser_session 导航时暴露。
+        """
         if not os.path.exists(self.account_file):
             raise RuntimeError(f"cookie文件不存在，请先完成视频号登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成视频号登录: {self.account_file}")
         if self.publish_strategy not in {TENCENT_PUBLISH_STRATEGY_IMMEDIATE, TENCENT_PUBLISH_STRATEGY_SCHEDULED}:
             raise ValueError(f"不支持的发布策略: {self.publish_strategy}")
 
@@ -605,6 +605,100 @@ class TencentBaseUploader(BaseBrowserUploader):
                 tencent_logger.info(_msg("🏃", "视频正在发布中..."))
                 await asyncio.sleep(0.5)
 
+    async def _fetch_published_video_short_url(self, page: Page) -> str | None:
+        """发布成功后,从管理页抓取刚发布视频的分享短链。
+
+        流程:
+        1. 重新加载管理页,拦截 post_list 和 auth_data 响应
+        2. 从 post_list 取第一个视频(刚发布的)的 exportId + objectNonce
+        3. 从 auth_data 取 finderUsername(_log_finder_id)
+        4. 调 get_object_short_link API 拿 shortUrl
+        """
+        captured = {"post_list_body": None, "finder_id": None, "aid": None}
+
+        async def on_response(response):
+            try:
+                url = response.url
+                if "post/post_list" in url and response.ok:
+                    captured["post_list_body"] = await response.text()
+                    m = re.search(r"_aid=([^&]+)", url)
+                    if m:
+                        captured["aid"] = m.group(1)
+                elif "auth/auth_data" in url and response.ok:
+                    body = await response.text()
+                    data = json.loads(body)
+                    finder_user = data.get("data", {}).get("finderUser", {})
+                    captured["finder_id"] = finder_user.get("finderUsername")
+            except Exception:
+                pass
+
+        page.on("response", on_response)
+        try:
+            await page.goto(TENCENT_MANAGE_URL, wait_until="domcontentloaded", timeout=30000)
+            for _ in range(40):
+                if captured["post_list_body"] and captured["finder_id"]:
+                    break
+                await asyncio.sleep(0.5)
+
+            if not captured["post_list_body"]:
+                tencent_logger.warning(_msg("⚠️", "未抓到 post_list 响应,无法获取视频链接"))
+                return None
+
+            post_list_data = json.loads(captured["post_list_body"])
+            video_list = post_list_data.get("data", {}).get("list", [])
+            if not video_list:
+                tencent_logger.warning(_msg("⚠️", "post_list 返回空列表"))
+                return None
+
+            # 取 createTime 最大的(刚发布的),不依赖列表排序
+            latest_video = max(video_list, key=lambda v: v.get("createTime", 0))
+            export_id = latest_video.get("exportId") or latest_video.get("objectId")
+            object_nonce = latest_video.get("objectNonce")
+            if not export_id or not object_nonce:
+                tencent_logger.warning(_msg("⚠️", "视频缺少 exportId 或 objectNonce"))
+                return None
+
+            short_link_url = "https://channels.weixin.qq.com/micro/content/cgi-bin/mmfinderassistant-bin/post/get_object_short_link"
+            if captured["aid"]:
+                short_link_url += f"?_aid={captured['aid']}"
+
+            result_text = await page.evaluate(
+                """
+                async (params) => {
+                    try {
+                        const resp = await fetch(params.url, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                exportId: params.exportId,
+                                nonceId: String(params.nonceId),
+                                scene: 40,
+                                timestamp: String(Date.now()),
+                                _log_finder_uin: '',
+                                _log_finder_id: params.finderId || '',
+                                rawKeyBuff: '',
+                                pluginSessionId: null,
+                                reqScene: 7
+                            })
+                        });
+                        return await resp.text();
+                    } catch (e) {
+                        return JSON.stringify({error: e.message});
+                    }
+                }
+                """,
+                {"url": short_link_url, "exportId": export_id, "nonceId": object_nonce, "finderId": captured["finder_id"] or ""},
+            )
+
+            result_data = json.loads(result_text)
+            short_url = result_data.get("data", {}).get("shortUrl")
+            if short_url:
+                return short_url
+            tencent_logger.warning(_msg("⚠️", f"get_object_short_link 返回无 shortUrl: {result_text[:200]}"))
+            return None
+        finally:
+            page.remove_listener("response", on_response)
+
 
 class TencentVideo(TencentBaseUploader):
     def __init__(
@@ -735,9 +829,16 @@ class TencentVideo(TencentBaseUploader):
         await self.set_short_title(page, self.title, self.short_title)
         await self.submit_publish(page)
 
+        try:
+            short_url = await self._fetch_published_video_short_url(page)
+            if short_url:
+                self._result_url = short_url
+                tencent_logger.success(_msg("🥳", f"获取视频链接: {short_url}"))
+        except Exception as e:
+            tencent_logger.warning(_msg("⚠️", f"获取视频链接失败: {e}"))
+
     async def upload(self) -> PlatformResultExtras:
-        """主入口，返回 PlatformResultExtras。
-        微信视频号不暴露已发布视频 URL，故 result 不含 result_url。"""
+        """主入口，返回 PlatformResultExtras。"""
         tencent_logger.info(_msg("🧍", "小人先检查 cookie、视频文件和发布时间"))
         await self.validate_upload_args()
         tencent_logger.info(_msg("🥳", "上传前检查通过"))
@@ -745,10 +846,12 @@ class TencentVideo(TencentBaseUploader):
         result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            async with self._browser_session(save_on_success_only=True) as page:
+            async with self._browser_session(save_on_success_only=True, save_state=False) as page:
                 await self.upload_video_content(page)
                 result["success"] = True
                 result["message"] = "发布成功"
+                if getattr(self, "_result_url", None):
+                    result["result_url"] = self._result_url
             tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
         except Exception as e:
             result["message"] = str(e)
@@ -832,7 +935,7 @@ class TencentNote(TencentBaseUploader):
         result: PlatformResultExtras = {"success": False, "message": ""}
 
         try:
-            async with self._browser_session(save_on_success_only=True) as page:
+            async with self._browser_session(save_on_success_only=True, save_state=False) as page:
                 await self.open_upload_page(page)
                 tencent_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
 

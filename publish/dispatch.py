@@ -207,6 +207,7 @@ async def publish_to_baijiahao(params: dict) -> dict:
         uploader = BaiJiaHaoVideo(
             title=title, file_path=params["video_file"], tags=params["tags"],
             publish_date=params["publish_time"] or 0, account_file=account_file,
+            publish_strategy=params["publish_strategy"],
         )
         result = await uploader.upload()
         if result["success"] and result.get("result_url"):

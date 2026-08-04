@@ -196,42 +196,76 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
         self.file_path = str(self.validate_video_file(self.file_path))
 
     async def set_schedule_time(self, page, publish_date):
-        """
-        todo 时间选择，日后在处理 百家号的时间选择不准确，目前是随机
-        """
-        publish_date_day = f"{publish_date.month}月{publish_date.day}日" if publish_date.day >9  else f"{publish_date.month}月0{publish_date.day}日"
+        """选择定时发布的日期/时/分,然后点确认。"""
+        publish_date_day = f"{publish_date.month}月{publish_date.day:02d}日"
         publish_date_hour = f"{publish_date.hour}点"
         publish_date_min = f"{publish_date.minute}分"
         await page.wait_for_selector('div.select-wrap', timeout=5000)
-        for _ in range(3):
-            try:
-                await page.locator('div.select-wrap').nth(0).click()
-                await page.wait_for_selector('div.rc-virtual-list  div.cheetah-select-item', timeout=5000)
-                break
-            except:
-                await page.locator('div.select-wrap').nth(0).click()
-        # page.locator(f'div.rc-virtual-list-holder-inner >> text={publish_date_day}').click()
-        await page.wait_for_timeout(2000)
-        await page.locator(f'div.rc-virtual-list  div.cheetah-select-item >> text={publish_date_day}').click()
-        await page.wait_for_timeout(2000)
 
-        # 改为随机点击一个 hour
-        for _ in range(3):
-            try:
-                await page.locator('div.select-wrap').nth(1).click()
-                await page.wait_for_selector('div.rc-virtual-list div.rc-virtual-list-holder-inner:visible', timeout=5000)
-                break
-            except:
-                await page.locator('div.select-wrap').nth(1).click()
-        await page.wait_for_timeout(2000)
-        current_choice_hour = await page.locator('div.rc-virtual-list:visible div.cheetah-select-item-option').count()
-        await page.wait_for_timeout(2000)
-        await page.locator('div.rc-virtual-list:visible div.cheetah-select-item-option').nth(
-            random.randint(1, current_choice_hour-3)).click()
-        # 2024.08.05 current_choice_hour的获取可能有问题，页面有7，这里获取了10，暂时硬编码至6
+        async def open_dropdown_and_pick(idx: int, option_text: str, label: str):
+            """打开第 idx 个 select-wrap,在虚拟列表里滚动查找文本匹配的选项并点击。"""
+            await page.locator('div.select-wrap').nth(idx).click()
+            await page.wait_for_selector('div.rc-virtual-list:visible', timeout=5000)
+            await page.wait_for_timeout(300)
 
-        await page.wait_for_timeout(2000)
-        await page.locator("button >> text=定时发布").click()
+            option_locator = page.locator(
+                f'div.rc-virtual-list:visible div.cheetah-select-item-option:has-text("{option_text}"),'
+                f'div.rc-virtual-list:visible div.cheetah-select-item:has-text("{option_text}")'
+            ).first
+
+            # 虚拟列表只渲染可见区域,需要滚动查找
+            for scroll_attempt in range(40):
+                if await option_locator.count() > 0:
+                    await option_locator.click()
+                    await page.wait_for_timeout(300)
+                    return
+                # 滚动 rc-virtual-list-holder
+                scrolled = await page.evaluate("""
+                    () => {
+                        const lists = Array.from(document.querySelectorAll('div.rc-virtual-list'));
+                        const visible = lists.filter(l => {
+                            const r = l.getBoundingClientRect();
+                            return r.width > 0 && r.height > 0;
+                        });
+                        if (!visible.length) return false;
+                        const list = visible[visible.length - 1];
+                        const holder = list.querySelector('div.rc-virtual-list-holder');
+                        if (!holder) return false;
+                        const before = holder.scrollTop;
+                        holder.scrollTop += 80;
+                        return holder.scrollTop !== before;
+                    }
+                """)
+                if not scrolled:
+                    break
+                await page.wait_for_timeout(150)
+
+            # 滚完还没找到 -> dump 可见选项辅助排查
+            visible_options = await page.evaluate("""
+                () => {
+                    const lists = Array.from(document.querySelectorAll('div.rc-virtual-list'));
+                    const visible = lists.filter(l => {
+                        const r = l.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                    });
+                    if (!visible.length) return [];
+                    const list = visible[visible.length - 1];
+                    const items = list.querySelectorAll('div.cheetah-select-item, div.cheetah-select-item-option');
+                    return Array.from(items).slice(0, 30).map(it => (it.innerText || '').trim());
+                }
+            """)
+            baijiahao_logger.error(f"{label} 选项未找到 '{option_text}',可见选项: {visible_options}")
+            raise ValueError(f"{label} 选项未找到 '{option_text}',可见选项: {visible_options}")
+
+        # 1. 日期
+        await open_dropdown_and_pick(0, publish_date_day, "日期")
+        # 2. 时
+        await open_dropdown_and_pick(1, publish_date_hour, "时")
+        # 3. 分
+        await open_dropdown_and_pick(2, publish_date_min, "分")
+
+        # 4. 点弹窗内确认按钮(用 cheetah-modal-confirm-btns 限定,避免匹配到底层触发按钮)
+        await page.locator('div.cheetah-modal-confirm-btns button:has-text("定时发布")').click()
 
     async def handle_upload_error(self, page):
         # 日后实现，目前没遇到
@@ -454,8 +488,7 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
 
     async def set_schedule_publish(self, page, publish_date):
         while True:
-            schedule_element = page.locator("div.op-btn-outter-content >> text=定时发布").locator("..").locator(
-                'button')
+            schedule_element = page.locator("div.op-btn-outter-content", has_text="定时发布").locator("button")
             try:
                 await schedule_element.click()
                 await page.wait_for_selector('div.select-wrap:visible', timeout=3000)
@@ -465,6 +498,12 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
                 break
             except Exception as e:
                 baijiahao_logger.error(f"定时发布失败: {e}")
+                # 关闭可能残留的定时弹窗,避免遮挡按钮导致 retry 点击失败
+                try:
+                    await page.keyboard.press('Escape')
+                    await page.wait_for_timeout(500)
+                except Exception:
+                    pass
                 raise  # 重新抛出异常，让重试装饰器捕获
 
     @async_retry(timeout=300)  # 例如，最多重试3次，超时时间为180秒

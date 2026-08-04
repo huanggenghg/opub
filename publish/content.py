@@ -51,7 +51,8 @@ def get_video_content(
     获取视频的标题和描述
 
     优先级：
-    1. 视频同名的 JSON 配置文件（最高优先）
+    0. publish_config.ini 显式指定的 title/desc（最高优先，不调 GLM-4V API）
+    1. 视频同名的 JSON 配置文件
     2. 自动生成配置（如果启用且无配置文件）
     3. 模板随机填充
     4. 配置文件默认值
@@ -67,6 +68,12 @@ def get_video_content(
         (title, desc) 元组
     """
     from utils.video_analyzer import load_video_config, config_exists
+
+    # 0. 最高优先：publish_config.ini 显式指定的 title/desc
+    # 用户在配置文件里填了就用用户的，避免触发 GLM-4V API 调用
+    if (default_title and default_title.strip()) or (default_desc and default_desc.strip()):
+        print(f"[AUTO] 使用 publish_config.ini 配置: {default_title}")
+        return default_title, default_desc
 
     # 1. 最高优先：视频同名 JSON 配置文件
     config = load_video_config(video_file)

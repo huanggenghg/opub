@@ -47,7 +47,6 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 
 ```bash
 hgsau --help
-hgsau --help
 ```
 
 如果你在使用 skill，也建议同步看一下：
@@ -76,7 +75,6 @@ uv pip install -e .
 4. 重新验证 CLI：
 
 ```bash
-hgsau --help
 hgsau --help
 ```
 

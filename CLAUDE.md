@@ -14,7 +14,7 @@ The project consists of a Python CLI tool and uploader modules.
 
 The project provides one public command-line workflow for terminal users:
 
-*   `hgsau publish`: Read `publish_config.ini`, validate runtime dependencies, check account login per enabled platform, publish, and print a summary.
+*   `hgsau`: Read `publish_config.ini`, validate runtime dependencies, check account login per enabled platform, publish, and print a summary.
 
 Platform, account, media, metadata, and schedule settings should be configured in `publish_config.ini`. Standalone platform login/check/upload CLI commands are no longer part of the current mainline.
 
@@ -44,13 +44,13 @@ Install the editable package and run the unified publish entry:
 
 ```bash
 uv pip install -e .
-hgsau publish
+hgsau
 ```
 
 Temporary overrides are allowed for one publish run:
 
 ```bash
-hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
+hgsau --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 ```
 
 ## Development Conventions

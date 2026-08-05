@@ -47,7 +47,7 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 
 ```bash
 hgsau --help
-hgsau publish --help
+hgsau --help
 ```
 
 如果你在使用 skill，也建议同步看一下：
@@ -77,13 +77,13 @@ uv pip install -e .
 
 ```bash
 hgsau --help
-hgsau publish --help
+hgsau --help
 ```
 
 5. 如果任务是浏览器平台链路，再继续检查 `publish_config.ini`，然后运行统一入口：
 
 ```bash
-hgsau publish
+hgsau
 ```
 
 6. 如果用户依赖 skill，再检查这些路径是否仍存在且契约没变：
@@ -96,5 +96,5 @@ hgsau publish
 - 当前 README 只做总览，安装和更新以 `docs/install.md`、`docs/update.md` 为准
 - Web 相关内容属于历史路径，见 `docs/legacy-web.md`
 - 如果更新后的登录流程输出了本地二维码图片，agent 应直接把图片展示/发送给用户扫码，不要只回传图片路径
-- `hgsau publish` 会在统一发布流程里做运行环境预检和账号登录校验
+- `hgsau` 会在统一发布流程里做运行环境预检和账号登录校验
 - Bilibili 登录当前仍建议让用户自己在本地真实终端里完成扫码；如果二维码显示不完整，可让用户直接打开 `qrcode.png` 扫码

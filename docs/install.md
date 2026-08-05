@@ -76,16 +76,16 @@ Windows 也可以直接手动复制并重命名。
 2. 执行统一发布入口：
 
 ```bash
-hgsau publish
+hgsau
 ```
 
 如需临时覆盖配置：
 
 ```bash
-hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
+hgsau --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 ```
 
-`hgsau publish` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
+`hgsau` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
 
 如果命令找不到，优先确认：
 
@@ -125,21 +125,21 @@ uv pip install -e .
 PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium
 ```
 
-5. 安装完成后，优先检查 `hgsau publish --help`
+5. 安装完成后，优先检查 `hgsau --help`
 6. 引导用户编辑 `publish_config.ini`，确认内容、素材路径、启用平台和账号文件
 7. 如果用户的目标是登录、账号校验、视频上传、图文上传或定时发布，优先走统一发布入口：
 
 ```bash
-hgsau publish
+hgsau
 ```
 
 如需临时覆盖配置：
 
 ```bash
-hgsau publish --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
+hgsau --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 ```
 
-`hgsau publish` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
+`hgsau` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
 
 8. 如果用户明确在使用 skill 系统，再引导其阅读：
 

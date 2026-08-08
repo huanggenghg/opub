@@ -477,6 +477,8 @@ class TencentBaseUploader(BaseBrowserUploader):
 
     async def open_upload_page(self, page: Page) -> None:
         await page.goto(TENCENT_UPLOAD_URL)
+        if "login.html" in (page.url or "").lower():
+            raise RuntimeError("cookie 已失效(被重定向到登录页),请重新扫码登录微信视频号")
         await page.wait_for_url(TENCENT_UPLOAD_URL)
 
     async def upload_video_file(self, page: Page, file_path: str) -> None:

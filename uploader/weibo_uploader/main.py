@@ -19,7 +19,7 @@ from utils.log import weibo_logger
 WEIBO_MAIN_URL = "https://weibo.com/"  # 微博主站，发布入口在首页
 WEIBO_LOGIN_URL = "https://passport.weibo.com/sso/signin?entry=miniblog&source=miniblog&disp=popup&url=https%3A%2F%2Fweibo.com%2Fu%2F6569482075&from=weibopro"  # 登录页面
 WEIBO_UPLOAD_CHANNEL_URL = "https://weibo.com/upload/channel"  # 视频上传页面
-WEIBO_LOGIN_URL_MARKERS = ("passport.weibo.com", "login.sina.com", "/login", "/sso/")
+WEIBO_LOGIN_URL_MARKERS = ("passport.weibo.com", "login.sina.com", "/login", "/sso/", "newlogin")
 WEIBO_UPLOAD_BUTTON_SELECTOR = 'button[id^="video_button_upload"], button._btn1_109u9_8'
 WEIBO_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 WEIBO_PUBLISH_STRATEGY_SCHEDULED = "scheduled"

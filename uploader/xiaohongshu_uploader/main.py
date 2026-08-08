@@ -423,7 +423,7 @@ class XiaoHongShuBaseUploader(BaseBrowserUploader):
     """小红书上传器基类 - hook layer for BaseBrowserUploader."""
 
     PLATFORM_NAME = "xiaohongshu"
-    UPLOAD_URL = XHS_UPLOAD_URL
+    UPLOAD_URL = XHS_PUBLISH_VIDEO_URL
     LOGIN_URL = XHS_LOGIN_URL
     LOGIN_MARKERS = ["手机号登录", "扫码登录"]
     PUBLISH_MARKERS = []

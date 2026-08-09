@@ -116,5 +116,56 @@ class CaptureBvAfterUploadTests(unittest.TestCase):
         self.assertIsNone(bv)
 
 
+class UploadWireTests(unittest.TestCase):
+    def test_upload_success_with_bv_sets_result_url(self):
+        import asyncio
+        uploader = _make_uploader()
+        upload_completed = _make_completed(0, stdout="Upload completed: demo.mp4")
+
+        def fake_run_biliup_command(args):
+            if "upload" in args:
+                return upload_completed
+            return _make_completed(0, stdout="")
+
+        with patch("uploader.bilibili_uploader.main.run_biliup_command", side_effect=fake_run_biliup_command), \
+             patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs", return_value=set()), \
+             patch.object(uploader, "_capture_bv_after_upload", return_value="BV15r3q6FEYZ") as capture_mock:
+            result = asyncio.run(uploader.upload())
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["result_url"], "https://www.bilibili.com/video/BV15r3q6FEYZ")
+        capture_mock.assert_called_once_with(set())
+
+    def test_upload_success_without_bv_leaves_result_url_absent(self):
+        import asyncio
+        uploader = _make_uploader()
+        upload_completed = _make_completed(0, stdout="Upload completed: demo.mp4")
+
+        with patch("uploader.bilibili_uploader.main.run_biliup_command", return_value=upload_completed), \
+             patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs", return_value=set()), \
+             patch.object(uploader, "_capture_bv_after_upload", return_value=None):
+            result = asyncio.run(uploader.upload())
+
+        self.assertTrue(result["success"])
+        self.assertNotIn("result_url", result)
+
+    def test_upload_failure_does_not_call_capture(self):
+        import asyncio
+        uploader = _make_uploader()
+        upload_failed = _make_completed(1, stderr="cookie 失效")
+
+        with patch("uploader.bilibili_uploader.main.run_biliup_command", return_value=upload_failed), \
+             patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs", return_value=set()) as list_mock, \
+             patch.object(uploader, "_capture_bv_after_upload") as capture_mock:
+            result = asyncio.run(uploader.upload())
+
+        self.assertFalse(result["success"])
+        capture_mock.assert_not_called()
+        list_mock.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

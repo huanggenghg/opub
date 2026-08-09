@@ -138,12 +138,14 @@ class BilibiliUploader(BaseCliUploader):
     async def upload(self) -> PlatformResultExtras:
         """用 biliup 上传视频到 B站。
 
-        Returns PlatformResultExtras without raw_output (biliup stdout
-        is logged but not returned - no consumer in the codebase).
+        上传成功后会尝试抓取本次发布视频的公开链接,写入 result_url。
+        抓取失败不影响发布成功状态(发布已成功,只是缺链接)。
         """
         tag_str = ",".join(self.tags) if isinstance(self.tags, list) else str(self.tags)
         if not os.path.exists(self.file_path):
             return {"success": False, "message": f"视频文件不存在: {self.file_path}"}
+
+        before_bvs = self._list_bvs()
 
         args = [
             "-u", self.account_file,
@@ -159,11 +161,20 @@ class BilibiliUploader(BaseCliUploader):
         stdout = result.stdout or ""
         stderr = result.stderr or ""
 
-        if result.returncode == 0:
-            bilibili_logger.success(f"biliup 上传成功: {stdout.strip()[:300]}")
-            return {"success": True, "message": "发布成功"}
-        bilibili_logger.error(f"biliup 上传失败: {stderr.strip()[:300]}")
-        return {"success": False, "message": f"biliup 上传失败: {stderr.strip()[:200]}"}
+        if result.returncode != 0:
+            bilibili_logger.error(f"biliup 上传失败: {stderr.strip()[:300]}")
+            return {"success": False, "message": f"biliup 上传失败: {stderr.strip()[:200]}"}
+
+        bilibili_logger.success(f"biliup 上传成功: {stdout.strip()[:300]}")
+        result_dict: PlatformResultExtras = {"success": True, "message": "发布成功"}
+        bv = self._capture_bv_after_upload(before_bvs)
+        if bv:
+            url = f"https://www.bilibili.com/video/{bv}"
+            result_dict["result_url"] = url
+            bilibili_logger.success(f"已抓取内容链接: {url}")
+        else:
+            bilibili_logger.warning("未能抓取 BV,请到 B站创作中心查看")
+        return result_dict
 
 
 # Module-level wrappers for dispatch.py compatibility

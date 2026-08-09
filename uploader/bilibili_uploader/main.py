@@ -84,6 +84,19 @@ class BilibiliUploader(BaseCliUploader):
             return await cls.cookie_gen(account_file)
         return True
 
+    def _list_bvs(self) -> set[str]:
+        """跑 biliup list,返回当前账号所有 BV 集合。命令失败返回空集,不抛异常。"""
+        result = run_biliup_command(["-u", self.account_file, "list"])
+        if result.returncode != 0:
+            bilibili_logger.warning(f"biliup list 失败,返回空集: {(result.stderr or '').strip()[:200]}")
+            return set()
+        bvs: set[str] = set()
+        for line in (result.stdout or "").splitlines():
+            parts = line.split("\t", 2)
+            if parts and parts[0].startswith("BV"):
+                bvs.add(parts[0])
+        return bvs
+
     async def upload(self) -> PlatformResultExtras:
         """用 biliup 上传视频到 B站。
 

@@ -49,5 +49,34 @@ class ListBvsTests(unittest.TestCase):
         self.assertEqual(bvs, {"BV15r3q6FEYZ"})
 
 
+class MatchBvByTitleTests(unittest.TestCase):
+    def test_returns_bv_when_title_matches(self):
+        stdout = "BV15r3q6FEYZ\t无小丑\t开放浏览\nBV1QQgy6rEaA\t测试标题\t开放浏览\n"
+        uploader = _make_uploader()
+        with patch("uploader.bilibili_uploader.main.run_biliup_command", return_value=_make_completed(0, stdout=stdout)):
+            bv = uploader._match_bv_by_title()
+        self.assertEqual(bv, "BV1QQgy6rEaA")
+
+    def test_returns_none_when_no_match(self):
+        stdout = "BV15r3q6FEYZ\t无小丑\t开放浏览\n"
+        uploader = _make_uploader()
+        with patch("uploader.bilibili_uploader.main.run_biliup_command", return_value=_make_completed(0, stdout=stdout)):
+            bv = uploader._match_bv_by_title()
+        self.assertIsNone(bv)
+
+    def test_returns_first_bv_when_multiple_matches(self):
+        stdout = "BV1111111111\t测试标题\t开放浏览\nBV2222222222\t测试标题\t开放浏览\n"
+        uploader = _make_uploader()
+        with patch("uploader.bilibili_uploader.main.run_biliup_command", return_value=_make_completed(0, stdout=stdout)):
+            bv = uploader._match_bv_by_title()
+        self.assertEqual(bv, "BV1111111111")
+
+    def test_returns_none_when_command_fails(self):
+        uploader = _make_uploader()
+        with patch("uploader.bilibili_uploader.main.run_biliup_command", return_value=_make_completed(1, stderr="cookie 失效")):
+            bv = uploader._match_bv_by_title()
+        self.assertIsNone(bv)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -97,6 +97,22 @@ class BilibiliUploader(BaseCliUploader):
                 bvs.add(parts[0])
         return bvs
 
+    def _match_bv_by_title(self) -> str | None:
+        """fallback: 在 biliup list 里找 title 等于 self.title 的行,返回 BV。"""
+        result = run_biliup_command(["-u", self.account_file, "list"])
+        if result.returncode != 0:
+            return None
+        matches: list[str] = []
+        for line in (result.stdout or "").splitlines():
+            parts = line.split("\t", 2)
+            if len(parts) >= 2 and parts[0].startswith("BV") and parts[1] == self.title:
+                matches.append(parts[0])
+        if not matches:
+            return None
+        if len(matches) > 1:
+            bilibili_logger.warning(f"title 匹配到多个 BV: {matches},取第一个")
+        return matches[0]
+
     async def upload(self) -> PlatformResultExtras:
         """用 biliup 上传视频到 B站。
 

@@ -227,6 +227,7 @@ async def publish_to_baijiahao(params: dict) -> dict:
 async def publish_to_bilibili(params: dict) -> dict:
     """发布到 B站 (via biliup CLI)"""
     from uploader.bilibili_uploader.main import BilibiliUploader
+    from utils.excel_writer import write_video_link
 
     account_file = resolve_path(params["account_file"])
     title = truncate_title(params["title"], "bilibili")
@@ -246,7 +247,17 @@ async def publish_to_bilibili(params: dict) -> dict:
             account_file=account_file, desc=params["desc"],
             publish_strategy=params["publish_strategy"],
         )
-        return await uploader.upload()
+        result = await uploader.upload()
+        if result["success"] and result.get("result_url"):
+            try:
+                write_result = write_video_link(result["result_url"])
+                if write_result["success"]:
+                    print(f"  📝 视频链接已写入 Excel: {result['result_url']}")
+                else:
+                    print(f"  ⚠️ 写入 Excel 失败: {write_result['message']}")
+            except Exception as e:
+                print(f"  ⚠️ 写入 Excel 异常: {e}")
+        return result
     except Exception as e:
         return {"success": False, "message": str(e)}
 

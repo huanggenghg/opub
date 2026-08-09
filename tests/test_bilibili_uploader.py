@@ -78,5 +78,43 @@ class MatchBvByTitleTests(unittest.TestCase):
         self.assertIsNone(bv)
 
 
+class CaptureBvAfterUploadTests(unittest.TestCase):
+    def test_returns_new_bv_when_diff_has_exactly_one(self):
+        uploader = _make_uploader()
+        before = {"BV1111111111"}
+        with patch.object(uploader, "_list_bvs", return_value={"BV1111111111", "BV2222222222"}), \
+             patch.object(uploader, "_match_bv_by_title") as match_mock:
+            bv = uploader._capture_bv_after_upload(before, max_retries=3, delay=0)
+        self.assertEqual(bv, "BV2222222222")
+        match_mock.assert_not_called()
+
+    def test_falls_back_to_title_match_after_retries_exhausted(self):
+        uploader = _make_uploader()
+        before = {"BV1111111111"}
+        with patch.object(uploader, "_list_bvs", return_value={"BV1111111111"}), \
+             patch.object(uploader, "_match_bv_by_title", return_value="BV3333333333") as match_mock:
+            bv = uploader._capture_bv_after_upload(before, max_retries=2, delay=0)
+        self.assertEqual(bv, "BV3333333333")
+        self.assertEqual(match_mock.call_count, 1)
+
+    def test_falls_back_to_title_match_when_multiple_new_bvs(self):
+        uploader = _make_uploader()
+        before = {"BV1111111111"}
+        after = {"BV1111111111", "BV2222222222", "BV3333333333"}
+        with patch.object(uploader, "_list_bvs", return_value=after), \
+             patch.object(uploader, "_match_bv_by_title", return_value="BV2222222222") as match_mock:
+            bv = uploader._capture_bv_after_upload(before, max_retries=3, delay=0)
+        self.assertEqual(bv, "BV2222222222")
+        self.assertEqual(match_mock.call_count, 1)
+
+    def test_returns_none_when_all_paths_fail(self):
+        uploader = _make_uploader()
+        before = {"BV1111111111"}
+        with patch.object(uploader, "_list_bvs", return_value={"BV1111111111"}), \
+             patch.object(uploader, "_match_bv_by_title", return_value=None):
+            bv = uploader._capture_bv_after_upload(before, max_retries=2, delay=0)
+        self.assertIsNone(bv)
+
+
 if __name__ == "__main__":
     unittest.main()

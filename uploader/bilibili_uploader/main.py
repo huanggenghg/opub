@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 from uploader.base_video import BaseCliUploader, PlatformResultExtras, PublishStrategy
@@ -112,6 +113,27 @@ class BilibiliUploader(BaseCliUploader):
         if len(matches) > 1:
             bilibili_logger.warning(f"title 匹配到多个 BV: {matches},取第一个")
         return matches[0]
+
+    def _capture_bv_after_upload(self, before_bvs: set[str], max_retries: int = 3, delay: float = 2.0) -> str | None:
+        """上传后轮询 biliup list,找本次上传产生的新 BV。
+
+        - 1 个新 BV: 返回它(主路径)
+        - 0 个新 BV: sleep 后重试
+        - >1 个新 BV: 立刻 fallback 到 title 匹配
+        - 重试耗尽: fallback 到 title 匹配
+        """
+        for attempt in range(max_retries):
+            after_bvs = self._list_bvs()
+            new_bvs = after_bvs - before_bvs
+            if len(new_bvs) == 1:
+                return next(iter(new_bvs))
+            if len(new_bvs) > 1:
+                bilibili_logger.warning(f"diff 出 {len(new_bvs)} 个新 BV,fallback 到 title 匹配: {new_bvs}")
+                return self._match_bv_by_title()
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+        bilibili_logger.warning(f"重试 {max_retries} 次仍未拿到新 BV,fallback 到 title 匹配")
+        return self._match_bv_by_title()
 
     async def upload(self) -> PlatformResultExtras:
         """用 biliup 上传视频到 B站。

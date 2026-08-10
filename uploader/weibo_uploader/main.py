@@ -354,43 +354,41 @@ class WeiboVideo(WeiboBaseUploader):
             except Exception as e2:
                 weibo_logger.error(_msg("❌", f"选择类型失败: {e2}"))
 
-        # 选择内容声明（必选：内容无需标注）
+        # 选择内容声明（必选）
+        # 2026-08 起微博改版:触发按钮文案改为"请进行内容声明（必填）"放在 title 属性,
+        # 选项文案从"内容无需标注"改为"我的内容无需声明"。保留旧文案做回退。
         weibo_logger.info(_msg("📝", "正在选择内容声明..."))
         try:
-            # 点击"内容声明"下面的选择区域
-            content_declare_area = page.locator('text=内容声明').locator('xpath=following-sibling::*').first
-            await content_declare_area.click()
-            await page.wait_for_timeout(500)
+            trigger = page.locator('div[title*="内容声明"]').first
+            if not await trigger.count():
+                trigger = page.locator('text=内容声明').locator('xpath=following-sibling::*').first
+            await trigger.wait_for(state="visible", timeout=5000)
+            await trigger.click()
+            await page.wait_for_timeout(800)
 
-            # 在弹框中选择"内容无需标注"
-            no_mark_option = page.locator('text=内容无需标注').first
-            await no_mark_option.click()
-            await page.wait_for_timeout(500)
+            option = None
+            selected_text = None
+            for option_text in ["我的内容无需声明", "内容无需标注"]:
+                loc = page.locator(f'button:has-text("{option_text}")').first
+                if await loc.count() and await loc.is_visible():
+                    option = loc
+                    selected_text = option_text
+                    break
 
-            # 点击弹框的确定按钮
+            if option is None:
+                raise RuntimeError("未找到内容声明选项")
+
+            await option.click()
+            await page.wait_for_timeout(800)
+
             confirm_btn = page.locator('button:has-text("确定")').first
-            await confirm_btn.click()
-            await page.wait_for_timeout(500)
-            weibo_logger.success(_msg("✅", "已选择内容声明: 内容无需标注"))
-        except Exception as e:
-            weibo_logger.warning(_msg("⚠️", f"选择内容声明失败: {e}，尝试其他方式..."))
-            try:
-                # 备选：直接点击包含"内容声明"的父容器
-                declare_container = page.locator('div:has-text("内容声明"):has-text("请选择")').first
-                await declare_container.click()
-                await page.wait_for_timeout(500)
-
-                no_mark_option = page.locator('text=内容无需标注').first
-                await no_mark_option.click()
-                await page.wait_for_timeout(500)
-
-                # 点击弹框的确定按钮
-                confirm_btn = page.locator('button:has-text("确定")').first
+            if await confirm_btn.count() and await confirm_btn.is_visible():
                 await confirm_btn.click()
-                await page.wait_for_timeout(500)
-                weibo_logger.success(_msg("✅", "已选择内容声明: 内容无需标注"))
-            except Exception as e2:
-                weibo_logger.error(_msg("❌", f"选择内容声明失败: {e2}"))
+                await page.wait_for_timeout(800)
+
+            weibo_logger.success(_msg("✅", f"已选择内容声明: {selected_text}"))
+        except Exception as e:
+            weibo_logger.error(_msg("❌", f"选择内容声明失败: {e}"))
 
         # 设置定时发布
         if self.publish_strategy == WEIBO_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:

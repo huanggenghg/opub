@@ -1,8 +1,9 @@
+import contextlib
 import io
 import unittest
 from contextlib import redirect_stdout
 
-from publish.reporter import print_summary
+from publish.reporter import print_results, print_summary
 
 
 class PrintSummaryTests(unittest.TestCase):
@@ -59,6 +60,20 @@ class PrintSummaryTests(unittest.TestCase):
         out = buf.getvalue()
         self.assertIn("成功: 0 次", out)
         self.assertIn("失败: 0 次", out)
+
+
+class PrintResultsErrorCodeTests(unittest.TestCase):
+    def test_platform_failure_line_contains_pub_code(self):
+        stderr_or_out = io.StringIO()
+        with contextlib.redirect_stdout(stderr_or_out):
+            print_results({"weibo": {"success": False, "message": "上传超时"}})
+        self.assertIn("[PUB-weibo]", stderr_or_out.getvalue())
+
+    def test_login_failure_line_contains_auth_code(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            print_results({"douyin": {"success": False, "message": "登录失败: 抖音", "error_code": "AUTH-001"}})
+        self.assertIn("[AUTH-001]", out.getvalue())
 
 
 if __name__ == "__main__":

@@ -25,9 +25,31 @@ from publish.dispatch import (
     platform_requires_account_login,
     publish_to_platform,
 )
-from publish.errors import EXIT_CONFIG_ERROR, EXIT_ENV_ERROR, print_error
+from publish.errors import (
+    EXIT_ALL_FAIL,
+    EXIT_AUTH_ERROR,
+    EXIT_CONFIG_ERROR,
+    EXIT_ENV_ERROR,
+    EXIT_OK,
+    EXIT_PARTIAL_FAIL,
+    print_error,
+)
 from publish.reporter import print_header, print_results, print_summary
 from publish.runtime import runtime_preflight
+
+
+def exit_code_from_results(all_results: Dict[str, Dict[str, Any]]) -> int:
+    results = [r for item_results in all_results.values() for r in item_results.values()]
+    if not results:
+        return EXIT_ALL_FAIL
+    failures = [r for r in results if not r["success"]]
+    if not failures:
+        return EXIT_OK
+    if len(failures) == len(results):
+        if all(r.get("account_issue") for r in failures):
+            return EXIT_AUTH_ERROR
+        return EXIT_ALL_FAIL
+    return EXIT_PARTIAL_FAIL
 
 
 async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -46,7 +68,12 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
 
         if not account_files:
             print(f"[{i}/{total}] 发布到 {platform_name}...")
-            results[platform] = {"success": False, "message": f"未配置 {platform} 账号"}
+            results[platform] = {
+                "success": False,
+                "message": f"未配置 {platform} 账号",
+                "account_issue": True,
+                "error_code": "AUTH-002",
+            }
             print("  ❌ 失败: 未配置账号")
             continue
 
@@ -78,9 +105,9 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
                         "success": False,
                         "message": msg,
                         "account_issue": True,
-                        "issue_type": "login_failed",
+                        "error_code": "AUTH-001",
                     }
-                    print(f"  ❌ 失败: {msg}")
+                    print_error("AUTH-001", msg, f"引导用户在弹出的浏览器中完成 {platform_name} 扫码登录后重试")
                     continue
 
             result = await publish_to_platform(platform, platform_params)
@@ -147,8 +174,7 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
 
         all_results = {"note": await publish_one_item(note_params)}
         print_summary(all_results)
-        fail_count = sum(1 for results in all_results.values() for result in results.values() if not result["success"])
-        return 0 if fail_count == 0 else 1
+        return exit_code_from_results(all_results)
 
     # 获取视频文件列表
     video_files = get_video_files(params["video_file"])
@@ -199,8 +225,7 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
 
     # 打印总体汇总
     print_summary(all_results)
-    fail_count = sum(1 for results in all_results.values() for result in results.values() if not result["success"])
-    return 0 if fail_count == 0 else 1
+    return exit_code_from_results(all_results)
 
 
 async def run_publish(

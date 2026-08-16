@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 import publish_all
 
-from publish.errors import EXIT_CONFIG_ERROR
+from publish.errors import EXIT_AUTH_ERROR, EXIT_ALL_FAIL, EXIT_CONFIG_ERROR, EXIT_OK, EXIT_PARTIAL_FAIL
+from publish.orchestrator import exit_code_from_results
 
 
 class PublishCliPackagingTests(unittest.TestCase):
@@ -138,6 +139,24 @@ class PublishCliConfigErrorTests(unittest.TestCase):
         code, stderr = self._run(params)
         self.assertEqual(code, EXIT_CONFIG_ERROR)
         self.assertIn("CFG-004", stderr)
+
+
+class ExitCodeFromResultsTests(unittest.TestCase):
+    def test_all_success(self):
+        results = {"v.mp4": {"douyin": {"success": True}}}
+        self.assertEqual(exit_code_from_results(results), EXIT_OK)
+
+    def test_partial_fail(self):
+        results = {"v.mp4": {"douyin": {"success": True}, "weibo": {"success": False, "message": "x"}}}
+        self.assertEqual(exit_code_from_results(results), EXIT_PARTIAL_FAIL)
+
+    def test_all_fail_platform_error(self):
+        results = {"v.mp4": {"weibo": {"success": False, "message": "x"}}}
+        self.assertEqual(exit_code_from_results(results), EXIT_ALL_FAIL)
+
+    def test_all_fail_account_issues_is_auth_error(self):
+        results = {"v.mp4": {"weibo": {"success": False, "message": "登录失败", "account_issue": True}}}
+        self.assertEqual(exit_code_from_results(results), EXIT_AUTH_ERROR)
 
 
 if __name__ == "__main__":

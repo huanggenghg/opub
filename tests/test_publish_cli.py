@@ -159,5 +159,20 @@ class ExitCodeFromResultsTests(unittest.TestCase):
         self.assertEqual(exit_code_from_results(results), EXIT_AUTH_ERROR)
 
 
+class PublishCliHelpTextTests(unittest.TestCase):
+    def test_help_documents_ini_field_mapping(self):
+        help_text = publish_all.build_parser().format_help()
+        for fragment in [
+            "[common] video_file",
+            "[common] title",
+            "[common] desc",
+            "[common] tags",
+            "[platforms] enabled",
+            "[common] publish_time",
+            "[common] start_from",
+        ]:
+            self.assertIn(fragment, help_text)
+
+
 if __name__ == "__main__":
     unittest.main()

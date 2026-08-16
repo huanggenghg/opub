@@ -278,22 +278,22 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     parser = argparse.ArgumentParser(
         prog="hgsau",
-        description="CLI for social-auto-upload.",
+        description="把视频/图文一键发布到抖音/小红书/快手/微博/B站/视频号/百家号。无参数时读取 publish_config.ini 执行完整发布。",
     )
     try:
         _version = pkg_version("hgsau")
     except PackageNotFoundError:
         _version = "0.0.0.dev0"
     parser.add_argument("--version", action="version", version=f"hgsau {_version}")
-    parser.add_argument("--config", default="publish_config.ini", help="Config file path (default: publish_config.ini)")
-    parser.add_argument("--platforms", default=None, help="Override enabled platforms, comma-separated")
-    parser.add_argument("--video", default=None, help="Override video file/directory path")
-    parser.add_argument("--title", default=None, help="Override title")
-    parser.add_argument("--desc", default=None, help="Override description")
-    parser.add_argument("--tags", default=None, help="Override tags, comma-separated")
-    parser.add_argument("--schedule", type=_schedule_value, default=None, help=f"Override schedule time in {schedule_help}")
-    parser.add_argument("--start-from", type=int, default=None, help="Start from video index (1-based)")
-    parser.add_argument("--force", action="store_true", help="Force regenerate video config")
+    parser.add_argument("--config", default="publish_config.ini", help="配置文件路径 (默认: publish_config.ini)")
+    parser.add_argument("--platforms", default=None, help="临时覆盖启用平台，逗号分隔 (对应 [platforms] enabled)")
+    parser.add_argument("--video", default=None, help="临时覆盖视频文件/目录路径 (对应 [common] video_file)")
+    parser.add_argument("--title", default=None, help="临时覆盖标题 (对应 [common] title)")
+    parser.add_argument("--desc", default=None, help="临时覆盖描述 (对应 [common] desc)")
+    parser.add_argument("--tags", default=None, help="临时覆盖话题标签，逗号分隔 (对应 [common] tags)")
+    parser.add_argument("--schedule", type=_schedule_value, default=None, help=f"临时覆盖定时发布时间，格式 {schedule_help}(对应 [common] publish_time)")
+    parser.add_argument("--start-from", type=int, default=None, help="断点续传起始序号，1 起 (对应 [common] start_from)")
+    parser.add_argument("--force", action="store_true", help="强制重新生成视频配置 (对应 [common] 一次性 force)")
     return parser
 
 

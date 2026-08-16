@@ -195,3 +195,6 @@ output/
 templates/
 # Temporary frame images
 temp_frames/
+
+# Claude Code local settings (contains secrets)
+.claude/settings.local.json

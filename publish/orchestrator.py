@@ -160,7 +160,6 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
             return EXIT_CONFIG_ERROR
 
         if not await runtime_preflight():
-            print_error("ENV-004", "运行环境检查失败", "按上方 ENV 错误码中的建议命令安装后重试")
             return EXIT_ENV_ERROR
 
         title, desc = fill_empty_content(params["title"], params["desc"])
@@ -183,7 +182,6 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
         return EXIT_CONFIG_ERROR
 
     if not await runtime_preflight():
-        print_error("ENV-004", "运行环境检查失败", "按上方 ENV 错误码中的建议命令安装后重试")
         return EXIT_ENV_ERROR
 
     print(f"找到 {len(video_files)} 个视频文件:")
@@ -316,5 +314,5 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         return asyncio.run(run_publish(args.config, _build_overrides(args)))
     except Exception as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+        print_error("RUN-001", f"运行时异常: {exc}", "将以上错误信息反馈给用户；重试前请先检查配置与环境")
+        return EXIT_ALL_FAIL

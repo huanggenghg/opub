@@ -82,13 +82,14 @@ class PublishCliParserTests(unittest.TestCase):
         self.assertEqual(call.args[1].platforms, "weibo")
         self.assertEqual(call.args[1].title, "标题")
 
-    def test_main_returns_1_for_run_publish_exception(self):
+    def test_main_wraps_exception_with_run001_and_exit_code_2(self):
         stderr = io.StringIO()
         with patch("publish.orchestrator.run_publish", new=AsyncMock(side_effect=RuntimeError("boom"))):
             with contextlib.redirect_stderr(stderr):
                 code = publish_all.main([])
 
-        self.assertEqual(code, 1)
+        self.assertEqual(code, EXIT_ALL_FAIL)
+        self.assertIn("RUN-001", stderr.getvalue())
         self.assertIn("boom", stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
 

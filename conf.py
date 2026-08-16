@@ -8,17 +8,15 @@ _PROJECT_ROOT = Path(__file__).parent.resolve()
 
 
 def _detect_mode() -> Path:
-    """开发模式：项目根有 .git 目录 → BASE_DIR = 项目根
+    """SAU_HOME 环境变量始终优先。
+    开发模式：项目根有 .git 目录 → BASE_DIR = 项目根
     pip 模式：→ BASE_DIR = ~/.social-auto-upload/"""
-    if (_PROJECT_ROOT / ".git").is_dir():
-        return _PROJECT_ROOT
     sau_home = os.environ.get("SAU_HOME", "").strip()
     if sau_home:
-        return Path(sau_home)
-    # pip 模式：始终使用 ~/.social-auto-upload/，不存在则自动创建
+        return Path(sau_home).resolve()
+    if (_PROJECT_ROOT / ".git").is_dir():
+        return _PROJECT_ROOT
     home_dir = Path.home() / ".social-auto-upload"
-    home_dir.mkdir(exist_ok=True)
-    (home_dir / "cookies").mkdir(exist_ok=True)
     return home_dir
 
 

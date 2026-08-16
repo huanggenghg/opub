@@ -6,29 +6,40 @@ version: "0.4.6"
 
 # hgsau CLI 使用指南
 
-## 当前主入口
+## 这是什么
 
-项目当前只提供一个公开 CLI 入口：
+`hgsau` 是一个 pip 包，把视频/图文一键发布到 7 个国内平台。本文件是它对 Agent 的完整接口契约：安装、配置、调用、读取结果所需的信息全部在此或 `hgsau` 运行时输出中。
+
+## 安装
 
 ```bash
-hgsau
+pip install hgsau
 ```
 
-不要引导用户执行独立的登录、校验或单平台上传命令。发布平台、视频路径、标题、描述、标签和定时发布时间都是一次性任务字段，每次发布前都必须明确设置；账号文件可以长期保存在 `publish_config.ini` 中。命令行参数只作为本次运行的临时覆盖。
+系统依赖：
+
+```bash
+# 浏览器驱动（首次发布时会自动检查并尝试自动安装，失败时按 ENV-004 提示手动执行）
+PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium
+
+# ffmpeg（仅"图文转视频"功能需要）
+# macOS: brew install ffmpeg
+# Ubuntu/Debian: sudo apt-get install ffmpeg
+```
+
+首次运行会自动在 `~/.social-auto-upload/` 创建数据目录（cookies、配置），无需手动初始化。可用环境变量 `SAU_HOME` 指定其他数据目录。
 
 ## 已验证平台（7个）
 
 | 平台标识 | 名称 | 视频 | 图文 | 说明 |
 | --- | --- | --- | --- | --- |
-| `douyin` | 抖音 | ✅ | ✅ | 主线重构最完整 |
+| `douyin` | 抖音 | ✅ | ✅ | |
 | `xiaohongshu` | 小红书 | ✅ | ✅ | 浏览器自动化 |
 | `kuaishou` | 快手 | ✅ | ✅ | 浏览器自动化 |
-| `bilibili` | B站 | ✅ | ❌ | 运行时自动准备 biliup，自动抓取BV号 |
-| `tencent` | 视频号 | ✅ | ❌ | 对应 tencent_uploader |
+| `bilibili` | B站 | ✅ | ❌ | 自动准备 biliup，自动抓取BV号 |
+| `tencent` | 视频号 | ✅ | ❌ | |
 | `baijiahao` | 百家号 | ✅ | ❌ | 浏览器自动化 |
 | `weibo` | 微博 | ✅ | ❌ | 支持逗号分隔多账号，每个账号各发一遍 |
-
-TikTok 等国际化平台暂不在主线范围内。
 
 ## 触发场景
 
@@ -37,59 +48,9 @@ TikTok 等国际化平台暂不在主线范围内。
 - 发布视频、上传视频、一键发布、多平台发布、图文发布
 - 发布到抖音、小红书、快手、微博、B站、视频号、百家号
 - 配置发布平台、账号、cookie、登录校验、扫码登录
-- 排查 `hgsau`、`publish_config.ini`、patchright、Chromium 或浏览器驱动问题
+- 排查 `hgsau`、`publish_config.ini`、Chromium 或浏览器驱动问题
 
-## 推荐流程
-
-```bash
-uv pip install -e .
-hgsau --help
-hgsau
-```
-
-如需临时覆盖配置：
-
-```bash
-hgsau --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
-hgsau --config my_publish_config.ini
-hgsau --start-from 5
-hgsau --force
-```
-
-## 环境准备
-
-### Python 依赖
-
-```bash
-uv venv && source .venv/bin/activate
-uv pip install -e .
-```
-
-当前主线依赖在 `pyproject.toml`（v0.4.6），关键依赖：
-- `patchright==1.58.2`（浏览器驱动）
-- `loguru`, `opencv-python`, `qrcode`, `segno`, `requests`
-
-`requirements.txt` 仅作历史兼容，不是主安装入口。
-
-### 浏览器驱动
-
-```bash
-PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium
-```
-
-### conf.py
-
-```bash
-cp conf.example.py conf.py
-```
-
-常用配置项：`LOCAL_CHROME_PATH`、`LOCAL_CHROME_HEADLESS`、`DEBUG_MODE`。
-
-### Bilibili biliup
-
-首次运行 B站 发布时自动下载 `biliup`，后续自动检查 release 更新。用户无需手动安装。国内网络访问 GitHub Release 较慢时可使用 `https://gh-proxy.com/` 或 `https://gh-proxy.org/` 辅助。
-
-## 配置原则
+## 配置
 
 ### publish_config.ini 关键字段
 
@@ -99,7 +60,7 @@ content_type = video          # video=视频, note=图文
 title =                       # 标题（所有平台共用）
 desc =                        # 描述，支持\n换行
 tags =                        # 话题标签，英文逗号分隔
-video_file =                  # 视频路径（相对项目根目录）
+video_file =                  # 视频路径
 images =                      # 图文图片路径，英文逗号分隔
 publish_strategy = immediate  # immediate=立即, scheduled=定时
 publish_time =                # 定时发布时间 YYYY-MM-DD HH:MM
@@ -117,32 +78,60 @@ weibo_account = cookies/weibo_uploader/account1.json  # 微博支持逗号分隔
 
 - **长期保留**：各平台账号文件路径（`*_account`）
 - **每次发布前必须重新设置**：`enabled`、`title`、`desc`、`tags`、`video_file`/`images`、`publish_strategy`、`publish_time`、`start_from`
-- 发布流程结束后，`hgsau` 会自动清空一次性任务字段，避免下次沿用旧配置
+- 发布流程结束后，`hgsau` 自动清空一次性任务字段，避免下次沿用旧配置
 
-### 命令行临时覆盖
+## 调用
 
 ```bash
---config publish_config.ini    # 指定配置文件
---platforms douyin,weibo       # 覆盖启用平台
---video videos/demo.mp4        # 覆盖视频路径
---title "标题"                  # 覆盖标题
---desc "简介"                   # 覆盖描述
---tags 运动,训练               # 覆盖标签
---schedule "2026-03-24 21:30"  # 覆盖定时发布
---start-from 5                 # 断点续传
---force                        # 强制重新生成视频配置
+hgsau                                  # 读取 publish_config.ini 执行完整发布
+hgsau --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
+hgsau --config my_publish_config.ini
+hgsau --start-from 5
+hgsau --force
+hgsau --version                        # 查看已安装版本
+hgsau --help                           # 全部参数说明（每个参数标注对应的 ini 字段）
 ```
 
-## 运行时行为
+命令行参数只作为本次运行的临时覆盖；也可以不写 ini，直接 `hgsau --platforms ... --video ...` 运行。
 
-`hgsau` 执行完整发布场景：
+## 读取结果
 
-1. 读取 `publish_config.ini`，合并命令行临时覆盖
-2. 运行环境预检（patchright、Chromium）
-3. 校验启用平台账号登录状态
-4. 按配置发布视频或图文内容
-5. 输出结果汇总（退出码表达整体结果）
-6. 清空一次性任务字段，保留账号文件配置
+### 退出码
+
+| 退出码 | 含义 | Agent 下一步 |
+| --- | --- | --- |
+| 0 | 全部平台发布成功 | 从汇总中提取结果链接汇报给用户 |
+| 1 | 部分平台成功、部分失败 | 读"发布结果"汇总，向用户汇报成败明细 |
+| 2 | 全部平台发布失败 | 读各平台 [PUB-xxx] 错误码，按建议动作处理 |
+| 10 | 配置错误 | 按 stderr 的 CFG-xxx 建议修配置或改用 CLI 覆盖参数 |
+| 11 | 环境错误 | 按 stderr 的 ENV-xxx 建议执行安装命令后重试 |
+| 12 | 账号未登录且扫码未完成 | 引导用户完成扫码登录后重试 |
+
+### 错误输出格式
+
+所有流程级错误输出到 stderr，格式固定：
+
+```
+[hgsau] <错误码>: <描述>。建议: <可执行的动作>
+```
+
+错误码体系：`CFG-xxx` 配置、`ENV-xxx` 环境、`AUTH-xxx` 登录、`PUB-<platform>` 平台发布失败（出现在"发布结果"汇总行中）。
+
+### 结果汇总格式
+
+发布结束打印稳定格式的汇总（stdout）：
+
+```
+========== 发布结果 ==========
+抖音: ✅ 成功
+微博: ❌ 失败 [PUB-weibo]: 上传超时
+
+========== 总体发布汇总 ==========
+成功: 1 次
+失败: 1 次
+```
+
+成功平台的分享链接写入 Excel 结果文件并显示在输出中。
 
 ## Agent 注意事项
 
@@ -150,5 +139,4 @@ weibo_account = cookies/weibo_uploader/account1.json  # 微博支持逗号分隔
 - 当登录流程生成本地二维码图片时，应直接展示图片或明确告诉用户打开哪个本地图片扫码，不要只回传路径。
 - Bilibili 等需要真实交互的登录场景，不要在非交互环境里强行代跑；应指导用户在本地真实终端完成扫码后再继续发布。
 - 微博多账号发布时，同一视频会为每个账号各发一遍。
-- 优先相信 `pyproject.toml`，不要把 `requirements.txt` 视为主线真相。
 - 本项目文档中文优先，不维护国际化文案。

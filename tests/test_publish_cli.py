@@ -174,5 +174,20 @@ class PublishCliHelpTextTests(unittest.TestCase):
             self.assertIn(fragment, help_text)
 
 
+class SkillDocBlackboxTests(unittest.TestCase):
+    SKILL_PATH = Path("skills/hgsau-cli/SKILL.md")
+
+    def test_no_repo_references(self):
+        text = self.SKILL_PATH.read_text(encoding="utf-8")
+        for forbidden in ["-e .", "conf.example.py", "pyproject.toml", "requirements.txt", "publish_all", "uv pip"]:
+            self.assertNotIn(forbidden, text, f"SKILL.md 不应包含仓库实现细节: {forbidden}")
+
+    def test_documents_exit_codes_and_install(self):
+        text = self.SKILL_PATH.read_text(encoding="utf-8")
+        self.assertIn("pip install hgsau", text)
+        for code_doc in ["10", "11", "12", "CFG-", "ENV-", "AUTH-", "PUB-"]:
+            self.assertIn(code_doc, text)
+
+
 if __name__ == "__main__":
     unittest.main()

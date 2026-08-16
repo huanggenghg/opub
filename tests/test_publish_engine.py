@@ -92,7 +92,7 @@ class PublishEngineTests(unittest.TestCase):
         self.assertEqual(merged["start_from"], 3)
         self.assertTrue(merged["force"])
 
-    def test_run_publish_sync_returns_1_when_config_has_no_enabled_platforms(self):
+    def test_run_publish_sync_returns_config_error_when_config_has_no_enabled_platforms(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "publish_config.ini"
             config_path.write_text(
@@ -107,7 +107,7 @@ class PublishEngineTests(unittest.TestCase):
 
             code = publish_all.run_publish_sync(str(config_path))
 
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 10)
 
     def test_run_publish_sync_resets_task_fields_after_config_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -177,7 +177,7 @@ class PublishEngineTests(unittest.TestCase):
         with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)):
             with patch("publish.orchestrator.get_video_files", return_value=["videos/demo.mp4"]):
                 with patch("publish.orchestrator.get_video_content", return_value=("标题", "描述")) as get_video_content:
-                    with patch("publish.orchestrator.publish_one_item", new=AsyncMock(return_value={})) as publish_one_item:
+                    with patch("publish.orchestrator.publish_one_item", new=AsyncMock(return_value={"weibo": {"success": True}})) as publish_one_item:
                         code = asyncio.run(publish_all.run_publish_with_params(params))
 
         self.assertEqual(code, 0)
@@ -209,7 +209,7 @@ class PublishEngineTests(unittest.TestCase):
         with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)) as preflight:
             code = asyncio.run(publish_all.run_publish_with_params(params))
 
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 10)
         preflight.assert_not_awaited()
 
     def test_run_publish_with_params_note_mode_without_conversion_publishes_via_images(self):
@@ -261,7 +261,7 @@ class PublishEngineTests(unittest.TestCase):
         with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)) as preflight:
             code = asyncio.run(publish_all.run_publish_with_params(params))
 
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 10)
         preflight.assert_not_awaited()
 
     def test_publish_to_douyin_marks_restriction_as_account_issue(self):
@@ -485,7 +485,7 @@ class PublishFailurePolicyTests(unittest.TestCase):
         self.assertFalse(results["douyin"]["success"])
         self.assertTrue(results["weibo"]["success"])
 
-    def test_run_publish_with_params_returns_one_when_any_publish_fails(self):
+    def test_run_publish_with_params_returns_all_fail_when_all_publish_fail(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video_path = Path(tmp_dir) / "demo.mp4"
             video_path.write_bytes(b"video")
@@ -511,7 +511,7 @@ class PublishFailurePolicyTests(unittest.TestCase):
                 code = publish_all.run_async_for_test(publish_all.run_publish_with_params(params))
 
         publish_one_item.assert_awaited_once()
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
 
 
 if __name__ == "__main__":

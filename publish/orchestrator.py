@@ -25,7 +25,7 @@ from publish.dispatch import (
     platform_requires_account_login,
     publish_to_platform,
 )
-from publish.errors import EXIT_CONFIG_ERROR, print_error
+from publish.errors import EXIT_CONFIG_ERROR, EXIT_ENV_ERROR, print_error
 from publish.reporter import print_header, print_results, print_summary
 from publish.runtime import runtime_preflight
 
@@ -124,7 +124,7 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
             print(f"[OK] 视频已生成: {video_path}\n")
         except Exception as e:
             print_error("ENV-005", f"图片转视频失败: {e}", "安装 ffmpeg 后重试（macOS: brew install ffmpeg; Ubuntu: sudo apt-get install ffmpeg）")
-            return 11  # ENV 错误，Task 4 会替换为 EXIT_ENV_ERROR 常量
+            return EXIT_ENV_ERROR
 
     # 图文模式(不转视频):不依赖 video_file,直接以 images 发布
     if params["content_type"] == "note":
@@ -133,8 +133,8 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
             return EXIT_CONFIG_ERROR
 
         if not await runtime_preflight():
-            print("❌ 错误: 运行环境检查失败")
-            return 1
+            print_error("ENV-004", "运行环境检查失败", "按上方 ENV 错误码中的建议命令安装后重试")
+            return EXIT_ENV_ERROR
 
         title, desc = fill_empty_content(params["title"], params["desc"])
         note_params = {**params, "title": title, "desc": desc}
@@ -158,7 +158,7 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
 
     if not await runtime_preflight():
         print_error("ENV-004", "运行环境检查失败", "按上方 ENV 错误码中的建议命令安装后重试")
-        return 11  # Task 4 替换为 EXIT_ENV_ERROR
+        return EXIT_ENV_ERROR
 
     print(f"找到 {len(video_files)} 个视频文件:")
     for vf in video_files:

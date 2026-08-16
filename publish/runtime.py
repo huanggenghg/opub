@@ -8,6 +8,8 @@ import sys
 from importlib import import_module
 from pathlib import Path
 
+from publish.errors import print_error
+
 
 def run_async_for_test(coro):
     return asyncio.run(coro)
@@ -97,15 +99,15 @@ async def runtime_preflight() -> bool:
     print("运行环境预检")
 
     if sys.version_info < (3, 9):
-        print("运行环境检查失败: 需要 Python 3.9 或更高版本", file=sys.stderr)
+        print_error("ENV-001", "需要 Python 3.9 或更高版本", f"当前为 {'.'.join(map(str, sys.version_info[:3]))}，请安装 Python 3.9+ 后重试")
         return False
 
     if not patchright_available():
-        print("运行环境检查失败: 未安装 patchright", file=sys.stderr)
+        print_error("ENV-002", "未安装 patchright", "运行 pip install hgsau --upgrade 重新安装")
         return False
 
     if not sync_python_dependencies():
-        print("运行环境检查失败: 依赖同步失败,请手动运行 pip install -r requirements.txt", file=sys.stderr)
+        print_error("ENV-003", "Python 依赖同步失败", "运行 pip install -r requirements.txt 后重试")
         return False
     print("Python 依赖已同步")
 
@@ -118,5 +120,9 @@ async def runtime_preflight() -> bool:
         print("Patchright Chromium 安装成功")
         return True
 
-    print("运行环境检查失败: Patchright Chromium 安装失败", file=sys.stderr)
+    print_error(
+        "ENV-004",
+        "Patchright Chromium 安装失败",
+        '运行 PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium',
+    )
     return False

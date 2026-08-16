@@ -1,6 +1,6 @@
 ---
 name: hgsau-cli
-description: Use when 用户要用 hgsau 发布/上传视频、配置多平台发布、发布到抖音/小红书/快手/微博/B站/视频号/百家号/TikTok，或排查 hgsau、publish_config.ini、账号登录校验、浏览器驱动环境问题
+description: Use when 用户要用 hgsau 发布/上传视频、配置多平台发布、发布到抖音/小红书/快手/微博/B站/视频号/百家号，或排查 hgsau、publish_config.ini、账号登录校验、浏览器驱动环境问题
 ---
 
 # hgsau CLI 使用指南
@@ -20,7 +20,7 @@ hgsau
 当用户表达下面任一意图时使用本 skill：
 
 - 发布视频、上传视频、一键发布、多平台发布
-- 发布到抖音、小红书、快手、微博、B站、视频号、百家号或 TikTok
+- 发布到抖音、小红书、快手、微博、B站、视频号、百家号
 - 配置发布平台、账号、cookie、登录校验、扫码登录
 - 排查 `hgsau`、`publish_config.ini`、patchright、Chromium 或浏览器驱动问题
 

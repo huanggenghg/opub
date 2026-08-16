@@ -6,10 +6,15 @@
 
 当前主线已接入的平台：
 
-- `bilibili`
-- `douyin`
-- `kuaishou`
-- `xiaohongshu`
+- `douyin`（抖音）
+- `xiaohongshu`（小红书）
+- `kuaishou`（快手）
+- `bilibili`（B站）
+- `tencent`（微信视频号）
+- `baijiahao`（百家号）
+- `weibo`（微博，支持多账号）
+
+以上平台均已通过真实发布端到端验证。TikTok 等国际化平台暂不在主线范围内。
 
 ## 这份文档解决什么问题
 
@@ -38,10 +43,13 @@
 
 这是一个多平台社交媒体自动发布项目。当前主线已经接入：
 
-- bilibili
-- douyin
-- kuaishou
-- xiaohongshu
+- `douyin`（抖音）
+- `xiaohongshu`（小红书）
+- `kuaishou`（快手）
+- `bilibili`（B站）
+- `tencent`（微信视频号）
+- `baijiahao`（百家号）
+- `weibo`（微博，支持多账号）
 
 你的第一目标不是通读全部源码，也不是优先运行历史 examples，而是先把项目安装到“可运行、可验证、可继续执行任务”的状态。
 
@@ -124,7 +132,7 @@
 - 再发完整启动提示词
 - 后续按“安装 -> 验证 -> 登录 -> 上传”顺序继续给任务
 
-## 为什么不按平台拆四套提示词
+## 为什么不按平台拆多套提示词
 
 因为这个项目现在已经有统一的 CLI 主线。
 
@@ -137,12 +145,15 @@
 
 等进入执行阶段，再让 agent 根据你的实际目标去选择：
 
-- `bilibili`
 - `douyin`
-- `kuaishou`
 - `xiaohongshu`
+- `kuaishou`
+- `bilibili`
+- `tencent`
+- `baijiahao`
+- `weibo`
 
-这样比给用户准备四套平台 prompt 更稳，也更容易维护。
+这样比给用户准备多套平台 prompt 更稳，也更容易维护。
 
 ## 快速开始
 

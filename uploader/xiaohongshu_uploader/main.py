@@ -286,32 +286,37 @@ async def get_share_link(page: Page) -> dict:
 
         try:
             clipboard_text = await page.evaluate('navigator.clipboard.readText()')
+            share_link = ""
+            note_id = ""
 
             if clipboard_text:
-                # 从剪贴板文本中提取URL（格式：标题 😆 口令 😆 URL）
-                share_link = clipboard_text
-                note_id = ""
-
-                # 尝试提取URL
-                url_match = re.search(r'https://[^\s]+', clipboard_text)
+                # 剪贴板可能是用户残留文本而非复制结果，必须校验出 URL 才算数
+                url_match = re.search(r'https?://[^\s]+', clipboard_text)
                 if url_match:
                     share_link = url_match.group(0)
-                    # 提取笔记ID
-                    match = re.search(r'/item/([a-f0-9]+)', share_link)
-                    if match:
-                        note_id = match.group(1)
 
+            if share_link:
+                match = re.search(r'/(?:item|explore)/([a-f0-9]+)', share_link)
+                if match:
+                    note_id = match.group(1)
                 xiaohongshu_logger.success(_msg("✅", f"获取到分享链接: {share_link}"))
-
-                return {
-                    "success": True,
-                    "share_link": share_link,
-                    "note_id": note_id,
-                    "message": "成功获取分享链接"
-                }
             else:
-                xiaohongshu_logger.warning(_msg("⚠️", "剪贴板内容为空"))
-                return {"success": False, "share_link": "", "note_id": "", "message": "剪贴板内容为空"}
+                # 复制未生效时退回当前笔记详情页 URL（页面已在详情页，URL 含笔记 ID）
+                page_match = re.search(r'/(?:explore|discovery/item|item)/([a-f0-9]+)', page.url)
+                if not page_match:
+                    msg = f"剪贴板与页面 URL 均未提取到链接，剪贴板内容: {clipboard_text!r}"
+                    xiaohongshu_logger.warning(_msg("⚠️", msg))
+                    return {"success": False, "share_link": "", "note_id": "", "message": msg}
+                note_id = page_match.group(1)
+                share_link = f"https://www.xiaohongshu.com/explore/{note_id}"
+                xiaohongshu_logger.warning(_msg("⚠️", f"剪贴板无链接，退回详情页 URL: {share_link}"))
+
+            return {
+                "success": True,
+                "share_link": share_link,
+                "note_id": note_id,
+                "message": "成功获取分享链接"
+            }
 
         except Exception as e:
             xiaohongshu_logger.error(_msg("❌", f"读取剪贴板失败: {e}"))

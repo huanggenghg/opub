@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import io
 import unittest
@@ -5,6 +6,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import publish_all
+
+from publish.errors import EXIT_CONFIG_ERROR
 
 
 class PublishCliPackagingTests(unittest.TestCase):
@@ -98,6 +101,43 @@ class PublishCliVersionTests(unittest.TestCase):
                 parser.parse_args(["--version"])
         self.assertEqual(ctx.exception.code, 0)
         self.assertRegex(stdout.getvalue(), r"^hgsau \d+\.\d+\.\d+")
+
+
+class PublishCliConfigErrorTests(unittest.TestCase):
+    def _run(self, params):
+        coro = publish_all.run_publish_with_params(params)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            with contextlib.redirect_stderr(stderr):
+                code = asyncio.run(coro)
+        return code, stderr.getvalue()
+
+    def test_no_enabled_platforms_returns_config_error(self):
+        params = publish_all.default_params_from_overrides()
+        code, stderr = self._run(params)
+        self.assertEqual(code, EXIT_CONFIG_ERROR)
+        self.assertIn("CFG-002", stderr)
+
+    def test_note_mode_without_images_returns_config_error(self):
+        params = publish_all.default_params_from_overrides()
+        params.update(content_type="note", enabled_platforms=["douyin"], images=[])
+        code, stderr = self._run(params)
+        self.assertEqual(code, EXIT_CONFIG_ERROR)
+        self.assertIn("CFG-004", stderr)
+
+    def test_video_mode_missing_video_returns_config_error(self):
+        params = publish_all.default_params_from_overrides()
+        params.update(content_type="video", enabled_platforms=["douyin"], video_file="no_such_video.mp4")
+        code, stderr = self._run(params)
+        self.assertEqual(code, EXIT_CONFIG_ERROR)
+        self.assertIn("CFG-003", stderr)
+
+    def test_convert_to_video_without_images_returns_config_error(self):
+        params = publish_all.default_params_from_overrides()
+        params.update(content_type="note", convert_to_video=True, enabled_platforms=["douyin"], images=[])
+        code, stderr = self._run(params)
+        self.assertEqual(code, EXIT_CONFIG_ERROR)
+        self.assertIn("CFG-004", stderr)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ from publish.dispatch import (
     platform_requires_account_login,
     publish_to_platform,
 )
+from publish.errors import EXIT_CONFIG_ERROR, print_error
 from publish.reporter import print_header, print_results, print_summary
 from publish.runtime import runtime_preflight
 
@@ -96,8 +97,8 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
 
 async def run_publish_with_params(params: Dict[str, Any]) -> int:
     if not params["enabled_platforms"]:
-        print("❌ 错误: 未配置启用平台")
-        return 1
+        print_error("CFG-002", "未配置启用平台", "在 publish_config.ini [platforms] enabled= 设置，或使用 --platforms 覆盖")
+        return EXIT_CONFIG_ERROR
 
     # 注意：标题为空时，会在视频处理流程中自动生成或使用模板填充
     # 不在此处检查标题，让 get_video_content() 处理
@@ -105,8 +106,8 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
     # 处理图文转视频
     if params["content_type"] == "note" and params["convert_to_video"]:
         if not params["images"]:
-            print("❌ 错误: 图文转视频需要提供图片")
-            return 1
+            print_error("CFG-004", "图文转视频需要提供图片", "在 publish_config.ini [common] images= 设置图片路径（英文逗号分隔）")
+            return EXIT_CONFIG_ERROR
 
         print("正在将图片转换为视频...")
         try:
@@ -122,14 +123,14 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
             params["video_file"] = video_path
             print(f"[OK] 视频已生成: {video_path}\n")
         except Exception as e:
-            print(f"[ERROR] 图片转视频失败: {e}")
-            return 1
+            print_error("ENV-005", f"图片转视频失败: {e}", "安装 ffmpeg 后重试（macOS: brew install ffmpeg; Ubuntu: sudo apt-get install ffmpeg）")
+            return 11  # ENV 错误，Task 4 会替换为 EXIT_ENV_ERROR 常量
 
     # 图文模式(不转视频):不依赖 video_file,直接以 images 发布
     if params["content_type"] == "note":
         if not params["images"]:
-            print("❌ 错误: 图文模式需要提供图片")
-            return 1
+            print_error("CFG-004", "图文模式需要提供图片", "在 publish_config.ini [common] images= 设置图片路径（英文逗号分隔）")
+            return EXIT_CONFIG_ERROR
 
         if not await runtime_preflight():
             print("❌ 错误: 运行环境检查失败")
@@ -152,12 +153,12 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
     # 获取视频文件列表
     video_files = get_video_files(params["video_file"])
     if not video_files:
-        print("❌ 错误: 未找到视频文件")
-        return 1
+        print_error("CFG-003", f"未找到视频文件: {params['video_file']}", "检查 [common] video_file= 路径或使用 --video 覆盖")
+        return EXIT_CONFIG_ERROR
 
     if not await runtime_preflight():
-        print("❌ 错误: 运行环境检查失败")
-        return 1
+        print_error("ENV-004", "运行环境检查失败", "按上方 ENV 错误码中的建议命令安装后重试")
+        return 11  # Task 4 替换为 EXIT_ENV_ERROR
 
     print(f"找到 {len(video_files)} 个视频文件:")
     for vf in video_files:
@@ -216,9 +217,8 @@ async def run_publish(
         reset_task_fields_after_run = True
     else:
         if overrides is None or overrides.platforms is None or overrides.video is None:
-            print(f"❌ 错误: 配置文件不存在: {config_path}")
-            print("请提供配置文件，或同时指定 --platforms 和 --video")
-            return 1
+            print_error("CFG-001", f"配置文件不存在: {config_path}", "提供 --config 指定配置文件，或同时指定 --platforms 和 --video")
+            return EXIT_CONFIG_ERROR
         params = default_params_from_overrides()
         reset_task_fields_after_run = False
 

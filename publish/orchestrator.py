@@ -5,6 +5,7 @@ import asyncio
 import os
 import sys
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
@@ -254,6 +255,11 @@ def build_parser() -> argparse.ArgumentParser:
         prog="hgsau",
         description="CLI for social-auto-upload.",
     )
+    try:
+        _version = pkg_version("hgsau")
+    except PackageNotFoundError:
+        _version = "0.0.0.dev0"
+    parser.add_argument("--version", action="version", version=f"hgsau {_version}")
     parser.add_argument("--config", default="publish_config.ini", help="Config file path (default: publish_config.ini)")
     parser.add_argument("--platforms", default=None, help="Override enabled platforms, comma-separated")
     parser.add_argument("--video", default=None, help="Override video file/directory path")

@@ -89,5 +89,16 @@ class PublishCliParserTests(unittest.TestCase):
         self.assertNotIn("Traceback", stderr.getvalue())
 
 
+class PublishCliVersionTests(unittest.TestCase):
+    def test_version_flag_prints_version_and_exits_zero(self):
+        parser = publish_all.build_parser()
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as ctx:
+                parser.parse_args(["--version"])
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertRegex(stdout.getvalue(), r"^hgsau \d+\.\d+\.\d+")
+
+
 if __name__ == "__main__":
     unittest.main()

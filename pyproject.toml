@@ -33,9 +33,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/huanggenghg/social-auto-upload"
-Repository = "https://github.com/huanggenghg/social-auto-upload"
-Issues = "https://github.com/huanggenghg/social-auto-upload/issues"
+Homepage = "https://github.com/huanggenghg/opub"
+Repository = "https://github.com/huanggenghg/opub"
+Issues = "https://github.com/huanggenghg/opub/issues"
 
 [project.scripts]
 opub = "publish_all:main"

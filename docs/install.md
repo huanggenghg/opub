@@ -14,8 +14,8 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/dreammis/social-auto-upload.git
-cd social-auto-upload
+git clone https://github.com/huanggenghg/opub.git
+cd opub
 ```
 
 ### 2. 创建虚拟环境

@@ -5,7 +5,7 @@ repository.
 
 ## Project
 
-`social-auto-upload` is a multi-platform social media publishing automation
+`opub` is a multi-platform social media publishing automation
 project. The current mainline workflow is the unified Python CLI entrypoint
 `opub`.
 

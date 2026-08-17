@@ -27,7 +27,7 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 # Ubuntu/Debian: sudo apt-get install ffmpeg
 ```
 
-首次运行会自动在 `~/.social-auto-upload/` 创建数据目录（cookies、配置），无需手动初始化。可用环境变量 `SAU_HOME` 指定其他数据目录。
+首次运行会自动在 `~/.social-auto-upload/` 创建数据目录（cookies 等），无需手动初始化。可用环境变量 `SAU_HOME` 指定其他数据目录。
 
 ## 已验证平台（7个）
 
@@ -51,6 +51,10 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 - 排查 `hgsau`、`publish_config.ini`、Chromium 或浏览器驱动问题
 
 ## 配置
+
+### 配置文件位置
+
+默认配置文件是数据目录下的 `publish_config.ini`（pip 模式即 `~/.social-auto-upload/publish_config.ini`，随 `SAU_HOME` 变化）；不存在时需用 `--config` 指定路径，或直接用 `--platforms` + `--video` 命令行运行。配置文件需手动创建，不会自动生成。
 
 ### publish_config.ini 关键字段
 
@@ -92,7 +96,7 @@ hgsau --version                        # 查看已安装版本
 hgsau --help                           # 全部参数说明（每个参数标注对应的 ini 字段）
 ```
 
-命令行参数只作为本次运行的临时覆盖；也可以不写 ini，直接 `hgsau --platforms ... --video ...` 运行。
+命令行参数只作为本次运行的临时覆盖；也可以不写 ini，直接 `hgsau --platforms ... --video ...` 运行。使用 `--schedule` 时本次运行自动切换为定时发布，无需在 ini 中设置 `publish_strategy = scheduled`。
 
 ## 读取结果
 

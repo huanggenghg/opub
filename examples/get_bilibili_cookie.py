@@ -10,7 +10,7 @@ from conf import BASE_DIR
 if __name__ == "__main__":
     # 建议直接在本地真实终端里运行这个脚本。
     # 如果终端里的二维码显示不完整，可以打开当前目录下的 qrcode.png 扫码。
-    cli_path = Path(BASE_DIR) / "hgsau_cli.py"
+    cli_path = Path(BASE_DIR) / "opub_cli.py"
     subprocess.run(
         [
             sys.executable,

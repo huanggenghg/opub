@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 class PackageBuildTest(unittest.TestCase):
-    def test_wheel_contains_hgsau_entry_modules(self):
+    def test_wheel_contains_opub_entry_modules(self):
         repo_root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
             subprocess.run(
@@ -27,12 +27,12 @@ class PackageBuildTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 text=True,
             )
-            wheel = next(Path(tmpdir).glob("hgsau-*.whl"))
+            wheel = next(Path(tmpdir).glob("opub-*.whl"))
             with zipfile.ZipFile(wheel) as archive:
                 names = set(archive.namelist())
 
         self.assertIn("conf.py", names)
-        self.assertNotIn("hgsau_cli.py", names)
+        self.assertNotIn("opub_cli.py", names)
         self.assertIn("publish_all.py", names)
         self.assertNotIn("sau_cli.py", names)
 

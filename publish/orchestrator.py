@@ -275,14 +275,14 @@ def _schedule_value(value: str) -> datetime:
 def build_parser() -> argparse.ArgumentParser:
     schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     parser = argparse.ArgumentParser(
-        prog="hgsau",
+        prog="opub",
         description="把视频/图文一键发布到抖音/小红书/快手/微博/B站/视频号/百家号。无参数时读取 publish_config.ini 执行完整发布。",
     )
     try:
-        _version = pkg_version("hgsau")
+        _version = pkg_version("opub")
     except PackageNotFoundError:
         _version = "0.0.0.dev0"
-    parser.add_argument("--version", action="version", version=f"hgsau {_version}")
+    parser.add_argument("--version", action="version", version=f"opub {_version}")
     parser.add_argument("--config", default="publish_config.ini", help="配置文件路径 (默认: publish_config.ini)")
     parser.add_argument("--platforms", default=None, help="临时覆盖启用平台，逗号分隔 (对应 [platforms] enabled)")
     parser.add_argument("--video", default=None, help="临时覆盖视频文件/目录路径 (对应 [common] video_file)")

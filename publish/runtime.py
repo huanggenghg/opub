@@ -103,7 +103,7 @@ async def runtime_preflight() -> bool:
         return False
 
     if not patchright_available():
-        print_error("ENV-002", "未安装 patchright", "运行 pip install hgsau --upgrade 重新安装")
+        print_error("ENV-002", "未安装 patchright", "运行 pip install opub --upgrade 重新安装")
         return False
 
     if not sync_python_dependencies():

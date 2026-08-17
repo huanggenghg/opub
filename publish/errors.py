@@ -11,4 +11,4 @@ EXIT_AUTH_ERROR = 12
 
 
 def print_error(code: str, message: str, action: str) -> None:
-    print(f"[hgsau] {code}: {message}。建议: {action}", file=sys.stderr)
+    print(f"[opub] {code}: {message}。建议: {action}", file=sys.stderr)

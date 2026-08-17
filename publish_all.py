@@ -3,7 +3,7 @@
 
 实际代码在 publish/ 包内。此文件保留用于:
 - python publish_all.py 入口
-- hgsau 控制台脚本(publish_all:main)
+- opub 控制台脚本(publish_all:main)
 - 测试 import 兼容(publish_all.X)
 """
 import os

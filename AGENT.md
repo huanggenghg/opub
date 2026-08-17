@@ -7,7 +7,7 @@ repository.
 
 `social-auto-upload` is a multi-platform social media publishing automation
 project. The current mainline workflow is the unified Python CLI entrypoint
-`hgsau`.
+`opub`.
 
 Mainline platforms:
 
@@ -20,7 +20,7 @@ Mainline platforms:
 
 - Treat the repository root as the working directory.
 - Prefer `uv` for Python environment and dependency management.
-- Prefer `publish_config.ini` plus `hgsau` over legacy example scripts
+- Prefer `publish_config.ini` plus `opub` over legacy example scripts
   or platform-specific command flows.
 - Do not default to historical `examples/` or old Web flows unless the CLI path
   is unavailable for the task.
@@ -62,7 +62,7 @@ cp conf.example.py conf.py
 After setup, verify the unified CLI entrypoint:
 
 ```bash
-hgsau --help
+opub --help
 ```
 
 Report:
@@ -77,7 +77,7 @@ Report:
 `publish_config.ini` is the primary control file. Account file mappings can
 persist there, but enabled platforms, content, asset paths, tags, scheduling,
 and other publish-task fields are one-time task state. Set them explicitly for
-each publish run; `hgsau` resets those task fields after it runs.
+each publish run; `opub` resets those task fields after it runs.
 
 ## 快速开始
 
@@ -85,16 +85,16 @@ each publish run; `hgsau` resets those task fields after it runs.
 2. 执行统一发布入口：
 
 ```bash
-hgsau
+opub
 ```
 
 如需临时覆盖配置：
 
 ```bash
-hgsau --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
+opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 ```
 
-`hgsau` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
+`opub` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
 
 ## Runtime Notes
 
@@ -109,11 +109,11 @@ hgsau --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 - `docs/CLI.md`
 - `docs/update.md`
 - `docs/agent-bootstrap.md`
-- `skills/hgsau-cli/`
+- `skills/opub-cli/`
 
 ## Notes For Maintenance
 
-- The CLI wrapper is intentionally thin around `hgsau`.
+- The CLI wrapper is intentionally thin around `opub`.
 - `publish_all.py` owns config loading, runtime preflight, account login checks,
   publishing, and summary output.
 - Browser automation lives under `uploader/` and related utility modules.

@@ -10,13 +10,13 @@ _PROJECT_ROOT = Path(__file__).parent.resolve()
 def _detect_mode() -> Path:
     """SAU_HOME 环境变量始终优先。
     开发模式：项目根有 .git 目录 → BASE_DIR = 项目根
-    pip 模式：→ BASE_DIR = ~/.social-auto-upload/"""
+    pip 模式：→ BASE_DIR = ~/.opub/"""
     sau_home = os.environ.get("SAU_HOME", "").strip()
     if sau_home:
         return Path(sau_home).resolve()
     if (_PROJECT_ROOT / ".git").is_dir():
         return _PROJECT_ROOT
-    home_dir = Path.home() / ".social-auto-upload"
+    home_dir = Path.home() / ".opub"
     return home_dir
 
 

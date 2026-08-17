@@ -3,7 +3,7 @@
 项目现在提供一个统一的 CLI 入口：
 
 ```bash
-hgsau
+opub
 ```
 
 `publish_config.ini` 是主要控制文件，用于描述账号文件和本次发布任务。
@@ -20,9 +20,9 @@ hgsau
 
 实现说明：
 
-- CLI 包装层很薄，只负责解析 `hgsau` 参数。
+- CLI 包装层很薄，只负责解析 `opub` 参数。
 - `publish_all.py` 是统一发布引擎，负责读取配置、合并临时覆盖、运行环境预检、账号登录校验、发布和结果汇总。
-- 如果需要给 OpenClaw、Codex 等 agent 使用，可参考仓库内 skill：`skills/hgsau-cli/`
+- 如果需要给 OpenClaw、Codex 等 agent 使用，可参考仓库内 skill：`skills/opub-cli/`
 
 ## 安装 CLI 入口
 
@@ -35,7 +35,7 @@ uv pip install -e .
 安装后就可以使用：
 
 ```bash
-hgsau --help
+opub --help
 ```
 
 ## 快速开始
@@ -44,16 +44,16 @@ hgsau --help
 2. 执行统一发布入口：
 
 ```bash
-hgsau
+opub
 ```
 
 如需临时覆盖配置：
 
 ```bash
-hgsau --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
+opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 ```
 
-`hgsau` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
+`opub` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
 发布流程结束后，会自动清空一次性任务字段，包括启用平台、标题、描述、标签、素材路径、定时发布时间和起始序号；账号文件配置会保留。
 
 ## 常用覆盖参数
@@ -89,7 +89,7 @@ hgsau --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 
 ## 运行时行为
 
-`hgsau` 执行完整发布场景：
+`opub` 执行完整发布场景：
 
 1. 读取 `publish_config.ini`。
 2. 合并命令行临时覆盖参数。
@@ -103,4 +103,4 @@ hgsau --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 
 本项目不维护国际化文档，当前文档以中文优先。
 
-后续维护 CLI 时，优先看统一 CLI 包装层、`publish_all.py`、`uploader/` 和 `skills/hgsau-cli/`。
+后续维护 CLI 时，优先看统一 CLI 包装层、`publish_all.py`、`uploader/` 和 `skills/opub-cli/`。

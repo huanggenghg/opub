@@ -20,8 +20,8 @@ class RuntimePreflightErrorTests(unittest.TestCase):
         with patch.object(runtime, "patchright_available", return_value=False):
             ok, stderr = _run_preflight()
         self.assertFalse(ok)
-        self.assertIn("[hgsau] ENV-002", stderr)
-        self.assertIn("pip install hgsau", stderr)
+        self.assertIn("[opub] ENV-002", stderr)
+        self.assertIn("pip install opub", stderr)
 
     def test_chromium_install_failure_reports_env_004(self):
         with patch.object(runtime, "patchright_available", return_value=True), \
@@ -30,14 +30,14 @@ class RuntimePreflightErrorTests(unittest.TestCase):
              patch.object(runtime, "install_patchright_chromium", return_value=False):
             ok, stderr = _run_preflight()
         self.assertFalse(ok)
-        self.assertIn("[hgsau] ENV-004", stderr)
+        self.assertIn("[opub] ENV-004", stderr)
         self.assertIn("patchright install chromium", stderr)
 
     def test_python_version_reports_env_001(self):
         with patch.object(runtime.sys, "version_info", (3, 8, 0)):
             ok, stderr = _run_preflight()
         self.assertFalse(ok)
-        self.assertIn("[hgsau] ENV-001", stderr)
+        self.assertIn("[opub] ENV-001", stderr)
 
 
 if __name__ == "__main__":

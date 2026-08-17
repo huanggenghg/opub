@@ -12,7 +12,7 @@ if __name__ == '__main__':
     files = list(folder_path.glob("*.mp4"))
     file_num = len(files)
     publish_datetimes = generate_schedule_time_next_day(file_num, 1, daily_times=[16])
-    cli_path = Path(BASE_DIR) / "hgsau_cli.py"
+    cli_path = Path(BASE_DIR) / "opub_cli.py"
 
     for index, file in enumerate(files):
         title, tags = get_title_and_hashtags(str(file))

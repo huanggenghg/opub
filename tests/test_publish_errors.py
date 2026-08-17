@@ -30,7 +30,7 @@ class PrintErrorTests(unittest.TestCase):
             print_error("CFG-001", "配置文件不存在: /tmp/x.ini", "提供 --config 或同时指定 --platforms 和 --video")
         self.assertEqual(
             stderr.getvalue(),
-            "[hgsau] CFG-001: 配置文件不存在: /tmp/x.ini。建议: 提供 --config 或同时指定 --platforms 和 --video\n",
+            "[opub] CFG-001: 配置文件不存在: /tmp/x.ini。建议: 提供 --config 或同时指定 --platforms 和 --video\n",
         )
 
 

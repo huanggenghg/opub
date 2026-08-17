@@ -1,7 +1,7 @@
 """
 当前主线仅提供统一发布入口：
 
-    hgsau publish
+    opub publish
 
 发布流程会按平台配置校验登录状态；这个脚本仅保留为小红书 uploader 的调试直连路径。
 """

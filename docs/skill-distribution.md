@@ -9,13 +9,13 @@
 仓库只保留一个公开 CLI 工作流：
 
 ```bash
-hgsau
+opub
 ```
 
 对应的 agent skill 也只保留一个：
 
 ```text
-skills/hgsau-cli/SKILL.md
+skills/opub-cli/SKILL.md
 ```
 
 ## 为什么收敛
@@ -27,8 +27,8 @@ skills/hgsau-cli/SKILL.md
 当前职责划分是：
 
 - `publish_config.ini` 负责声明平台、账号、素材、标题、简介、标签和定时发布。
-- `hgsau` 负责读取配置、运行环境预检、账号登录校验、发布和结果汇总。
-- `skills/hgsau-cli/SKILL.md` 负责告诉 agent 只使用统一入口。
+- `opub` 负责读取配置、运行环境预检、账号登录校验、发布和结果汇总。
+- `skills/opub-cli/SKILL.md` 负责告诉 agent 只使用统一入口。
 
 ## 分发方式
 
@@ -36,11 +36,11 @@ skills/hgsau-cli/SKILL.md
 
 如果后续需要正式分发，可以选择：
 
-- 继续随仓库提供 `skills/hgsau-cli/`。
-- 在发布包中包含 `skills/hgsau-cli/` 资源。
-- 独立维护一个只包含 `hgsau-cli` 的 skill 仓库。
+- 继续随仓库提供 `skills/opub-cli/`。
+- 在发布包中包含 `skills/opub-cli/` 资源。
+- 独立维护一个只包含 `opub-cli` 的 skill 仓库。
 
-无论采用哪种方式，都应保持 skill 文档和真实 CLI 契约一致：只有 `hgsau` 是公开主入口。
+无论采用哪种方式，都应保持 skill 文档和真实 CLI 契约一致：只有 `opub` 是公开主入口。
 
 ## 发布前检查
 
@@ -48,7 +48,7 @@ skills/hgsau-cli/SKILL.md
 
 ```bash
 uv pip install -e .
-hgsau --help
+opub --help
 ```
 
 并扫描用户文档中是否仍出现旧入口关键字。

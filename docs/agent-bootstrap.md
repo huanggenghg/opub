@@ -57,22 +57,22 @@
 
 1. 默认把仓库根目录视为当前工作目录。
 2. 优先使用 `uv` 管理 Python 环境，不要默认回退到旧的 `requirements.txt`。
-3. 优先使用当前主线 CLI：`hgsau`。
+3. 优先使用当前主线 CLI：`opub`。
 4. 优先参考这些文档：
    - `docs/install.md`
    - `docs/CLI.md`
    - `docs/update.md`
 5. `publish_config.ini` 是主要控制文件。账号文件可以长期保留；内容、素材路径、启用平台、标题、简介、标签和定时发布是一次性任务字段，每次发布前都必须重新设置。
-6. 如果需要 agent skill，优先参考 `skills/hgsau-cli/`。
+6. 如果需要 agent skill，优先参考 `skills/opub-cli/`。
 7. 不要默认走历史 `examples/` 和旧 Web 路径，除非当前 CLI 主线不可用。
 8. 如果登录流程生成二维码图片，不要只返回图片路径；请直接展示图片，或者明确告诉我该打开哪个本地图片文件扫码。
 9. 如果是 Bilibili 登录，不要在非交互环境里强行代跑；应改为指导我在本地真实终端完成扫码。
 10. 首次环境准备时，先预热安装 Patchright Chromium：
    `PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium`
-11. 安装完成后，请优先验证 `hgsau --help`。
+11. 安装完成后，请优先验证 `opub --help`。
 12. 需要执行发布时，请先确认本次发布的平台、素材路径、标题、简介和标签都已经重新设置，然后运行：
-   `hgsau`
-13. `hgsau` 会自动完成运行环境预检、账号登录校验、发布和结果汇总，并在结束后清空一次性任务字段，避免下次沿用旧配置。
+   `opub`
+13. `opub` 会自动完成运行环境预检、账号登录校验、发布和结果汇总，并在结束后清空一次性任务字段，避免下次沿用旧配置。
 14. 完成后，请明确输出：
    - 你实际执行了哪些命令
    - 哪些验证通过了
@@ -123,7 +123,7 @@
 ### Codex
 
 - 建议先让它完成 bootstrap，再继续发平台任务
-- 让它优先使用 `docs/install.md`、`docs/CLI.md` 和 `skills/hgsau-cli/`
+- 让它优先使用 `docs/install.md`、`docs/CLI.md` 和 `skills/opub-cli/`
 - 不要让它一开始自由探索整个仓库，否则容易走到历史路径
 
 ### Claude Code / cc
@@ -161,15 +161,15 @@
 2. 执行统一发布入口：
 
 ```bash
-hgsau
+opub
 ```
 
 如需临时覆盖配置：
 
 ```bash
-hgsau --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
+opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 ```
 
-`hgsau` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
+`opub` 会自动完成运行环境预检、账号登录校验、发布和结果汇总。
 
 本项目不维护国际化文档，当前文档以中文优先。

@@ -3,8 +3,8 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hgsau"
-version = "0.4.7"
+name = "opub"
+version = "0.5.0"
 description = "Social media auto uploader"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,7 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Topic :: Multimedia :: Video",
 ]
-keywords = ["social-media", "auto-upload", "video", "douyin", "xiaohongshu", "kuaishou", "weibo"]
+keywords = ["social-media", "auto-upload", "video", "douyin", "xiaohongshu", "kuaishou", "weibo", "opub"]
 dependencies = [
   "loguru==0.7.3",
   "opencv-python>=4.13.0.92",
@@ -38,7 +38,7 @@ Repository = "https://github.com/huanggenghg/social-auto-upload"
 Issues = "https://github.com/huanggenghg/social-auto-upload/issues"
 
 [project.scripts]
-hgsau = "publish_all:main"
+opub = "publish_all:main"
 
 [tool.uv]
 package = true

@@ -16,7 +16,7 @@ GITHUB_RELEASE_API = "https://api.github.com/repos/biliup/biliup/releases/latest
 
 
 def get_biliup_runtime_root() -> Path:
-    return Path.home() / ".social-auto-upload" / "tools" / "biliup"
+    return Path.home() / ".opub" / "tools" / "biliup"
 
 
 def _normalize_system(system_name: str | None = None) -> str:
@@ -79,7 +79,7 @@ def fetch_latest_release() -> dict:
         GITHUB_RELEASE_API,
         headers={
             "Accept": "application/vnd.github+json",
-            "User-Agent": "social-auto-upload",
+            "User-Agent": "opub",
         },
         timeout=30,
     )

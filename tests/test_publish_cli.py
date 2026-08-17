@@ -12,24 +12,24 @@ from publish.orchestrator import exit_code_from_results
 
 
 class PublishCliPackagingTests(unittest.TestCase):
-    def test_pyproject_exposes_hgsau_pointing_to_publish_all(self):
+    def test_pyproject_exposes_opub_pointing_to_publish_all(self):
         pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
         py_modules_line = next(
             line for line in pyproject.splitlines() if line.startswith("py-modules = ")
         )
 
-        self.assertIn('name = "hgsau"', pyproject)
-        self.assertIn('hgsau = "publish_all:main"', pyproject)
-        self.assertNotIn("hgsau_cli", pyproject)
+        self.assertIn('name = "opub"', pyproject)
+        self.assertIn('opub = "publish_all:main"', pyproject)
+        self.assertNotIn("opub_cli", pyproject)
         self.assertEqual(py_modules_line, 'py-modules = ["conf", "publish_all"]')
 
     def test_publish_all_exposes_build_parser_and_main(self):
         self.assertTrue(hasattr(publish_all, "build_parser"))
         self.assertTrue(hasattr(publish_all, "main"))
 
-    def test_parser_prog_is_hgsau(self):
+    def test_parser_prog_is_opub(self):
         parser = publish_all.build_parser()
-        self.assertEqual(parser.prog, "hgsau")
+        self.assertEqual(parser.prog, "opub")
 
 
 class PublishCliParserTests(unittest.TestCase):
@@ -102,7 +102,7 @@ class PublishCliVersionTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 parser.parse_args(["--version"])
         self.assertEqual(ctx.exception.code, 0)
-        self.assertRegex(stdout.getvalue(), r"^hgsau \d+\.\d+\.\d+")
+        self.assertRegex(stdout.getvalue(), r"^opub \d+\.\d+\.\d+")
 
 
 class PublishCliConfigErrorTests(unittest.TestCase):
@@ -176,7 +176,7 @@ class PublishCliHelpTextTests(unittest.TestCase):
 
 
 class SkillDocBlackboxTests(unittest.TestCase):
-    SKILL_PATH = Path("skills/hgsau-cli/SKILL.md")
+    SKILL_PATH = Path("skills/opub-cli/SKILL.md")
 
     def test_no_repo_references(self):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
@@ -185,7 +185,7 @@ class SkillDocBlackboxTests(unittest.TestCase):
 
     def test_documents_exit_codes_and_install(self):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
-        self.assertIn("pip install hgsau", text)
+        self.assertIn("pip install opub", text)
         for code_doc in ["10", "11", "12", "CFG-", "ENV-", "AUTH-", "PUB-"]:
             self.assertIn(code_doc, text)
 

@@ -44,7 +44,7 @@ Install the editable package and run the unified publish entry:
 
 ```bash
 uv pip install -e .
-opub
+opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 ```
 
 All settings are provided as CLI arguments for each run:

@@ -23,6 +23,10 @@ class PublishOverrides:
     schedule: Optional[datetime] = None
     start_from: Optional[int] = None
     force: bool = False
+    note: bool = False
+    images: Optional[str] = None
+    convert_to_video: bool = False
+    video_duration: float = 5.0
 
 
 def read_config(config_file: str = "publish_config.ini") -> dict:
@@ -116,22 +120,26 @@ def _discover_account_files() -> Dict[str, str]:
     return platforms
 
 
-def default_params_from_overrides() -> Dict[str, Any]:
-    return {
-        "content_type": "video",
-        "title": "",
-        "desc": "",
-        "tags": [],
-        "video_file": "",
-        "images": [],
-        "publish_strategy": "immediate",
-        "publish_time": None,
-        "enabled_platforms": [],
+def default_params_from_overrides(overrides: Optional[PublishOverrides] = None) -> Dict[str, Any]:
+    overrides = overrides or PublishOverrides()
+    params: Dict[str, Any] = {
+        "content_type": "note" if overrides.note else "video",
+        "title": overrides.title or "",
+        "desc": overrides.desc or "",
+        "tags": _split_csv(overrides.tags),
+        "video_file": overrides.video or "",
+        "images": _split_csv(overrides.images),
+        "publish_strategy": "scheduled" if overrides.schedule else "immediate",
+        "publish_time": overrides.schedule,
+        "enabled_platforms": _split_csv(overrides.platforms),
         "platforms": _discover_account_files(),
-        "convert_to_video": False,
-        "video_duration": 5,
-        "start_from": 1,
+        "convert_to_video": overrides.convert_to_video,
+        "video_duration": overrides.video_duration,
+        "start_from": overrides.start_from if overrides.start_from else 1,
     }
+    if overrides.force:
+        params["force"] = True
+    return params
 
 
 def apply_overrides(params: Dict[str, Any], overrides: Optional[PublishOverrides]) -> Dict[str, Any]:

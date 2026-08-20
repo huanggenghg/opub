@@ -9,66 +9,8 @@ import publish_all
 
 
 class PublishEngineTests(unittest.TestCase):
-    def test_reset_publish_task_fields_clears_one_time_fields_and_keeps_accounts(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "publish_config.ini"
-            config_path.write_text(
-                "# config comments should stay\n"
-                "[common]\n"
-                "content_type = note\n"
-                "convert_to_video = true\n"
-                "video_duration = 9\n"
-                "title = old title\n"
-                "desc = old desc\n"
-                "tags = old,tags\n"
-                "video_file = videos/old.mp4\n"
-                "images = images/old.png\n"
-                "publish_strategy = scheduled\n"
-                "publish_time = 2026-05-01 12:00\n"
-                "start_from = 3\n"
-                "\n"
-                "[platforms]\n"
-                "enabled = weibo,douyin\n"
-                "weibo_account = cookies/weibo.json\n",
-                encoding="utf-8",
-            )
-
-            publish_all.reset_publish_task_fields(config_path)
-
-            text = config_path.read_text(encoding="utf-8")
-
-        self.assertIn("# config comments should stay", text)
-        self.assertIn("content_type = video", text)
-        self.assertIn("convert_to_video = false", text)
-        self.assertIn("video_duration = 5", text)
-        self.assertIn("title =", text)
-        self.assertIn("desc =", text)
-        self.assertIn("tags =", text)
-        self.assertIn("video_file =", text)
-        self.assertIn("images =", text)
-        self.assertIn("publish_strategy = immediate", text)
-        self.assertIn("publish_time =", text)
-        self.assertIn("start_from =", text)
-        self.assertIn("enabled =", text)
-        self.assertIn("weibo_account = cookies/weibo.json", text)
-
-    def test_apply_overrides_merges_publish_fields(self):
+    def test_default_params_from_overrides_builds_full_params(self):
         publish_time = publish_all.datetime.strptime("2026-05-30 21:30", "%Y-%m-%d %H:%M")
-        params = {
-            "content_type": "video",
-            "title": "old title",
-            "desc": "old desc",
-            "tags": ["old"],
-            "video_file": "old.mp4",
-            "images": [],
-            "publish_strategy": "immediate",
-            "publish_time": None,
-            "enabled_platforms": ["douyin"],
-            "platforms": {},
-            "convert_to_video": False,
-            "video_duration": 5,
-            "start_from": 1,
-        }
         overrides = publish_all.PublishOverrides(
             platforms="douyin,weibo",
             video="videos/demo.mp4",
@@ -80,17 +22,48 @@ class PublishEngineTests(unittest.TestCase):
             force=True,
         )
 
-        merged = publish_all.apply_overrides(params, overrides)
+        params = publish_all.default_params_from_overrides(overrides)
 
-        self.assertEqual(merged["enabled_platforms"], ["douyin", "weibo"])
-        self.assertEqual(merged["video_file"], "videos/demo.mp4")
-        self.assertEqual(merged["title"], "标题")
-        self.assertEqual(merged["desc"], "描述")
-        self.assertEqual(merged["tags"], ["标签1", "标签2"])
-        self.assertEqual(merged["publish_strategy"], "scheduled")
-        self.assertEqual(merged["publish_time"], publish_time)
-        self.assertEqual(merged["start_from"], 3)
-        self.assertTrue(merged["force"])
+        self.assertEqual(params["content_type"], "video")
+        self.assertEqual(params["enabled_platforms"], ["douyin", "weibo"])
+        self.assertEqual(params["video_file"], "videos/demo.mp4")
+        self.assertEqual(params["title"], "标题")
+        self.assertEqual(params["desc"], "描述")
+        self.assertEqual(params["tags"], ["标签1", "标签2"])
+        self.assertEqual(params["publish_strategy"], "scheduled")
+        self.assertEqual(params["publish_time"], publish_time)
+        self.assertEqual(params["start_from"], 3)
+        self.assertTrue(params["force"])
+        self.assertFalse(params["convert_to_video"])
+        self.assertEqual(params["video_duration"], 5)
+
+    def test_default_params_from_overrides_note_mode(self):
+        overrides = publish_all.PublishOverrides(
+            platforms="xiaohongshu",
+            note=True,
+            images="images/a.png, images/b.png",
+            convert_to_video=True,
+            video_duration=8,
+        )
+
+        params = publish_all.default_params_from_overrides(overrides)
+
+        self.assertEqual(params["content_type"], "note")
+        self.assertEqual(params["images"], ["images/a.png", "images/b.png"])
+        self.assertEqual(params["video_file"], "")
+        self.assertTrue(params["convert_to_video"])
+        self.assertEqual(params["video_duration"], 8)
+        self.assertEqual(params["publish_strategy"], "immediate")
+        self.assertIsNone(params["publish_time"])
+
+    def test_default_params_from_overrides_without_overrides_uses_defaults(self):
+        params = publish_all.default_params_from_overrides()
+
+        self.assertEqual(params["content_type"], "video")
+        self.assertEqual(params["enabled_platforms"], [])
+        self.assertEqual(params["video_file"], "")
+        self.assertEqual(params["start_from"], 1)
+        self.assertFalse(params["convert_to_video"])
 
     def test_run_publish_sync_returns_config_error_when_config_has_no_enabled_platforms(self):
         with tempfile.TemporaryDirectory() as tmpdir:

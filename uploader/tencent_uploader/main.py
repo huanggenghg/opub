@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -28,6 +29,8 @@ TENCENT_UPLOAD_URL = "https://channels.weixin.qq.com/platform/post/create"
 TENCENT_MANAGE_URL = "https://channels.weixin.qq.com/platform/post/list"
 TENCENT_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 TENCENT_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+TENCENT_UPLOAD_WAIT_TIMEOUT = 1800
+TENCENT_PUBLISH_WAIT_TIMEOUT = 600
 
 
 def _resolve_account_file(account_file: str | Path) -> str:
@@ -535,7 +538,8 @@ class TencentBaseUploader(BaseBrowserUploader):
                 await declare_button.click()
 
     async def wait_for_upload_complete(self, page: Page) -> None:
-        while True:
+        deadline = time.monotonic() + TENCENT_UPLOAD_WAIT_TIMEOUT
+        while time.monotonic() < deadline:
             try:
                 publish_button = page.get_by_role("button", name="发表")
                 button_class = await publish_button.get_attribute("class")
@@ -554,9 +558,12 @@ class TencentBaseUploader(BaseBrowserUploader):
             except Exception:
                 tencent_logger.info(_msg("🏃", "正在上传视频中..."))
                 await asyncio.sleep(2)
+        else:
+            raise TimeoutError(f"等待视频上传完成超时({TENCENT_UPLOAD_WAIT_TIMEOUT}秒)，发表按钮一直未激活")
 
     async def submit_publish(self, page: Page) -> None:
-        while True:
+        deadline = time.monotonic() + TENCENT_PUBLISH_WAIT_TIMEOUT
+        while time.monotonic() < deadline:
             try:
                 if getattr(self, "is_draft", False):
                     draft_button = page.locator('div.form-btns button:has-text("保存草稿")')
@@ -584,6 +591,8 @@ class TencentBaseUploader(BaseBrowserUploader):
                 tencent_logger.exception(f"  [-] Exception: {exc}")
                 tencent_logger.info(_msg("🏃", "视频正在发布中..."))
                 await asyncio.sleep(0.5)
+        else:
+            raise TimeoutError(f"发布/保存草稿超时({TENCENT_PUBLISH_WAIT_TIMEOUT}秒)，页面一直未跳转")
 
     async def _fetch_published_video_short_url(self, page: Page) -> str | None:
         """发布成功后,从管理页抓取刚发布视频的分享短链。

@@ -159,6 +159,9 @@ class TencentQrcodeExtractionTests(unittest.TestCase):
             async def wait_for(self, *args, **kwargs):
                 pass
 
+            async def get_attribute(self, name):
+                return "/connect/qrcode/abc123"
+
             async def screenshot(self, path=None, **kwargs):
                 from pathlib import Path
                 calls["screenshot_path"] = str(path)
@@ -283,3 +286,34 @@ class ModuleWrapperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TencentUploadWaitTimeoutTests(unittest.TestCase):
+    """wait_for_upload_complete/submit_publish 的 while 循环必须有超时兜底,
+    否则发表按钮永远不激活/页面永远不跳转时进程会无限挂死。"""
+
+    def test_wait_for_upload_complete_raises_on_timeout(self):
+        import asyncio
+        from uploader.tencent_uploader import main as tencent_main
+        from uploader.tencent_uploader.main import TencentVideo
+
+        uploader = TencentVideo(
+            title="t", file_path="/fake.mp4", tags=[], publish_date=0,
+            account_file="/fake.json", desc="", publish_strategy=PublishStrategy.IMMEDIATE,
+        )
+        with patch.object(tencent_main, "TENCENT_UPLOAD_WAIT_TIMEOUT", 0):
+            with self.assertRaises(TimeoutError):
+                asyncio.run(uploader.wait_for_upload_complete(page=None))
+
+    def test_submit_publish_raises_on_timeout(self):
+        import asyncio
+        from uploader.tencent_uploader import main as tencent_main
+        from uploader.tencent_uploader.main import TencentVideo
+
+        uploader = TencentVideo(
+            title="t", file_path="/fake.mp4", tags=[], publish_date=0,
+            account_file="/fake.json", desc="", publish_strategy=PublishStrategy.IMMEDIATE,
+        )
+        with patch.object(tencent_main, "TENCENT_PUBLISH_WAIT_TIMEOUT", 0):
+            with self.assertRaises(TimeoutError):
+                asyncio.run(uploader.submit_publish(page=None))

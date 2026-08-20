@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime
 
 from patchright.async_api import Page, async_playwright
@@ -15,6 +16,9 @@ from uploader.base_video import (
 )
 from uploader.tk_uploader.tk_config import Tk_Locator
 from utils.log import tiktok_logger
+
+TK_UPLOAD_WAIT_TIMEOUT = 1800
+TK_PUBLISH_WAIT_TIMEOUT = 600
 
 
 class TiktokVideo(BaseBrowserUploader):
@@ -230,7 +234,8 @@ class TiktokVideo(BaseBrowserUploader):
 
     async def click_publish(self, page):
         success_flag_div = '#\\:r9\\:'
-        while True:
+        publish_deadline = time.monotonic() + TK_PUBLISH_WAIT_TIMEOUT
+        while time.monotonic() < publish_deadline:
             try:
                 publish_button = self.locator_base.locator('div.btn-post')
                 if await publish_button.count():
@@ -248,9 +253,12 @@ class TiktokVideo(BaseBrowserUploader):
                     tiktok_logger.info("  [-] video publishing")
                     await page.screenshot(full_page=True)
                     await asyncio.sleep(0.5)
+        else:
+            raise TimeoutError(f"等待视频发布成功超时({TK_PUBLISH_WAIT_TIMEOUT}秒)")
 
     async def detect_upload_status(self, page):
-        while True:
+        upload_deadline = time.monotonic() + TK_UPLOAD_WAIT_TIMEOUT
+        while time.monotonic() < upload_deadline:
             try:
                 if await self.locator_base.locator('div.btn-post > button').get_attribute("disabled") is None:
                     tiktok_logger.info("  [-]video uploaded.")
@@ -264,6 +272,8 @@ class TiktokVideo(BaseBrowserUploader):
             except:
                 tiktok_logger.info("  [-] video uploading...")
                 await asyncio.sleep(2)
+        else:
+            raise TimeoutError(f"等待视频上传完成超时({TK_UPLOAD_WAIT_TIMEOUT}秒)")
 
     async def choose_base_locator(self, page):
         if await page.locator('iframe[data-tt="Upload_index_iframe"]').count():

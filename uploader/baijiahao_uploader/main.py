@@ -22,6 +22,8 @@ from utils.log import baijiahao_logger
 from utils.network import async_retry
 
 BAIJIAHAO_HOME_URL = "https://baijiahao.baidu.com/builder/rc/home"
+BAIJIAHAO_COVER_WAIT_TIMEOUT = 300
+BAIJIAHAO_UPLOAD_WAIT_TIMEOUT = 1800
 BAIJIAHAO_LOGIN_URL = "https://baijiahao.baidu.com/builder/theme/bjh/login"
 BAIJIAHAO_UPLOAD_EDIT_URL = "https://baijiahao.baidu.com/builder/rc/edit?type=videoV2&is_from_cms=1"
 BAIJIAHAO_LOGIN_URL_MARKERS = ("/login", "login")
@@ -362,7 +364,8 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
             raise
 
         # 判断视频封面图是否生成成功
-        while True:
+        cover_deadline = time.monotonic() + BAIJIAHAO_COVER_WAIT_TIMEOUT
+        while time.monotonic() < cover_deadline:
             baijiahao_logger.info("正在确认封面完成, 准备去点击定时/发布...")
             if await page.locator("div.cheetah-spin-container img").count():
                 baijiahao_logger.info("封面已完成，点击定时/发布...")
@@ -370,6 +373,8 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
             else:
                 baijiahao_logger.info("等待封面生成...")
                 await asyncio.sleep(3)
+        else:
+            raise TimeoutError(f"等待封面生成超时({BAIJIAHAO_COVER_WAIT_TIMEOUT}秒)")
 
         await self.select_creation_declaration(page)
         await self.publish_video(page, self.publish_date)
@@ -468,7 +473,9 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
 
     @async_retry(timeout=300)  # 例如，最多重试3次，超时时间为180秒
     async def uploading_video(self, page):
-        while True:
+        # async_retry 只在异常时计时,这里必须自己兜底防止"上传中"永远不消失
+        upload_deadline = time.monotonic() + BAIJIAHAO_UPLOAD_WAIT_TIMEOUT
+        while time.monotonic() < upload_deadline:
             upload_failed = await page.locator('div .cover-overlay:has-text("上传失败")').count()
             if upload_failed:
                 baijiahao_logger.error("发现上传出错了...")
@@ -485,6 +492,7 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
             if not uploading and not upload_failed:
                 baijiahao_logger.success("视频上传完毕")
                 return True
+        raise TimeoutError(f"等待视频上传完成超时({BAIJIAHAO_UPLOAD_WAIT_TIMEOUT}秒)")
 
     async def set_schedule_publish(self, page, publish_date):
         while True:

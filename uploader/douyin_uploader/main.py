@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import asyncio
+import time
 import os
 import re
 from pathlib import Path
@@ -27,6 +28,9 @@ from utils.log import douyin_logger
 from utils.excel_writer import write_video_link
 
 DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
+DOUYIN_PAGE_WAIT_TIMEOUT = 120
+DOUYIN_UPLOAD_WAIT_TIMEOUT = 1800
+DOUYIN_PUBLISH_WAIT_TIMEOUT = 600
 DOUYIN_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 DOUYIN_UPLOAD_URL = "https://creator.douyin.com/creator-micro/content/upload"
 DOUYIN_LOGIN_URL = "https://creator.douyin.com/"
@@ -600,7 +604,8 @@ class DouYinVideo(DouYinBaseUploader):
         if restriction_text:
             raise DouyinPublishRestrictedError(restriction_text)
 
-        while True:
+        deadline = time.monotonic() + DOUYIN_PAGE_WAIT_TIMEOUT
+        while time.monotonic() < deadline:
             try:
                 await page.wait_for_url(
                     "https://creator.douyin.com/creator-micro/content/publish?enter_from=publish_page",
@@ -619,13 +624,16 @@ class DouYinVideo(DouYinBaseUploader):
                 except Exception:
                     douyin_logger.debug(_msg("🧍", "还没进到视频发布页面，小人继续等一会"))
                     await asyncio.sleep(0.5)
+        else:
+            raise TimeoutError(f"等待进入视频发布页超时({DOUYIN_PAGE_WAIT_TIMEOUT}秒)")
 
         await asyncio.sleep(1)
         douyin_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
         await self.fill_title_and_description(page, self.title, self.desc or self.title, self.tags)
         douyin_logger.info(_msg("🏷️", f"小人一共贴了 {len(self.tags)} 个话题"))
 
-        while True:
+        deadline = time.monotonic() + DOUYIN_UPLOAD_WAIT_TIMEOUT
+        while time.monotonic() < deadline:
             try:
                 number = await page.locator('[class^="long-card"] div:has-text("重新上传")').count()
                 if number > 0:
@@ -639,6 +647,8 @@ class DouYinVideo(DouYinBaseUploader):
             except Exception:
                 douyin_logger.debug(_msg("🧍", "小人还在等视频上传完成"))
                 await asyncio.sleep(2)
+        else:
+            raise TimeoutError(f"等待视频上传完成超时({DOUYIN_UPLOAD_WAIT_TIMEOUT}秒)")
 
         if self.productLink and self.productTitle:
             douyin_logger.info(_msg("🛒", "小人正在设置商品链接"))
@@ -655,7 +665,8 @@ class DouYinVideo(DouYinBaseUploader):
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
 
-        while True:
+        deadline = time.monotonic() + DOUYIN_PUBLISH_WAIT_TIMEOUT
+        while time.monotonic() < deadline:
             try:
                 publish_button = page.get_by_role("button", name="发布", exact=True)
                 if await publish_button.count():
@@ -685,6 +696,8 @@ class DouYinVideo(DouYinBaseUploader):
                 if self.debug:
                     await page.screenshot(full_page=True)
                 await asyncio.sleep(0.5)
+        else:
+            raise TimeoutError(f"发布视频超时({DOUYIN_PUBLISH_WAIT_TIMEOUT}秒)，页面一直未跳转到管理页")
 
     async def upload(self) -> PlatformResultExtras:
         """主入口，返回 PlatformResultExtras。捕获 DouyinPublishRestrictedError 映射为 account_issue。"""
@@ -807,7 +820,8 @@ class DouYinNote(DouYinBaseUploader):
         if restriction_text:
             raise DouyinPublishRestrictedError(restriction_text)
 
-        while True:
+        deadline = time.monotonic() + DOUYIN_PAGE_WAIT_TIMEOUT
+        while time.monotonic() < deadline:
             try:
                 await page.wait_for_url(
                     "**/creator-micro/content/post/image?**",
@@ -818,6 +832,8 @@ class DouYinNote(DouYinBaseUploader):
             except Exception:
                 douyin_logger.debug(_msg("🧍", "小人还在等图片上传完成"))
                 await asyncio.sleep(0.5)
+        else:
+            raise TimeoutError(f"等待进入图文发布页超时({DOUYIN_PAGE_WAIT_TIMEOUT}秒)")
 
         await asyncio.sleep(1)
         douyin_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
@@ -827,7 +843,8 @@ class DouYinNote(DouYinBaseUploader):
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
 
-        while True:
+        deadline = time.monotonic() + DOUYIN_PUBLISH_WAIT_TIMEOUT
+        while time.monotonic() < deadline:
             try:
                 publish_button = page.get_by_role("button", name="发布", exact=True)
                 if await publish_button.count():
@@ -841,6 +858,8 @@ class DouYinNote(DouYinBaseUploader):
             except Exception:
                 douyin_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
                 await asyncio.sleep(0.5)
+        else:
+            raise TimeoutError(f"发布图文超时({DOUYIN_PUBLISH_WAIT_TIMEOUT}秒)，页面一直未跳转到管理页")
 
     async def upload(self) -> PlatformResultExtras:
         """主入口，返回 PlatformResultExtras。捕获 DouyinPublishRestrictedError 映射为 account_issue。"""

@@ -51,3 +51,20 @@ class ModuleWrapperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BaiJiaHaoWaitTimeoutTests(unittest.TestCase):
+    """封面/上传等待循环必须有超时兜底,防止状态元素永远不出现时进程挂死。"""
+
+    def test_uploading_video_raises_on_timeout(self):
+        import asyncio
+        from uploader.baijiahao_uploader import main as bj_main
+        from uploader.baijiahao_uploader.main import BaiJiaHaoVideo
+
+        uploader = BaiJiaHaoVideo(
+            title="t", file_path="/fake.mp4", tags=[], publish_date=0,
+            account_file="/fake.json",
+        )
+        with patch.object(bj_main, "BAIJIAHAO_UPLOAD_WAIT_TIMEOUT", 0):
+            with self.assertRaises(TimeoutError):
+                asyncio.run(uploader.uploading_video(page=None))

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -35,6 +36,7 @@ KUAISHOU_UPLOAD_URL_PATTERN = "**/article/publish/video**"
 KUAISHOU_MANAGE_URL_PATTERN = "**/article/manage/video**"
 KUAISHOU_COOKIE_INVALID_SELECTOR = "div.names div.container div.name:text('机构服务')"
 KUAISHOU_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
+KUAISHOU_PUBLISH_WAIT_TIMEOUT = 600
 KUAISHOU_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 KUAISHOU_VIDEO_ITEM_SELECTOR = "div.video-item__cover"
 KUAISHOU_LOGIN_MARKERS = ["passport.kuaishou.com"]
@@ -622,7 +624,8 @@ class KSVideo(KSBaseUploader):
         if self.publish_strategy == KUAISHOU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time(page, self.publish_date)
 
-        while True:
+        publish_deadline = time.monotonic() + KUAISHOU_PUBLISH_WAIT_TIMEOUT
+        while time.monotonic() < publish_deadline:
             try:
                 publish_button = page.get_by_text("发布", exact=True)
                 if await publish_button.count() > 0:
@@ -641,6 +644,8 @@ class KSVideo(KSBaseUploader):
                 if self.debug:
                     await page.screenshot(full_page=True)
                 await asyncio.sleep(1)
+        else:
+            raise TimeoutError(f"发布视频超时({KUAISHOU_PUBLISH_WAIT_TIMEOUT}秒)，页面一直未跳转到管理页")
 
         # 获取分享链接（内部会轮询等待审核通过）
         share_link_result = await get_share_link(page)
@@ -808,7 +813,8 @@ class KSNote(KSBaseUploader):
         if self.publish_strategy == KUAISHOU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time(page, self.publish_date)
 
-        while True:
+        publish_deadline = time.monotonic() + KUAISHOU_PUBLISH_WAIT_TIMEOUT
+        while time.monotonic() < publish_deadline:
             try:
                 publish_button = page.get_by_text("发布", exact=True)
                 if await publish_button.count() > 0:
@@ -827,6 +833,8 @@ class KSNote(KSBaseUploader):
                 if self.debug:
                     await page.screenshot(full_page=True)
                 await asyncio.sleep(1)
+        else:
+            raise TimeoutError(f"发布图文超时({KUAISHOU_PUBLISH_WAIT_TIMEOUT}秒)，页面一直未跳转到管理页")
 
         # 获取分享链接（内部会轮询等待审核通过）
         share_link_result = await get_share_link(page)

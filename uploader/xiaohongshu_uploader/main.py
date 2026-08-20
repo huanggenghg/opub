@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import os
 import re
 from datetime import datetime
@@ -28,6 +29,7 @@ from utils.log import xiaohongshu_logger
 from utils.excel_writer import write_video_link
 
 XHS_LOGIN_URL = "https://xiaohongshu.com/login"
+XHS_UPLOAD_WAIT_TIMEOUT = 1800
 XHS_UPLOAD_URL = "https://www.xiaohongshu.com/explore"
 XHS_PUBLISH_VIDEO_URL = "https://creator.xiaohongshu.com/publish/publish?source=official&target=video"
 XHS_PUBLISH_NOTE_URL = "https://creator.xiaohongshu.com/publish/publish?source=official&target=image"
@@ -676,7 +678,8 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         await page.wait_for_url(XHS_PUBLISH_VIDEO_URL)
         await page.locator("div[class^='upload-content'] input[class='upload-input']").set_input_files(self.file_path)
 
-        while True:
+        deadline = time.monotonic() + XHS_UPLOAD_WAIT_TIMEOUT
+        while time.monotonic() < deadline:
             try:
                 upload_input = await page.wait_for_selector('input.upload-input', timeout=3000)
                 preview_new = await upload_input.query_selector(
@@ -712,6 +715,8 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             except Exception as e:
                 xiaohongshu_logger.debug(_msg("😵", f"上传状态还没稳定下来，小人继续观察: {e}"))
             await asyncio.sleep(2)
+        else:
+            raise TimeoutError(f"等待视频上传完成超时({XHS_UPLOAD_WAIT_TIMEOUT}秒)")
 
         xiaohongshu_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
         await self.fill_meta(page)
@@ -870,7 +875,8 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         xiaohongshu_logger.info(_msg("📤", "小人正在上传图片"))
         await upload_input.set_input_files(self.image_paths)
 
-        while True:
+        deadline = time.monotonic() + XHS_UPLOAD_WAIT_TIMEOUT
+        while time.monotonic() < deadline:
             try:
                 title_container = page.locator('input[placeholder*="填写标题"]').first
                 await title_container.wait_for(state="visible", timeout=3000)
@@ -879,6 +885,8 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             except Exception:
                 xiaohongshu_logger.debug(_msg("🧍", "图文素材还在上传，小人继续等一会"))
                 await asyncio.sleep(1)
+        else:
+            raise TimeoutError(f"等待图文素材上传完成超时({XHS_UPLOAD_WAIT_TIMEOUT}秒)")
 
         xiaohongshu_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
         await self.fill_meta(page)

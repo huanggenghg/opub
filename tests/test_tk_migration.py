@@ -70,6 +70,35 @@ class TiktokVideoUploadTests(unittest.TestCase):
         self.assertTrue(result["success"])
 
 
+class TkWaitTimeoutTests(unittest.TestCase):
+    """detect_upload_status / click_publish 的 while 循环必须有超时兜底,
+    否则发布按钮永远不激活/发布永远不成功时进程会无限截图+重试挂死。"""
+
+    def _make_uploader(self):
+        return TiktokVideo(
+            title="t", file_path="/fake.mp4", tags=[], publish_date=0,
+            account_file="/fake.json", publish_strategy=PublishStrategy.IMMEDIATE,
+        )
+
+    def test_detect_upload_status_raises_on_timeout(self):
+        import asyncio
+        from uploader.tk_uploader import main as tk_main
+
+        uploader = self._make_uploader()
+        with patch.object(tk_main, "TK_UPLOAD_WAIT_TIMEOUT", 0):
+            with self.assertRaises(TimeoutError):
+                asyncio.run(uploader.detect_upload_status(page=None))
+
+    def test_click_publish_raises_on_timeout(self):
+        import asyncio
+        from uploader.tk_uploader import main as tk_main
+
+        uploader = self._make_uploader()
+        with patch.object(tk_main, "TK_PUBLISH_WAIT_TIMEOUT", 0):
+            with self.assertRaises(TimeoutError):
+                asyncio.run(uploader.click_publish(page=None))
+
+
 class ModuleWrapperTests(unittest.TestCase):
     def test_setup_signature_is_5_params(self):
         import inspect

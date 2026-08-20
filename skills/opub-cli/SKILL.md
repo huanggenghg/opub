@@ -1,7 +1,7 @@
 ---
 name: opub-cli
 description: Use when 用户要用 opub 发布/上传视频或图文、配置多平台发布、发布到抖音/小红书/快手/微博/B站/视频号/百家号，或排查 opub、publish_config.ini、账号登录校验、浏览器驱动环境问题
-version: "0.4.7"
+version: "0.5.2"
 ---
 
 # opub CLI 使用指南
@@ -15,6 +15,8 @@ version: "0.4.7"
 ```bash
 pip install opub
 ```
+
+升级：`pip install -U opub`，升级后用 `opub --version` 确认版本。
 
 系统依赖：
 

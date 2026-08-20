@@ -33,19 +33,22 @@ class PublishCliPackagingTests(unittest.TestCase):
 
 
 class PublishCliParserTests(unittest.TestCase):
-    def test_parser_accepts_defaults_no_subcommand(self):
+    def test_parser_defaults(self):
         parser = publish_all.build_parser()
         args = parser.parse_args([])
 
-        self.assertEqual(args.config, "publish_config.ini")
+        self.assertFalse(hasattr(args, "config"))
         self.assertIsNone(args.platforms)
         self.assertIsNone(args.video)
+        self.assertIsNone(args.images)
+        self.assertFalse(args.note)
+        self.assertFalse(args.convert_to_video)
+        self.assertEqual(args.video_duration, 5)
 
     def test_parser_accepts_overrides(self):
         parser = publish_all.build_parser()
         args = parser.parse_args(
             [
-                "--config", "my.ini",
                 "--platforms", "douyin,weibo",
                 "--video", "videos/demo.mp4",
                 "--title", "标题",
@@ -57,7 +60,6 @@ class PublishCliParserTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(args.config, "my.ini")
         self.assertEqual(args.platforms, "douyin,weibo")
         self.assertEqual(args.video, "videos/demo.mp4")
         self.assertEqual(args.title, "标题")
@@ -71,6 +73,28 @@ class PublishCliParserTests(unittest.TestCase):
         parser = publish_all.build_parser()
         with self.assertRaises(SystemExit):
             parser.parse_args(["douyin", "upload-video"])
+
+    def test_parser_accepts_note_mode_args(self):
+        parser = publish_all.build_parser()
+        args = parser.parse_args(
+            [
+                "--platforms", "xiaohongshu",
+                "--note",
+                "--images", "images/a.png,images/b.png",
+                "--convert-to-video",
+                "--video-duration", "8",
+            ]
+        )
+
+        self.assertTrue(args.note)
+        self.assertEqual(args.images, "images/a.png,images/b.png")
+        self.assertTrue(args.convert_to_video)
+        self.assertEqual(args.video_duration, 8)
+
+    def test_parser_rejects_config_flag(self):
+        parser = publish_all.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["--config", "my.ini"])
 
     def test_main_calls_run_publish_with_overrides(self):
         with patch("publish.orchestrator.run_publish", new=AsyncMock(return_value=0)) as run_publish:
@@ -160,18 +184,12 @@ class ExitCodeFromResultsTests(unittest.TestCase):
 
 
 class PublishCliHelpTextTests(unittest.TestCase):
-    def test_help_documents_ini_field_mapping(self):
+    def test_help_documents_cli_surface(self):
         help_text = publish_all.build_parser().format_help()
-        for fragment in [
-            "[common] video_file",
-            "[common] title",
-            "[common] desc",
-            "[common] tags",
-            "[platforms] enabled",
-            "[common] publish_time",
-            "[common] start_from",
-        ]:
+        for fragment in ["--platforms", "--video", "--note", "--images", "--convert-to-video", "--video-duration", "--schedule"]:
             self.assertIn(fragment, help_text)
+        self.assertNotIn("publish_config.ini", help_text)
+        self.assertNotIn("[common]", help_text)
 
 
 class SkillDocBlackboxTests(unittest.TestCase):

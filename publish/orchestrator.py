@@ -257,22 +257,25 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     parser = argparse.ArgumentParser(
         prog="opub",
-        description="把视频/图文一键发布到抖音/小红书/快手/微博/B站/视频号/百家号。发布平台与素材通过命令行参数指定（--platforms 必填，配 --video 或 --note --images）。",
+        description="把视频/图文一键发布到抖音/小红书/快手/微博/B站/视频号/百家号。必填 --platforms，素材提供 --video（视频）或 --note --images（图文）。",
     )
     try:
         _version = pkg_version("opub")
     except PackageNotFoundError:
         _version = "0.0.0.dev0"
     parser.add_argument("--version", action="version", version=f"opub {_version}")
-    parser.add_argument("--config", default="publish_config.ini", help="配置文件路径 (默认: publish_config.ini)")
-    parser.add_argument("--platforms", default=None, help="临时覆盖启用平台，逗号分隔 (对应 [platforms] enabled)")
-    parser.add_argument("--video", default=None, help="临时覆盖视频文件/目录路径 (对应 [common] video_file)")
-    parser.add_argument("--title", default=None, help="临时覆盖标题 (对应 [common] title)")
-    parser.add_argument("--desc", default=None, help="临时覆盖描述 (对应 [common] desc)")
-    parser.add_argument("--tags", default=None, help="临时覆盖话题标签，逗号分隔 (对应 [common] tags)")
-    parser.add_argument("--schedule", type=_schedule_value, default=None, help=f"临时覆盖定时发布时间，格式 {schedule_help}(对应 [common] publish_time)")
-    parser.add_argument("--start-from", type=int, default=None, help="断点续传起始序号，1 起 (对应 [common] start_from)")
-    parser.add_argument("--force", action="store_true", help="强制重新生成视频配置 (对应 [common] 一次性 force)")
+    parser.add_argument("--platforms", default=None, help="启用的平台，逗号分隔（必填）")
+    parser.add_argument("--video", default=None, help="视频文件或目录路径")
+    parser.add_argument("--note", action="store_true", help="图文模式：以 --images 的图片发布图文")
+    parser.add_argument("--images", default=None, help="图文图片路径，逗号分隔（图文模式必填）")
+    parser.add_argument("--convert-to-video", action="store_true", help="图文转视频后发布（仅 --note 模式生效）")
+    parser.add_argument("--video-duration", type=float, default=5, help="图转视频每张图片时长（秒，默认 5）")
+    parser.add_argument("--title", default=None, help="标题（留空则自动生成）")
+    parser.add_argument("--desc", default=None, help="描述（留空则自动生成）")
+    parser.add_argument("--tags", default=None, help="话题标签，逗号分隔")
+    parser.add_argument("--schedule", type=_schedule_value, default=None, help=f"定时发布时间，格式 {schedule_help}")
+    parser.add_argument("--start-from", type=int, default=None, help="断点续传起始序号，1 起")
+    parser.add_argument("--force", action="store_true", help="强制重新生成视频配置")
     return parser
 
 
@@ -286,6 +289,10 @@ def _build_overrides(args: argparse.Namespace) -> PublishOverrides:
         schedule=args.schedule,
         start_from=args.start_from,
         force=args.force,
+        note=args.note,
+        images=args.images,
+        convert_to_video=args.convert_to_video,
+        video_duration=args.video_duration,
     )
 
 

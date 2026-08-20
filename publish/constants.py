@@ -22,22 +22,3 @@ TITLE_LIMITS = {
     "tk": 2200,
     "weibo": 2000,
 }
-
-PUBLISH_TASK_FIELD_DEFAULTS = {
-    "common": {
-        "content_type": "video",
-        "convert_to_video": "false",
-        "video_duration": "5",
-        "title": "",
-        "desc": "",
-        "tags": "",
-        "video_file": "",
-        "images": "",
-        "publish_strategy": "immediate",
-        "publish_time": "",
-        "start_from": "",
-    },
-    "platforms": {
-        "enabled": "",
-    },
-}

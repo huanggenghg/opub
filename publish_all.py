@@ -17,11 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from publish.config import (
     PublishOverrides,
-    apply_overrides,
     default_params_from_overrides,
-    parse_config,
-    read_config,
-    reset_publish_task_fields,
 )
 from publish.content import (
     fill_empty_content,
@@ -33,7 +29,6 @@ from publish.content import (
 )
 from publish.constants import (
     PLATFORM_NAMES,
-    PUBLISH_TASK_FIELD_DEFAULTS,
     TITLE_LIMITS,
 )
 from publish.dispatch import (

@@ -77,10 +77,9 @@ class PublishCliParserTests(unittest.TestCase):
             code = publish_all.main(["--platforms", "weibo", "--title", "标题"])
 
         self.assertEqual(code, 0)
-        call = run_publish.await_args
-        self.assertEqual(call.args[0], "publish_config.ini")
-        self.assertEqual(call.args[1].platforms, "weibo")
-        self.assertEqual(call.args[1].title, "标题")
+        overrides = run_publish.await_args.args[0]
+        self.assertEqual(overrides.platforms, "weibo")
+        self.assertEqual(overrides.title, "标题")
 
     def test_main_wraps_exception_with_run001_and_exit_code_2(self):
         stderr = io.StringIO()

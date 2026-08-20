@@ -6,17 +6,11 @@ import os
 import sys
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version as pkg_version
-from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
-from conf import BASE_DIR
 from publish.config import (
     PublishOverrides,
-    apply_overrides,
     default_params_from_overrides,
-    parse_config,
-    read_config,
-    reset_publish_task_fields,
 )
 from publish.constants import PLATFORM_NAMES
 from publish.content import fill_empty_content, get_video_content, get_video_files
@@ -124,7 +118,7 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
 
 async def run_publish_with_params(params: Dict[str, Any]) -> int:
     if not params["enabled_platforms"]:
-        print_error("CFG-002", "未配置启用平台", "在 publish_config.ini [platforms] enabled= 设置，或使用 --platforms 覆盖")
+        print_error("CFG-002", "未配置启用平台", "提供 --platforms，逗号分隔平台标识")
         return EXIT_CONFIG_ERROR
 
     # 注意：标题为空时，会在视频处理流程中自动生成或使用模板填充
@@ -133,7 +127,7 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
     # 处理图文转视频
     if params["content_type"] == "note" and params["convert_to_video"]:
         if not params["images"]:
-            print_error("CFG-004", "图文转视频需要提供图片", "在 publish_config.ini [common] images= 设置图片路径（英文逗号分隔）")
+            print_error("CFG-004", "图文转视频需要提供图片", "提供 --images 设置图片路径（英文逗号分隔）")
             return EXIT_CONFIG_ERROR
 
         print("正在将图片转换为视频...")
@@ -156,7 +150,7 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
     # 图文模式(不转视频):不依赖 video_file,直接以 images 发布
     if params["content_type"] == "note":
         if not params["images"]:
-            print_error("CFG-004", "图文模式需要提供图片", "在 publish_config.ini [common] images= 设置图片路径（英文逗号分隔）")
+            print_error("CFG-004", "图文模式需要提供图片", "提供 --images 设置图片路径（英文逗号分隔）")
             return EXIT_CONFIG_ERROR
 
         if not await runtime_preflight():
@@ -178,7 +172,7 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
     # 获取视频文件列表
     video_files = get_video_files(params["video_file"])
     if not video_files:
-        print_error("CFG-003", f"未找到视频文件: {params['video_file']}", "检查 [common] video_file= 路径或使用 --video 覆盖")
+        print_error("CFG-003", f"未找到视频文件: {params['video_file']}", "检查 --video 路径是否正确")
         return EXIT_CONFIG_ERROR
 
     if not await runtime_preflight():
@@ -226,38 +220,25 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
     return exit_code_from_results(all_results)
 
 
-async def run_publish(
-    config_file: str = "publish_config.ini",
-    overrides: Optional[PublishOverrides] = None,
-) -> int:
-    config_path = Path(config_file)
-    if not config_path.is_absolute():
-        config_path = BASE_DIR / config_path
+async def run_publish(overrides: Optional[PublishOverrides] = None) -> int:
+    overrides = overrides or PublishOverrides()
 
-    if config_path.exists():
-        config = read_config(str(config_path))
-        params = parse_config(config)
-        reset_task_fields_after_run = True
-    else:
-        if overrides is None or overrides.platforms is None or overrides.video is None:
-            print_error("CFG-001", f"配置文件不存在: {config_path}", "提供 --config 指定配置文件，或同时指定 --platforms 和 --video")
-            return EXIT_CONFIG_ERROR
-        params = default_params_from_overrides()
-        reset_task_fields_after_run = False
+    if not overrides.platforms:
+        print_error("CFG-002", "未指定启用平台", "提供 --platforms，逗号分隔平台标识（见 opub --help）")
+        return EXIT_CONFIG_ERROR
+    if overrides.note and overrides.video:
+        print_error("CFG-001", "--note 与 --video 互斥", "二选一：图文用 --note --images，视频用 --video")
+        return EXIT_CONFIG_ERROR
+    if not overrides.note and not overrides.video:
+        print_error("CFG-001", "缺少发布素材", "提供 --video（视频发布）或 --note --images（图文发布）")
+        return EXIT_CONFIG_ERROR
 
-    params = apply_overrides(params, overrides)
-    try:
-        return await run_publish_with_params(params)
-    finally:
-        if reset_task_fields_after_run:
-            reset_publish_task_fields(config_path)
+    params = default_params_from_overrides(overrides)
+    return await run_publish_with_params(params)
 
 
-def run_publish_sync(
-    config_file: str = "publish_config.ini",
-    overrides: Optional[PublishOverrides] = None,
-) -> int:
-    return asyncio.run(run_publish(config_file, overrides))
+def run_publish_sync(overrides: Optional[PublishOverrides] = None) -> int:
+    return asyncio.run(run_publish(overrides))
 
 
 SCHEDULE_FORMAT = "%Y-%m-%d %H:%M"
@@ -276,7 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     parser = argparse.ArgumentParser(
         prog="opub",
-        description="把视频/图文一键发布到抖音/小红书/快手/微博/B站/视频号/百家号。无参数时读取 publish_config.ini 执行完整发布。",
+        description="把视频/图文一键发布到抖音/小红书/快手/微博/B站/视频号/百家号。发布平台与素材通过命令行参数指定（--platforms 必填，配 --video 或 --note --images）。",
     )
     try:
         _version = pkg_version("opub")
@@ -312,7 +293,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     try:
-        return asyncio.run(run_publish(args.config, _build_overrides(args)))
+        return asyncio.run(run_publish(_build_overrides(args)))
     except Exception as exc:
         print_error("RUN-001", f"运行时异常: {exc}", "将以上错误信息反馈给用户；重试前请先检查配置与环境")
         return EXIT_ALL_FAIL

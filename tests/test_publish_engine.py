@@ -65,70 +65,6 @@ class PublishEngineTests(unittest.TestCase):
         self.assertEqual(params["start_from"], 1)
         self.assertFalse(params["convert_to_video"])
 
-    def test_run_publish_sync_returns_config_error_when_config_has_no_enabled_platforms(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "publish_config.ini"
-            config_path.write_text(
-                "[common]\n"
-                "video_file = videos/demo.mp4\n"
-                "title = 标题\n"
-                "\n"
-                "[platforms]\n"
-                "enabled = \n",
-                encoding="utf-8",
-            )
-
-            code = publish_all.run_publish_sync(str(config_path))
-
-        self.assertEqual(code, 10)
-
-    def test_run_publish_sync_resets_task_fields_after_config_run(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "publish_config.ini"
-            config_path.write_text(
-                "[common]\n"
-                "content_type = video\n"
-                "video_file = videos/demo.mp4\n"
-                "title = old title\n"
-                "tags = old\n"
-                "\n"
-                "[platforms]\n"
-                "enabled = weibo\n"
-                "weibo_account = cookies/weibo.json\n",
-                encoding="utf-8",
-            )
-
-            with patch("publish.orchestrator.run_publish_with_params", new=AsyncMock(return_value=0)):
-                code = publish_all.run_publish_sync(str(config_path))
-
-            text = config_path.read_text(encoding="utf-8")
-
-        self.assertEqual(code, 0)
-        self.assertIn("video_file =", text)
-        self.assertIn("title =", text)
-        self.assertIn("tags =", text)
-        self.assertIn("enabled =", text)
-        self.assertIn("weibo_account = cookies/weibo.json", text)
-
-    def test_run_publish_sync_uses_cli_overrides_without_config_file(self):
-        overrides = publish_all.PublishOverrides(
-            platforms="weibo",
-            video="videos/demo.mp4",
-            title="标题",
-        )
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            missing_config = Path(tmpdir) / "missing.ini"
-            with patch("publish.orchestrator.run_publish_with_params", new=AsyncMock(return_value=0)) as run_params:
-                code = publish_all.run_publish_sync(str(missing_config), overrides)
-
-        self.assertEqual(code, 0)
-        call = run_params.await_args
-        params = call.args[0]
-        self.assertEqual(params["enabled_platforms"], ["weibo"])
-        self.assertEqual(params["video_file"], "videos/demo.mp4")
-        self.assertEqual(params["title"], "标题")
-
     def test_run_publish_with_params_passes_force_to_content_generation(self):
         params = {
             "content_type": "video",
@@ -265,6 +201,45 @@ class PublishEngineTests(unittest.TestCase):
         self.assertTrue(result["account_issue"])
         self.assertEqual(result["issue_type"], "publish_restricted")
         self.assertIn("健康分不足", result["message"])
+
+
+class RunPublishValidationTests(unittest.TestCase):
+    def _stderr_code(self, overrides):
+        import contextlib, io
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = publish_all.run_publish_sync(overrides)
+        return code, stderr.getvalue()
+
+    def test_missing_platforms_returns_config_error(self):
+        code, stderr = self._stderr_code(publish_all.PublishOverrides(video="videos/demo.mp4"))
+        self.assertEqual(code, 10)
+        self.assertIn("CFG-002", stderr)
+
+    def test_missing_video_and_note_returns_config_error(self):
+        code, stderr = self._stderr_code(publish_all.PublishOverrides(platforms="weibo"))
+        self.assertEqual(code, 10)
+        self.assertIn("CFG-001", stderr)
+
+    def test_note_with_video_returns_config_error(self):
+        code, stderr = self._stderr_code(
+            publish_all.PublishOverrides(platforms="weibo", video="v.mp4", note=True, images="a.png")
+        )
+        self.assertEqual(code, 10)
+        self.assertIn("CFG-001", stderr)
+
+    def test_run_publish_builds_params_and_calls_engine(self):
+        overrides = publish_all.PublishOverrides(
+            platforms="weibo", video="videos/demo.mp4", title="标题"
+        )
+        with patch("publish.orchestrator.run_publish_with_params", new=AsyncMock(return_value=0)) as run_params:
+            code = publish_all.run_publish_sync(overrides)
+
+        self.assertEqual(code, 0)
+        params = run_params.await_args.args[0]
+        self.assertEqual(params["enabled_platforms"], ["weibo"])
+        self.assertEqual(params["video_file"], "videos/demo.mp4")
+        self.assertEqual(params["title"], "标题")
 
 
 class RuntimePreflightTests(unittest.TestCase):

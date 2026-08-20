@@ -27,10 +27,10 @@ class PrintErrorTests(unittest.TestCase):
     def test_output_format_goes_to_stderr(self):
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
-            print_error("CFG-001", "配置文件不存在: /tmp/x.ini", "提供 --platforms，并使用 --video 或 --note --images 指定素材")
+            print_error("CFG-001", "缺少发布素材: 未提供 --video 或 --note --images", "提供 --platforms，并使用 --video 或 --note --images 指定素材")
         self.assertEqual(
             stderr.getvalue(),
-            "[opub] CFG-001: 配置文件不存在: /tmp/x.ini。建议: 提供 --platforms，并使用 --video 或 --note --images 指定素材\n",
+            "[opub] CFG-001: 缺少发布素材: 未提供 --video 或 --note --images。建议: 提供 --platforms，并使用 --video 或 --note --images 指定素材\n",
         )
 
 

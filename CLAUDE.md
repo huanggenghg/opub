@@ -40,11 +40,10 @@ Platform, account, media, metadata, and schedule settings are passed as command-
 
 ### Command-line Interface
 
-Install the editable package and run the unified publish entry:
+Install the editable package:
 
 ```bash
 uv pip install -e .
-opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 ```
 
 All settings are provided as CLI arguments for each run:

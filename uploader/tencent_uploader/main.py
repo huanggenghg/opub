@@ -54,45 +54,23 @@ def format_str_for_short_title(origin_title: str) -> str:
     return formatted_string
 
 
-async def _extract_tencent_qrcode_src(page: Page) -> str:
-    if hasattr(page, "frame_locator"):
-        try:
-            iframe_locator = page.frame_locator('[src*="login-for-iframe"]')
-            qr_code_img = iframe_locator.locator('div#app img.qrcode').first
-            await qr_code_img.wait_for(state="visible", timeout=30000)
-            src = await qr_code_img.get_attribute("src")
-            if src and src.startswith("data:image/"):
-                return src
-        except Exception:
-            pass
-
-    selector_candidates = [
-        "div.login-qrcode-wrap img.qrcode",
-        "div.qrcode-wrap img.qrcode",
-        "img.qrcode",
-        'img[src^="data:image/"]',
-    ]
-    for selector in selector_candidates:
-        qr_code_img = page.locator(selector).first
-        try:
-            if not await qr_code_img.count() or not await qr_code_img.is_visible():
-                continue
-            src = await qr_code_img.get_attribute("src")
-            if src and src.startswith("data:image/"):
-                return src
-        except Exception:
-            continue
-
-    raise RuntimeError("未获取到视频号登录二维码地址")
+async def _find_tencent_qrcode_element(page: Page):
+    """真实登录页(2026-08 微信改版后)的二维码在 qrconnect iframe 内,img.qrcode
+    的 src 是相对 URL,不能走 data:image 解析,调用方须用 element.screenshot 存图。"""
+    if not hasattr(page, "frame_locator"):
+        raise RuntimeError("未获取到视频号登录二维码地址")
+    iframe_locator = page.frame_locator('[src*="qrconnect"]')
+    qr_code_img = iframe_locator.locator("img.qrcode").first
+    await qr_code_img.wait_for(state="visible", timeout=30000)
+    return qr_code_img
 
 
 async def _save_tencent_qrcode(page: Page, account_file: str, previous_qrcode_path: Path | None = None, qrcode_callback=None) -> dict:
     qrcode_utils = _get_qrcode_utils()
-    qrcode_src = await _extract_tencent_qrcode_src(page)
-    qrcode_path = qrcode_utils["save_data_url_image"](
-        qrcode_src,
-        qrcode_utils["build_login_qrcode_path"](account_file, suffix="tencent_login_qrcode"),
-    )
+    qr_code_img = await _find_tencent_qrcode_element(page)
+    qrcode_path = qrcode_utils["build_login_qrcode_path"](account_file, suffix="tencent_login_qrcode")
+    qrcode_path.parent.mkdir(parents=True, exist_ok=True)
+    await qr_code_img.screenshot(path=qrcode_path)
     if previous_qrcode_path and previous_qrcode_path != qrcode_path:
         if qrcode_utils["remove_qrcode_file"](previous_qrcode_path):
             tencent_logger.info(_msg("🧹", f"临时二维码文件已清理: {previous_qrcode_path}"))
@@ -111,7 +89,7 @@ async def _save_tencent_qrcode(page: Page, account_file: str, previous_qrcode_pa
 
     qrcode_info = {
         "image_path": str(qrcode_path),
-        "image_data_url": qrcode_src,
+        "image_data_url": None,
     }
     await _emit_qrcode_callback(qrcode_callback, qrcode_info)
     return qrcode_info

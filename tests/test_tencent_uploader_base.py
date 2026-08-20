@@ -148,6 +148,57 @@ class TencentCookieGenTests(unittest.TestCase):
         wait_mock.assert_called_once()
 
 
+class TencentQrcodeExtractionTests(unittest.TestCase):
+    """真实登录页(2026-08 观察):二维码在 qrconnect iframe 内,img.qrcode 的 src 是
+    相对 URL(/connect/qrcode/...),不是 data:image/。
+    提取必须:1) 用 iframe[src*="qrconnect"];2) 用 element.screenshot 存 PNG。
+    """
+
+    def _make_page(self, calls):
+        class FakeQrImg:
+            async def wait_for(self, *args, **kwargs):
+                pass
+
+            async def screenshot(self, path=None, **kwargs):
+                from pathlib import Path
+                calls["screenshot_path"] = str(path)
+                Path(path).write_bytes(b"\x89PNG-fake")
+                return b"\x89PNG-fake"
+
+        class FakeInnerLocator:
+            first = FakeQrImg()
+
+        class FakeFrameLocator:
+            def locator(self, selector):
+                calls["inner_selector"] = selector
+                return FakeInnerLocator()
+
+        class FakePage:
+            def frame_locator(self, selector):
+                calls["iframe_selector"] = selector
+                return FakeFrameLocator()
+
+        return FakePage()
+
+    def test_save_tencent_qrcode_uses_qrconnect_iframe_and_screenshot(self):
+        import asyncio
+        import tempfile
+        from pathlib import Path
+
+        from uploader.tencent_uploader.main import _save_tencent_qrcode
+
+        calls = {}
+        page = self._make_page(calls)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            account_file = str(Path(tmpdir) / "acc.json")
+            result = asyncio.run(_save_tencent_qrcode(page, account_file))
+
+        self.assertIn("qrconnect", calls.get("iframe_selector", ""))
+        self.assertEqual("img.qrcode", calls.get("inner_selector"))
+        self.assertTrue(calls["screenshot_path"].endswith(".png"))
+        self.assertEqual(result["image_path"], calls["screenshot_path"])
+
+
 class TencentRedundantCookieAuthTests(unittest.TestCase):
     """tencent sessionid 在新浏览器上下文里 22 秒失效,任何 cookie_auth 调用都会开新浏览器,
     导致后续 cookie_auth 误判失效。所以:

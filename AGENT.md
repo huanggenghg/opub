@@ -20,7 +20,7 @@ Mainline platforms:
 
 - Treat the repository root as the working directory.
 - Prefer `uv` for Python environment and dependency management.
-- Prefer `publish_config.ini` plus `opub` over legacy example scripts
+- Prefer `opub` CLI over legacy example scripts
   or platform-specific command flows.
 - Do not default to historical `examples/` or old Web flows unless the CLI path
   is unavailable for the task.
@@ -74,21 +74,14 @@ Report:
 
 ## Core CLI Usage
 
-`publish_config.ini` is the primary control file. Account file mappings can
-persist there, but enabled platforms, content, asset paths, tags, scheduling,
-and other publish-task fields are one-time task state. Set them explicitly for
-each publish run; `opub` resets those task fields after it runs.
+`opub` is stateless: every publish run passes all settings (enabled platforms,
+content, asset paths, tags, scheduling) as command-line arguments. Account
+files are auto-discovered from the `cookies/` directory under the data
+directory.
 
 ## 快速开始
 
-1. 编辑 `publish_config.ini`，配置内容、素材路径、启用平台和账号文件。
-2. 执行统一发布入口：
-
-```bash
-opub
-```
-
-如需临时覆盖配置：
+执行统一发布入口（全部发布信息通过命令行参数传入）：
 
 ```bash
 opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
@@ -98,8 +91,6 @@ opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 
 ## Runtime Notes
 
-- Command-line options are temporary overrides for values in
-  `publish_config.ini`.
 - The project does not maintain internationalized docs. Current documentation is
   Chinese-first, with agent bootstrap notes kept concise where useful.
 
@@ -114,8 +105,9 @@ opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 ## Notes For Maintenance
 
 - The CLI wrapper is intentionally thin around `opub`.
-- `publish_all.py` owns config loading, runtime preflight, account login checks,
-  publishing, and summary output.
+- The `publish/` package owns runtime preflight, account login checks,
+  publishing, and summary output. `publish_all.py` is a thin backward-compat
+  shell re-exporting it.
 - Browser automation lives under `uploader/` and related utility modules.
 - For TestPyPI uploads, first look for the local token file
   `.secrets/testpypi.token` and use it as the Twine API token

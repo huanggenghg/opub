@@ -40,20 +40,24 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 
 ## 快速开始
 
-1. 编辑工作目录中的 `publish_config.ini`，配置内容、素材路径、启用平台和账号文件。
-2. 执行统一发布入口：
+`opub` 是无状态命令,全部配置通过命令行参数传入,账号文件从 `cookies/` 目录自动发现。
 
 ```bash
-opub
+# 视频发布(必填:--platforms + --video)
+opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题" --tags "标签1,标签2"
+
+# 图文发布
+opub --platforms xiaohongshu --note --images img1.jpg,img2.jpg --title "标题"
+
+# 图文转视频(视频号/百家号等不支持图文的平台)
+opub --platforms tencent --note --images img1.jpg --convert-to-video --video-duration 5
+
+# 定时 / 断点续传 / 强制重新生成
+opub --platforms weibo --video videos/demo.mp4 --schedule "2026-08-21 12:00" --start-from 2 --force
+
+opub --version                        # 查看已安装版本
+opub --help                           # 全部参数说明
 ```
-
-如需临时覆盖配置：
-
-```bash
-opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
-```
-
-`publish_config.ini` 是主要控制文件，用于配置内容、素材路径、启用平台、账号文件、定时发布和平台元数据。命令行参数只用于临时覆盖本次运行的配置。发布结束后会自动清空一次性任务字段，账号文件配置保留。
 
 ## AI Agent 技能
 

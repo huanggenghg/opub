@@ -14,9 +14,9 @@ The project consists of a Python CLI tool and uploader modules.
 
 The project provides one public command-line workflow for terminal users:
 
-*   `opub`: Read `publish_config.ini`, validate runtime dependencies, check account login per enabled platform, publish, and print a summary.
+*   `opub`: Take all publish settings as command-line arguments, validate runtime dependencies, check account login per enabled platform, publish, and print a summary.
 
-Platform, account, media, metadata, and schedule settings should be configured in `publish_config.ini`. Standalone platform login/check/upload CLI commands are no longer part of the current mainline.
+Platform, account, media, metadata, and schedule settings are passed as command-line arguments (`opub --platforms ... --video ...`); account files are auto-discovered from the `cookies/` directory. Standalone platform login/check/upload CLI commands are no longer part of the current mainline.
 
 ## Building and Running
 
@@ -47,7 +47,7 @@ uv pip install -e .
 opub
 ```
 
-Temporary overrides are allowed for one publish run:
+All settings are provided as CLI arguments for each run:
 
 ```bash
 opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"

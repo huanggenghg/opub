@@ -1,7 +1,7 @@
 ---
 name: opub-cli
-description: Use when 用户要用 opub 发布/上传视频或图文、配置多平台发布、发布到抖音/小红书/快手/微博/B站/视频号/百家号，或排查 opub、publish_config.ini、账号登录校验、浏览器驱动环境问题
-version: "0.5.2"
+description: Use when 用户要用 opub 发布/上传视频或图文、配置多平台发布、发布到抖音/小红书/快手/微博/B站/视频号/百家号，或排查 opub、账号登录校验、浏览器驱动环境问题
+version: "0.6.0"
 ---
 
 # opub CLI 使用指南
@@ -50,55 +50,30 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 - 发布视频、上传视频、一键发布、多平台发布、图文发布
 - 发布到抖音、小红书、快手、微博、B站、视频号、百家号
 - 配置发布平台、账号、cookie、登录校验、扫码登录
-- 排查 `opub`、`publish_config.ini`、Chromium 或浏览器驱动问题
-
-## 配置
-
-### 配置文件位置
-
-默认配置文件是数据目录下的 `publish_config.ini`（pip 模式即 `~/.opub/publish_config.ini`，随 `SAU_HOME` 变化）；不存在时需用 `--config` 指定路径，或直接用 `--platforms` + `--video` 命令行运行。配置文件需手动创建，不会自动生成。
-
-### publish_config.ini 关键字段
-
-```ini
-[common]
-content_type = video          # video=视频, note=图文
-title =                       # 标题（所有平台共用）
-desc =                        # 描述，支持\n换行
-tags =                        # 话题标签，英文逗号分隔
-video_file =                  # 视频路径
-images =                      # 图文图片路径，英文逗号分隔
-publish_strategy = immediate  # immediate=立即, scheduled=定时
-publish_time =                # 定时发布时间 YYYY-MM-DD HH:MM
-start_from =                  # 断点续传起始序号
-convert_to_video = false      # 图文转视频（仅 note 模式）
-
-[platforms]
-enabled =                     # 启用平台，英文逗号分隔
-# 各平台账号文件路径（长期保留）
-douyin_account = cookies/douyin_uploader/account.json
-weibo_account = cookies/weibo_uploader/account1.json  # 微博支持逗号分隔多账号
-```
-
-### 一次性字段 vs 长期字段
-
-- **长期保留**：各平台账号文件路径（`*_account`）
-- **每次发布前必须重新设置**：`enabled`、`title`、`desc`、`tags`、`video_file`/`images`、`publish_strategy`、`publish_time`、`start_from`
-- 发布流程结束后，`opub` 自动清空一次性任务字段，避免下次沿用旧配置
+- 排查 `opub`、Chromium 或浏览器驱动问题
 
 ## 调用
 
+`opub` 是无状态命令,每次发布的全部信息通过命令行参数传入:
+
 ```bash
-opub                                  # 读取 publish_config.ini 执行完整发布
-opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
-opub --config my_publish_config.ini
-opub --start-from 5
-opub --force
+# 视频发布(必填:--platforms + --video)
+opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题" --tags "标签1,标签2"
+
+# 图文发布
+opub --platforms xiaohongshu --note --images img1.jpg,img2.jpg --title "标题"
+
+# 图文转视频(视频号/百家号等不支持图文的平台)
+opub --platforms tencent --note --images img1.jpg --convert-to-video --video-duration 5
+
+# 定时 / 断点续传 / 强制重新生成
+opub --platforms weibo --video videos/demo.mp4 --schedule "2026-08-21 12:00" --start-from 2 --force
+
 opub --version                        # 查看已安装版本
-opub --help                           # 全部参数说明（每个参数标注对应的 ini 字段）
+opub --help                           # 全部参数说明
 ```
 
-命令行参数只作为本次运行的临时覆盖；也可以不写 ini，直接 `opub --platforms ... --video ...` 运行。使用 `--schedule` 时本次运行自动切换为定时发布，无需在 ini 中设置 `publish_strategy = scheduled`。
+参数说明:`--title`/`--desc` 留空时自动生成;`--schedule` 指定后本次为定时发布;账号文件从数据目录 `cookies/` 自动发现(微博支持多账号,每个账号各发一遍),无需配置。
 
 ## 读取结果
 

@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional, Sequence
 
 from publish.config import (
     PublishOverrides,
+    default_account_file,
     default_params_from_overrides,
 )
 from publish.constants import PLATFORM_NAMES
@@ -61,15 +62,18 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
         account_files = [af.strip() for af in account_file_str.split(",") if af.strip()]
 
         if not account_files:
-            print(f"[{i}/{total}] 发布到 {platform_name}...")
-            results[platform] = {
-                "success": False,
-                "message": f"未配置 {platform} 账号",
-                "account_issue": True,
-                "error_code": "AUTH-002",
-            }
-            print("  ❌ 失败: 未配置账号")
-            continue
+            default_file = default_account_file(platform)
+            if default_file is None:
+                results[platform] = {
+                    "success": False,
+                    "message": f"未配置 {platform} 账号",
+                    "account_issue": True,
+                    "error_code": "AUTH-002",
+                }
+                print("  ❌ 失败: 未配置账号")
+                continue
+            print(f"  ℹ️ 未发现 {platform_name} 账号文件，将触发扫码登录: {default_file}")
+            account_files = [default_file]
 
         for acct_idx, account_file in enumerate(account_files):
             if len(account_files) > 1:
@@ -121,8 +125,8 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
         print_error("CFG-002", "未配置启用平台", "提供 --platforms，逗号分隔平台标识")
         return EXIT_CONFIG_ERROR
 
-    # 注意：标题为空时，会在视频处理流程中自动生成或使用模板填充
-    # 不在此处检查标题，让 get_video_content() 处理
+    # 注意：标题为空时，会在视频处理流程中尝试自动生成；
+    # 解析后仍为空则 CFG-001 报错（除 bilibili 外各平台都强制要求标题）
 
     # 处理图文转视频
     if params["content_type"] == "note" and params["convert_to_video"]:
@@ -157,6 +161,9 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
             return EXIT_ENV_ERROR
 
         title, desc = fill_empty_content(params["title"], params["desc"])
+        if not (title and str(title).strip()):
+            print_error("CFG-001", "图文发布缺少标题", "提供 --title（自动填充未生效时标题为必填）")
+            return EXIT_CONFIG_ERROR
         note_params = {**params, "title": title, "desc": desc}
         print(f"\n========== 图文发布 ==========")
         print(f"标题: {title}")
@@ -204,6 +211,14 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
             params["desc"],
             force=params.get("force", False),
         )
+
+        if not (title and str(title).strip()):
+            print_error(
+                "CFG-001",
+                f"视频 {os.path.basename(video_file)} 标题解析后为空",
+                "提供 --title，或配置视频同名 JSON / ZHIPU_API_KEY 供自动生成",
+            )
+            return EXIT_CONFIG_ERROR
 
         # 更新参数
         video_params = {
@@ -270,7 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--images", default=None, help="图文图片路径，逗号分隔（图文模式必填）")
     parser.add_argument("--convert-to-video", action="store_true", help="图文转视频后发布（仅 --note 模式生效）")
     parser.add_argument("--video-duration", type=float, default=5, help="图转视频每张图片时长（秒，默认 5）")
-    parser.add_argument("--title", default=None, help="标题（留空则自动生成）")
+    parser.add_argument("--title", default=None, help="标题（留空则尝试自动生成，失败时报 CFG-001）")
     parser.add_argument("--desc", default=None, help="描述（留空则自动生成）")
     parser.add_argument("--tags", default=None, help="话题标签，逗号分隔")
     parser.add_argument("--schedule", type=_schedule_value, default=None, help=f"定时发布时间，格式 {schedule_help}")

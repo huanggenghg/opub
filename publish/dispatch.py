@@ -2,6 +2,7 @@
 """平台分发:登录校验与各平台发布实现"""
 import importlib
 import os
+import sys
 
 from publish.constants import PLATFORM_NAMES, TITLE_LIMITS
 from publish.content import resolve_path, truncate_title
@@ -33,6 +34,13 @@ async def ensure_login(platform: str, account_file: str) -> bool:
         if await check_func(account_file):
             return True
 
+    # 扫码登录会打开浏览器并阻塞等待用户扫码(最长约 5 分钟),
+    # 提前告知调用方,避免 Agent 工具默认超时杀掉进程组导致浏览器一并退出
+    print(
+        f"[opub] {platform} 未登录,即将打开浏览器等待扫码登录(最长约 5 分钟)。"
+        f"若由 Agent 调用,请确保工具超时不低于 360 秒",
+        file=sys.stderr,
+    )
     setup_func = getattr(module, setup_name)
     return await setup_func(account_file, handle=True)
 

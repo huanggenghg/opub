@@ -6,6 +6,61 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import publish_all
+from conf import BASE_DIR
+from publish.errors import EXIT_CONFIG_ERROR
+
+
+class TitleGuardTests(unittest.TestCase):
+    def test_video_mode_empty_title_after_resolution_returns_config_error(self):
+        params = {
+            "content_type": "video",
+            "title": "",
+            "desc": "",
+            "tags": [],
+            "video_file": "videos/demo.mp4",
+            "images": [],
+            "publish_strategy": "immediate",
+            "publish_time": None,
+            "enabled_platforms": ["weibo"],
+            "platforms": {"weibo_account": "cookies/weibo_1.json"},
+            "convert_to_video": False,
+            "video_duration": 5,
+            "start_from": 1,
+        }
+
+        with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)), \
+             patch("publish.orchestrator.get_video_files", return_value=["videos/demo.mp4"]), \
+             patch("publish.orchestrator.get_video_content", return_value=("", "")), \
+             patch("publish.orchestrator.publish_one_item", new=AsyncMock()) as publish_one_item:
+            code = asyncio.run(publish_all.run_publish_with_params(params))
+
+        self.assertEqual(code, EXIT_CONFIG_ERROR)
+        publish_one_item.assert_not_awaited()
+
+    def test_note_mode_empty_title_returns_config_error(self):
+        params = {
+            "content_type": "note",
+            "title": "",
+            "desc": "",
+            "tags": [],
+            "video_file": "",
+            "images": ["videos/demo.png"],
+            "publish_strategy": "immediate",
+            "publish_time": None,
+            "enabled_platforms": ["weibo"],
+            "platforms": {"weibo_account": "cookies/weibo_1.json"},
+            "convert_to_video": False,
+            "video_duration": 5,
+            "start_from": 1,
+        }
+
+        with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)), \
+             patch("publish.orchestrator.fill_empty_content", return_value=("", "")), \
+             patch("publish.orchestrator.publish_one_item", new=AsyncMock()) as publish_one_item:
+            code = asyncio.run(publish_all.run_publish_with_params(params))
+
+        self.assertEqual(code, EXIT_CONFIG_ERROR)
+        publish_one_item.assert_not_awaited()
 
 
 class PublishEngineTests(unittest.TestCase):
@@ -381,6 +436,30 @@ class AccountLoginFlowTests(unittest.TestCase):
         self.assertFalse(results["douyin"]["success"])
         self.assertIn("登录失败", results["douyin"]["message"])
 
+    def test_publish_one_item_missing_account_file_triggers_login_with_default_path(self):
+        params = {
+            "enabled_platforms": ["douyin"],
+            "platforms": {},
+            "content_type": "video",
+            "video_file": "videos/demo.mp4",
+            "title": "标题",
+            "desc": "描述",
+            "tags": [],
+            "publish_strategy": "immediate",
+            "publish_time": None,
+            "convert_to_video": False,
+        }
+
+        expected_default = str(Path(BASE_DIR) / "cookies" / "douyin_uploader" / "account.json")
+
+        with patch("publish.orchestrator.ensure_account_login", new=AsyncMock(return_value=True)) as ensure_login, \
+             patch("publish.orchestrator.publish_to_platform", new=AsyncMock(return_value={"success": True, "message": "发布成功"})) as publish:
+            results = publish_all.run_async_for_test(publish_all.publish_one_item(params))
+
+        ensure_login.assert_awaited_once_with("douyin", expected_default)
+        publish.assert_awaited_once()
+        self.assertTrue(results["douyin"]["success"])
+
     def test_publish_one_item_skips_login_for_unsupported_platforms(self):
         params = {
             "enabled_platforms": ["fake_platform"],
@@ -401,6 +480,31 @@ class AccountLoginFlowTests(unittest.TestCase):
         ensure_login.assert_not_awaited()
         self.assertFalse(results["fake_platform"]["success"])
         self.assertIn("未知平台", results["fake_platform"]["message"])
+
+
+class EnsureLoginWarningTests(unittest.TestCase):
+    def test_ensure_login_missing_account_prints_timeout_warning_before_setup(self):
+        import contextlib
+        import io
+
+        from publish import dispatch
+
+        fake_setup = AsyncMock(return_value=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            account_file = str(Path(tmp) / "account.json")
+            with patch.dict(
+                "publish.dispatch._PLATFORM_LOGIN",
+                {"fake_plat": ("fake_mod", "cookie_auth", "fake_setup")},
+            ), patch("importlib.import_module") as import_module:
+                import_module.return_value.cookie_auth = AsyncMock(return_value=True)
+                import_module.return_value.fake_setup = fake_setup
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    ok = asyncio.run(dispatch.ensure_login("fake_plat", account_file))
+
+        self.assertTrue(ok)
+        fake_setup.assert_awaited_once_with(account_file, handle=True)
+        self.assertIn("工具超时", stderr.getvalue())
 
 
 class PublishFailurePolicyTests(unittest.TestCase):

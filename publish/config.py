@@ -29,6 +29,28 @@ def _split_csv(value: Optional[str]) -> list:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+PLATFORM_ACCOUNT_SUBDIRS = {
+    "douyin": "douyin_uploader",
+    "kuaishou": "ks_uploader",
+    "xiaohongshu": "xiaohongshu_uploader",
+    "weibo": "weibo_uploader",
+    "tencent": "tencent_uploader",
+    "baijiahao": "baijiahao_uploader",
+    "bilibili": "bilibili_uploader",
+    "tk": "tk_uploader",
+}
+
+
+def default_account_file(platform: str) -> Optional[str]:
+    """未发现账号文件时的默认保存路径,登录流程会把扫码结果写到这里"""
+    subdir = PLATFORM_ACCOUNT_SUBDIRS.get(platform)
+    if subdir is None:
+        return None
+    account_dir = BASE_DIR / "cookies" / subdir
+    account_dir.mkdir(parents=True, exist_ok=True)
+    return str(account_dir / "account.json")
+
+
 def _discover_account_files() -> Dict[str, str]:
     cookies_dir = BASE_DIR / "cookies"
     platform_prefixes = {
@@ -38,22 +60,14 @@ def _discover_account_files() -> Dict[str, str]:
         "weibo": "weibo_",
         "tencent": "tencent_",
         "baijiahao": "baijiahao_",
+        "bilibili": "bilibili_",
         "tk": "tk_",
-    }
-    platform_subdirs = {
-        "douyin": "douyin_uploader",
-        "kuaishou": "ks_uploader",
-        "xiaohongshu": "xiaohongshu_uploader",
-        "weibo": "weibo_uploader",
-        "tencent": "tencent_uploader",
-        "baijiahao": "baijiahao_uploader",
-        "tk": "tk_uploader",
     }
 
     platforms = {}
     for platform, prefix in platform_prefixes.items():
         flat_files = sorted(cookies_dir.glob(f"{prefix}*.json"))
-        subdir = platform_subdirs[platform]
+        subdir = PLATFORM_ACCOUNT_SUBDIRS[platform]
         subdir_files = sorted((cookies_dir / subdir).glob("*.json")) if (cookies_dir / subdir).exists() else []
         account_files = flat_files + [file for file in subdir_files if file not in flat_files]
         if account_files:

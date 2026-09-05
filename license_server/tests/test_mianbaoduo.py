@@ -88,7 +88,15 @@ def test_create_wechat_checkout_posts_signed_payload_and_returns_url():
 def test_create_alipay_checkout_posts_both_return_urls_and_returns_html():
     from license_server.mianbaoduo import ALIPAY_URL, MianbaoduoClient, sign_parameters
 
-    body = "<html><form action='https://pay.example'></form></html>"
+    body = (
+        "<html><head><script>provider_secret()</script></head><body>"
+        "<form method='post' action='https://alipay.com/pay'>"
+        "<input type='hidden' name='method' value='alipay.trade.page.pay'>"
+        "<input type='hidden' name='app_id' value='app'>"
+        "<input type='hidden' name='biz_content' value='{&quot;out_trade_no&quot;:&quot;order-1&quot;}'>"
+        "<input type='hidden' name='sign' value='provider-signature'>"
+        "</form><script>provider_secret_after()</script></body></html>"
+    )
     response = FakeResponse({"body": body})
     session = FakeSession(response)
     client = MianbaoduoClient("app", "secret", "https://opub.test/done", session)
@@ -100,7 +108,12 @@ def test_create_alipay_checkout_posts_both_return_urls_and_returns_html():
         "url": "https://opub.test/done", "callback_url": "https://opub.test/done",
     }
     expected["sign"] = sign_parameters(expected, "secret")
-    assert checkout == Checkout("html", body)
+    assert checkout.kind == "html"
+    assert checkout.value != body
+    assert "provider_secret" not in checkout.value
+    assert "provider-signature" in checkout.value
+    assert 'id="mianbaoduo-checkout"' in checkout.value
+    assert "<noscript><button type=\"submit\">Continue to payment</button></noscript>" in checkout.value
     assert session.calls == [(ALIPAY_URL, expected, (5, 15))]
 
 
@@ -118,6 +131,15 @@ def test_query_order_normalizes_numeric_strings_and_copies_raw_payload():
     assert order == ProviderOrder(1, 990, "opub", "charge-1", 2, payload)
     assert order.raw is not payload
     assert session.calls == [(QUERY_URL, expected, (5, 15))]
+
+
+def test_query_order_accepts_only_canonical_nonnegative_decimal_fields():
+    from license_server.mianbaoduo import MianbaoduoClient
+
+    payload = {"state": 0, "amount": "0", "description": "opub", "charge_id": "charge-1", "payway": "2"}
+    client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse(payload)))
+    order = client.query_order("order-1")
+    assert (order.state, order.amount, order.payway) == (0, 0, 2)
 
 
 @pytest.mark.parametrize("payway", ["stripe", "", None])
@@ -232,11 +254,12 @@ def test_invalid_alipay_html_fails_closed(body):
 def test_alipay_html_at_size_limit_is_allowed():
     from license_server.mianbaoduo import _MAX_CHECKOUT_HTML_BYTES, MianbaoduoClient
 
-    prefix = "<form>"
-    suffix = "</form>"
-    body = prefix + ("x" * (_MAX_CHECKOUT_HTML_BYTES - len(prefix.encode("utf-8")) - len(suffix.encode("utf-8")))) + suffix
+    base = _alipay_form()
+    body = _alipay_form("x" * (_MAX_CHECKOUT_HTML_BYTES - len(base.encode("utf-8"))))
     client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse({"body": body})))
-    assert client.create_checkout("alipay", "order-1", "opub", 990) == Checkout("html", body)
+    checkout = client.create_checkout("alipay", "order-1", "opub", 990)
+    assert checkout.kind == "html"
+    assert checkout.value != body
 
 
 def test_alipay_html_unicode_encoding_failure_is_redacted():
@@ -249,6 +272,84 @@ def test_alipay_html_unicode_encoding_failure_is_redacted():
         client.create_checkout("alipay", "order-1", "opub", 990)
     assert secret not in str(exc_info.value)
     assert "\ud800" not in str(exc_info.value)
+
+
+def _alipay_form(extra: str = "", *, action: str = "https://alipay.com/pay") -> str:
+    return (
+        f'<form method="post" action="{action}">'
+        '<input name="method" value="alipay.trade.page.pay">'
+        '<input name="app_id" value="app">'
+        '<input name="biz_content" value="payload">'
+        '<input name="sign" value="signature">'
+        f"{extra}</form>"
+    )
+
+
+@pytest.mark.parametrize(
+    "action",
+    ["javascript:alert(1)", "http://alipay.com/pay", "https://evil.example/pay", "https://notalipay.com/pay"],
+)
+def test_alipay_rejects_unsafe_form_actions(action):
+    from license_server.mianbaoduo import MianbaoduoClient, ProviderError
+
+    client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse({"body": _alipay_form(action=action)})))
+    with pytest.raises(ProviderError):
+        client.create_checkout("alipay", "order-1", "opub", 990)
+
+
+def test_alipay_escapes_action_and_input_attributes():
+    from license_server.mianbaoduo import MianbaoduoClient
+
+    body = _alipay_form(
+        '<input name="name&quot; onfocus=&quot;bad" value="value&quot; onfocus=&quot;bad">',
+        action="https://alipay.com/pay?x=1&amp;y=2&quot;onfocus=&quot;bad",
+    )
+    client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse({"body": body})))
+    checkout = client.create_checkout("alipay", "order-1", "opub", 990)
+    assert 'onfocus="bad' not in checkout.value
+    assert "&quot;" in checkout.value
+    assert "https://alipay.com/pay?x=1&amp;y=2&quot;" in checkout.value
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        _alipay_form() + _alipay_form(),
+        _alipay_form('<input name="sign" value="duplicate">'),
+        _alipay_form('<div><input name="extra" value="x"></form></div>'),
+        _alipay_form().replace("</form>", ""),
+    ],
+)
+def test_alipay_rejects_multiple_duplicate_or_malformed_forms(body):
+    from license_server.mianbaoduo import MianbaoduoClient, ProviderError
+
+    client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse({"body": body})))
+    with pytest.raises(ProviderError):
+        client.create_checkout("alipay", "order-1", "opub", 990)
+
+
+def test_repeated_form_prefixes_at_byte_limit_fail_without_repeated_regex_work():
+    from license_server.mianbaoduo import MianbaoduoClient, ProviderError
+
+    body = "<form>" * (256 * 1024 // len("<form>"))
+    client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse({"body": body})))
+    with pytest.raises(ProviderError):
+        client.create_checkout("alipay", "order-1", "opub", 990)
+
+
+def test_alipay_parser_failure_is_redacted(monkeypatch):
+    from license_server import mianbaoduo
+    from license_server.mianbaoduo import MianbaoduoClient, ProviderError
+
+    def fail(self, data):
+        raise RuntimeError("raw provider body")
+
+    monkeypatch.setattr(mianbaoduo._AlipayFormParser, "feed", fail)
+    client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse({"body": _alipay_form()})))
+    with pytest.raises(ProviderError) as exc_info:
+        client.create_checkout("alipay", "order-1", "opub", 990)
+    assert "raw provider body" not in str(exc_info.value)
+    assert "secret" not in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
@@ -267,6 +368,14 @@ def test_alipay_html_unicode_encoding_failure_is_redacted():
         {"state": 1, "amount": 990, "description": "opub", "charge_id": " ", "payway": 1},
         {"state": 1, "amount": 990, "description": "opub", "charge_id": "id", "payway": "no"},
         {"state": "no", "amount": 990, "description": "opub", "charge_id": "id", "payway": 1},
+        {"state": -1, "amount": 990, "description": "opub", "charge_id": "id", "payway": 1},
+        {"state": 1, "amount": " 990", "description": "opub", "charge_id": "id", "payway": 1},
+        {"state": 1, "amount": "+990", "description": "opub", "charge_id": "id", "payway": 1},
+        {"state": 1, "amount": "9_90", "description": "opub", "charge_id": "id", "payway": 1},
+        {"state": 1, "amount": "９９０", "description": "opub", "charge_id": "id", "payway": 1},
+        {"state": 1, "amount": "0990", "description": "opub", "charge_id": "id", "payway": 1},
+        {"state": 1, "amount": 1.0, "description": "opub", "charge_id": "id", "payway": 1},
+        {"state": 1, "amount": True, "description": "opub", "charge_id": "id", "payway": 1},
     ],
 )
 def test_invalid_query_payload_fails_closed(payload):

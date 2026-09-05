@@ -1,0 +1,5 @@
+# license_server/deploy/Caddyfile.example
+{$OPUB_LICENSE_HOST} {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8013
+}

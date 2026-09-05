@@ -1,0 +1,4 @@
+# MANIFEST.in
+prune license_server
+prune .secrets
+global-exclude *.sqlite3 *.sqlite3-shm *.sqlite3-wal

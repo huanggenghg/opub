@@ -1,0 +1,17 @@
+# license_server/deploy/opub-license.service
+[Unit]
+Description=opub license service
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/opub
+EnvironmentFile=/etc/opub-license.env
+ExecStart=/opt/opub/.venv/bin/uvicorn license_server.app:app_from_env --factory --host 127.0.0.1 --port 8013 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+User=opub-license
+Group=opub-license
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

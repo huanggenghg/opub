@@ -201,3 +201,9 @@ temp_frames/
 
 # Claude Code local settings (contains secrets)
 .claude/settings.local.json
+
+# License service runtime state
+license_server/data/
+license_server/*.sqlite3
+license_server/*.sqlite3-shm
+license_server/*.sqlite3-wal

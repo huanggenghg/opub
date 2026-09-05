@@ -33,12 +33,13 @@ def test_sign_license_creates_verifiable_license_payload() -> None:
     from license_server.signing import canonical_json, sign_license
 
     private_key_b64 = base64.b64encode(bytes(range(32))).decode("ascii")
+    issued_at = "2026-09-05T00:00:00Z"
     signed = sign_license(
         private_key_b64=private_key_b64,
         key_id="kid-1",
         license_id="lic-1",
         device_hash="device-hash-1",
-        issued_at=1712345678,
+        issued_at=issued_at,
     )
 
     assert signed["payload"] == {
@@ -47,8 +48,9 @@ def test_sign_license_creates_verifiable_license_payload() -> None:
         "license_id": "lic-1",
         "product": "opub-lifetime-v1",
         "device_hash": "device-hash-1",
-        "issued_at": 1712345678,
+        "issued_at": issued_at,
     }
+    assert isinstance(signed["payload"]["issued_at"], str)
 
     payload_bytes = canonical_json(signed["payload"])
     signature = base64.b64decode(signed["signature"])
@@ -60,12 +62,13 @@ def test_sign_license_rejects_tampered_payload() -> None:
     from license_server.signing import canonical_json, sign_license
 
     private_key_b64 = base64.b64encode(bytes(range(32))).decode("ascii")
+    issued_at = "2026-09-05T00:00:00Z"
     signed = sign_license(
         private_key_b64=private_key_b64,
         key_id="kid-1",
         license_id="lic-1",
         device_hash="device-hash-1",
-        issued_at=1712345678,
+        issued_at=issued_at,
     )
 
     tampered_payload = dict(signed["payload"])
@@ -122,7 +125,7 @@ def test_keygen_creates_private_seed_and_public_client_module(tmp_path: Path) ->
         key_id="kid-1",
         license_id="lic-1",
         device_hash="device-hash-1",
-        issued_at=1712345678,
+        issued_at="2026-09-05T00:00:00Z",
     )
 
     public_key = Ed25519PublicKey.from_public_bytes(public_key_bytes)
@@ -151,6 +154,159 @@ def test_keygen_refuses_existing_private_before_touching_client(tmp_path: Path) 
         )
 
     assert client_file.read_text(encoding="utf-8") == "sentinel = True\n"
+
+
+def test_keygen_does_not_use_fchmod(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from license_server import keygen
+
+    def _boom(*args, **kwargs):  # noqa: ANN001, ANN002
+        raise AssertionError("os.fchmod must not be used")
+
+    monkeypatch.setattr(keygen.os, "fchmod", _boom)
+
+    assert (
+        keygen.generate(
+            private_file=tmp_path / "license.private",
+            client_file=tmp_path / "license_client.py",
+            base_url="https://example.com/license",
+            key_id="kid-1",
+        )
+        == 0
+    )
+
+
+def _files_in(root: Path) -> set[Path]:
+    return {path.relative_to(root) for path in root.rglob("*") if path.is_file()}
+
+
+def _assert_no_temp_files(root: Path) -> None:
+    temp_files = [path for path in root.rglob("*") if path.is_file() and path.name.startswith(".")]
+    assert temp_files == []
+
+
+def _assert_retryable_atomic_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    fail_attr: str,
+    expected_exception: type[BaseException],
+) -> None:
+    from license_server import keygen
+
+    private_file = tmp_path / "keys" / "license.private"
+    client_file = tmp_path / "client" / "license_client.py"
+    client_file.parent.mkdir(parents=True, exist_ok=True)
+    client_file.write_text("sentinel = True\n", encoding="utf-8")
+
+    real_func = getattr(keygen.os, fail_attr)
+    calls = {"count": 0}
+
+    def _fail_once(*args, **kwargs):  # noqa: ANN001, ANN002
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise expected_exception(f"{fail_attr} boom")
+        return real_func(*args, **kwargs)
+
+    monkeypatch.setattr(keygen.os, fail_attr, _fail_once)
+
+    with pytest.raises(expected_exception):
+        keygen.generate(
+            private_file=private_file,
+            client_file=client_file,
+            base_url="https://example.com:8443/license/",
+            key_id="kid-1",
+        )
+
+    assert not private_file.exists()
+    assert client_file.read_text(encoding="utf-8") == "sentinel = True\n"
+    assert _files_in(tmp_path) == {client_file.relative_to(tmp_path)}
+    _assert_no_temp_files(tmp_path)
+
+    assert (
+        keygen.generate(
+            private_file=private_file,
+            client_file=client_file,
+            base_url="https://example.com:8443/license/",
+            key_id="kid-1",
+        )
+        == 0
+    )
+    assert private_file.exists()
+    assert client_file.read_text(encoding="utf-8").startswith("LICENSE_API_BASE_URL='https://example.com:8443/license'")
+    _assert_no_temp_files(tmp_path)
+
+
+def test_keygen_recovers_after_private_write_fsync_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from license_server import keygen
+
+    _assert_retryable_atomic_failure(
+        monkeypatch,
+        tmp_path,
+        fail_attr="fsync",
+        expected_exception=OSError,
+    )
+
+
+def test_keygen_recovers_after_private_publication_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from license_server import keygen
+
+    _assert_retryable_atomic_failure(
+        monkeypatch,
+        tmp_path,
+        fail_attr="link",
+        expected_exception=FileExistsError,
+    )
+
+
+def test_keygen_recovers_after_client_write_or_replace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from license_server import keygen
+
+    private_file = tmp_path / "keys" / "license.private"
+    client_file = tmp_path / "client" / "license_client.py"
+    client_file.parent.mkdir(parents=True, exist_ok=True)
+    client_file.write_text("sentinel = True\n", encoding="utf-8")
+
+    real_replace = keygen.os.replace
+    calls = {"count": 0}
+
+    def _fail_once(src: str, dst: str) -> None:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise OSError("replace boom")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(keygen.os, "replace", _fail_once)
+
+    with pytest.raises(OSError):
+        keygen.generate(
+            private_file=private_file,
+            client_file=client_file,
+            base_url="https://example.com:8443/license/",
+            key_id="kid-1",
+        )
+
+    assert not private_file.exists()
+    assert client_file.read_text(encoding="utf-8") == "sentinel = True\n"
+    _assert_no_temp_files(tmp_path)
+
+    assert (
+        keygen.generate(
+            private_file=private_file,
+            client_file=client_file,
+            base_url="https://example.com:8443/license/",
+            key_id="kid-1",
+        )
+        == 0
+    )
+    assert private_file.exists()
+    assert client_file.read_text(encoding="utf-8").startswith("LICENSE_API_BASE_URL='https://example.com:8443/license'")
+    _assert_no_temp_files(tmp_path)
 
 
 @pytest.mark.parametrize(

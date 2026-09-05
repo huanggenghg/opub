@@ -22,7 +22,7 @@ def sign_license(
     key_id: str,
     license_id: str,
     device_hash: str,
-    issued_at: int,
+    issued_at: str,
 ) -> dict[str, object]:
     private_seed = base64.b64decode(private_key_b64, validate=True)
     if len(private_seed) != 32:

@@ -81,20 +81,27 @@ def _validate_key_id(key_id: str) -> str:
 
 def _write_private_seed(private_file: Path, private_seed: bytes) -> None:
     private_file.parent.mkdir(parents=True, exist_ok=True)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    fd = os.open(private_file, flags, 0o600)
+    fd, temp_path = tempfile.mkstemp(
+        dir=str(private_file.parent),
+        prefix=f".{private_file.name}.",
+    )
     try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb", closefd=False) as handle:
+        os.chmod(temp_path, 0o600)
+        with os.fdopen(fd, "wb") as handle:
             handle.write(base64.b64encode(private_seed))
             handle.write(b"\n")
             handle.flush()
             os.fsync(handle.fileno())
-    except Exception:
-        os.close(fd)
-        raise
-    else:
-        os.close(fd)
+        os.link(temp_path, private_file)
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
 
 
 def _write_client_module(client_file: Path, base_url: str, key_id: str, public_key_b64: str) -> None:
@@ -103,22 +110,25 @@ def _write_client_module(client_file: Path, base_url: str, key_id: str, public_k
         f"LICENSE_API_BASE_URL={base_url!r}\n"
         f"TRUSTED_PUBLIC_KEYS={{{key_id!r}: {public_key_b64!r}}}\n"
     )
-    fd, temp_path = tempfile.mkstemp(dir=str(client_file.parent), prefix=f".{client_file.name}.")
+    fd, temp_path = tempfile.mkstemp(
+        dir=str(client_file.parent),
+        prefix=f".{client_file.name}.",
+    )
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n", closefd=False) as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-    except Exception:
-        os.close(fd)
+        os.replace(temp_path, client_file)
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
         try:
             os.unlink(temp_path)
         except FileNotFoundError:
             pass
-        raise
-    else:
-        os.close(fd)
-        os.replace(temp_path, client_file)
 
 
 def generate(
@@ -139,8 +149,18 @@ def generate(
         public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
     ).decode("ascii")
 
-    _write_private_seed(private_file, private_seed)
-    _write_client_module(client_file, normalized_base_url, normalized_key_id, public_key_b64)
+    private_published = False
+    try:
+        _write_private_seed(private_file, private_seed)
+        private_published = True
+        _write_client_module(client_file, normalized_base_url, normalized_key_id, public_key_b64)
+    except Exception:
+        if private_published:
+            try:
+                private_file.unlink()
+            except FileNotFoundError:
+                pass
+        raise
 
     return 0
 

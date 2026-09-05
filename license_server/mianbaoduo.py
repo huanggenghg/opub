@@ -180,7 +180,11 @@ class MianbaoduoClient:
         value = result.get("body")
         if not isinstance(value, str) or not value:
             raise ProviderError("Mianbaoduo alipay checkout returned no usable form")
-        if len(value.encode("utf-8")) > _MAX_CHECKOUT_HTML_BYTES or not _FORM_RE.search(value):
+        try:
+            body_size = len(value.encode("utf-8"))
+        except UnicodeError:
+            raise ProviderError("Mianbaoduo alipay checkout returned an invalid form") from None
+        if body_size > _MAX_CHECKOUT_HTML_BYTES or not _FORM_RE.search(value):
             raise ProviderError("Mianbaoduo alipay checkout returned an invalid form")
         return Checkout("html", value)
 

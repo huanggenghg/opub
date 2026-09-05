@@ -220,13 +220,35 @@ def test_valid_wechat_url_structure_is_returned(url):
     assert client.create_checkout("wechat", "order-1", "opub", 990) == Checkout("url", url)
 
 
-@pytest.mark.parametrize("body", ["", "not html", "<html>" + ("x" * (256 * 1024))])
+@pytest.mark.parametrize("body", ["", "not html", "<form>" + ("x" * (256 * 1024)) + "</form>"])
 def test_invalid_alipay_html_fails_closed(body):
     from license_server.mianbaoduo import MianbaoduoClient, ProviderError
 
     client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse({"body": body})))
     with pytest.raises(ProviderError):
         client.create_checkout("alipay", "order-1", "opub", 990)
+
+
+def test_alipay_html_at_size_limit_is_allowed():
+    from license_server.mianbaoduo import _MAX_CHECKOUT_HTML_BYTES, MianbaoduoClient
+
+    prefix = "<form>"
+    suffix = "</form>"
+    body = prefix + ("x" * (_MAX_CHECKOUT_HTML_BYTES - len(prefix.encode("utf-8")) - len(suffix.encode("utf-8")))) + suffix
+    client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse({"body": body})))
+    assert client.create_checkout("alipay", "order-1", "opub", 990) == Checkout("html", body)
+
+
+def test_alipay_html_unicode_encoding_failure_is_redacted():
+    from license_server.mianbaoduo import MianbaoduoClient, ProviderError
+
+    secret = "TOP-SECRET-APP-KEY"
+    body = "<form>" + "\ud800" + "</form>"
+    client = MianbaoduoClient("app", secret, "https://opub.test/done", FakeSession(FakeResponse({"body": body})))
+    with pytest.raises(ProviderError) as exc_info:
+        client.create_checkout("alipay", "order-1", "opub", 990)
+    assert secret not in str(exc_info.value)
+    assert "\ud800" not in str(exc_info.value)
 
 
 @pytest.mark.parametrize(

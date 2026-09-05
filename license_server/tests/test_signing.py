@@ -175,6 +175,50 @@ def test_keygen_rejects_invalid_base_url(base_url: str, tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://example.com:443/license",
+        "https://127.0.0.1:8443/license",
+        "https://[::1]:9443/license",
+    ],
+)
+def test_keygen_accepts_valid_explicit_ports_and_paths(base_url: str, tmp_path: Path) -> None:
+    from license_server import keygen
+
+    assert (
+        keygen.generate(
+            private_file=tmp_path / "license.private",
+            client_file=tmp_path / "license_client.py",
+            base_url=base_url,
+            key_id="kid-1",
+        )
+        == 0
+    )
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://example.com:bad/license",
+        "https://example.com:99999/license",
+        "https://exa mple.com/license",
+        "https://exa\nmple.com/license",
+        "https://@example.com/license",
+    ],
+)
+def test_keygen_rejects_malformed_host_and_ports(base_url: str, tmp_path: Path) -> None:
+    from license_server import keygen
+
+    with pytest.raises(ValueError):
+        keygen.generate(
+            private_file=tmp_path / "license.private",
+            client_file=tmp_path / "license_client.py",
+            base_url=base_url,
+            key_id="kid-1",
+        )
+
+
 @pytest.mark.parametrize("key_id", ["", "   "])
 def test_keygen_rejects_empty_key_id(key_id: str, tmp_path: Path) -> None:
     from license_server import keygen
@@ -186,6 +230,27 @@ def test_keygen_rejects_empty_key_id(key_id: str, tmp_path: Path) -> None:
             base_url="https://example.com/license",
             key_id=key_id,
         )
+
+
+def test_keygen_rejects_same_private_and_client_path_without_touching_file(
+    tmp_path: Path,
+) -> None:
+    from license_server import keygen
+
+    target = tmp_path / "license_client.py"
+    target.write_text("sentinel = True\n", encoding="utf-8")
+    before_mode = stat.S_IMODE(target.stat().st_mode)
+
+    with pytest.raises(ValueError):
+        keygen.generate(
+            private_file=target,
+            client_file=target,
+            base_url="https://example.com/license",
+            key_id="kid-1",
+        )
+
+    assert target.read_text(encoding="utf-8") == "sentinel = True\n"
+    assert stat.S_IMODE(target.stat().st_mode) == before_mode
 
 
 def test_keygen_main_returns_zero(tmp_path: Path) -> None:

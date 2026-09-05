@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ipaddress
 import os
 import secrets
 import tempfile
@@ -13,19 +14,62 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 
 def _normalize_base_url(base_url: str) -> str:
-    parts = urlsplit(base_url.strip())
+    trimmed = base_url.strip()
+    if any(ord(char) < 33 or ord(char) == 127 for char in trimmed):
+        raise ValueError("base_url must be a valid https URL")
+
+    parts = urlsplit(trimmed)
     if (
         parts.scheme != "https"
         or not parts.hostname
-        or parts.username
-        or parts.password
         or parts.query
         or parts.fragment
     ):
         raise ValueError("base_url must be a valid https URL")
 
+    try:
+        _ = parts.port
+    except ValueError as exc:
+        raise ValueError("base_url must be a valid https URL") from exc
+
+    if "@" in parts.netloc or parts.username is not None or parts.password is not None:
+        raise ValueError("base_url must be a valid https URL")
+
+    _validate_hostname(parts.hostname)
     path = parts.path.rstrip("/")
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+
+def _validate_hostname(hostname: str) -> None:
+    if any(ord(char) < 33 or ord(char) == 127 for char in hostname):
+        raise ValueError("base_url must be a valid https URL")
+
+    try:
+        hostname.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError("base_url must be a valid https URL") from exc
+
+    try:
+        ipaddress.ip_address(hostname)
+        return
+    except ValueError:
+        pass
+
+    if hostname == "localhost":
+        return
+
+    if hostname.endswith("."):
+        raise ValueError("base_url must be a valid https URL")
+
+    labels = hostname.split(".")
+    if not labels or any(not label for label in labels):
+        raise ValueError("base_url must be a valid https URL")
+
+    for label in labels:
+        if len(label) > 63 or label[0] == "-" or label[-1] == "-":
+            raise ValueError("base_url must be a valid https URL")
+        if not all(char.isalnum() or char == "-" for char in label):
+            raise ValueError("base_url must be a valid https URL")
 
 
 def _validate_key_id(key_id: str) -> str:
@@ -84,6 +128,9 @@ def generate(
     base_url: str,
     key_id: str,
 ) -> int:
+    if private_file.resolve(strict=False) == client_file.resolve(strict=False):
+        raise ValueError("private_file and client_file must be different paths")
+
     normalized_base_url = _normalize_base_url(base_url)
     normalized_key_id = _validate_key_id(key_id)
     private_seed = secrets.token_bytes(32)

@@ -1,0 +1,6 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+requests>=2.32,<3
+cryptography>=45,<51
+pytest>=8,<10
+httpx>=0.28,<1

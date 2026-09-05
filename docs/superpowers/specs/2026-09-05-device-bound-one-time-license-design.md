@@ -121,12 +121,16 @@ MVP 部署配置：
 
 ```text
 OPUB_PUBLIC_BASE_URL
+OPUB_PAYMENT_RETURN_URL
 OPUB_MBD_APP_ID
 OPUB_MBD_APP_KEY
 OPUB_LICENSE_PRIVATE_KEY
-OPUB_LICENSE_PRODUCT_ID=opub-lifetime-v1
-OPUB_LICENSE_PRICE_FEN=990
+OPUB_LICENSE_KEY_ID=2026-09
+OPUB_LICENSE_DB_PATH
 ```
+
+商品标识 `opub-lifetime-v1` 与价格 990 分写死在服务端配置类型中，不通过客户端
+请求或部署环境覆盖，避免误配置造成错价签发。
 
 客户端只内置许可证服务 URL 和 Ed25519 公钥，不包含支付密钥或签名私钥。
 客户端使用 `cryptography` 完成 Ed25519 验签；许可证服务使用同一套规范化和签名
@@ -145,9 +149,12 @@ amount_fen           INTEGER NOT NULL
 status               TEXT NOT NULL
 poll_token_hash       TEXT NOT NULL
 created_at            TEXT NOT NULL
+expires_at            TEXT NOT NULL
 paid_at               TEXT NULL
 provider_charge_id    TEXT NULL
 payway                INTEGER NULL
+checkout_kind         TEXT NULL
+checkout_value        TEXT NULL
 ```
 
 `status` 只允许：`pending`、`paid`、`verification_failed`、`expired`。
@@ -175,15 +182,18 @@ issued_at            TEXT NOT NULL
 {
   "device_hash": "64 位十六进制 SHA-256",
   "client_nonce": "至少 128 位随机值",
-  "client_version": "当前 opub 版本"
+  "client_version": "当前 opub 版本",
+  "payway": "wechat 或 alipay"
 }
 ```
 
 服务端固定选择 `opub-lifetime-v1` 和 990 分：
 
 - 若该设备已有许可证，响应直接返回原签名许可证，不创建订单。
-- 若该设备存在未过期的待支付订单，返回原会话并轮换 `poll_token`；旧轮询令牌
-  立即失效，避免多个客户端并发控制同一会话。
+- 若该设备存在同支付渠道且未过期的待支付订单，返回原会话并轮换
+  `poll_token`；旧轮询令牌立即失效，避免多个客户端并发控制同一会话。
+- 若同一设备改选另一支付渠道，旧待支付订单标记为 `expired`，然后按新渠道创建
+  新会话；两个渠道不会共享同一个供应商订单号。
 - 其他情况创建新订单。
 
 待支付响应包含：
@@ -192,7 +202,10 @@ issued_at            TEXT NOT NULL
 {
   "session_id": "随机 ID",
   "poll_token": "只返回一次的随机令牌",
-  "checkout_url": "许可证服务生成的 HTTPS 支付页 URL",
+  "checkout": {
+    "kind": "url 或 html",
+    "value": "微信 H5 URL 或支付宝自动提交表单"
+  },
   "expires_at": "ISO 8601 时间"
 }
 ```
@@ -220,15 +233,10 @@ issued_at            TEXT NOT NULL
 6. 依赖唯一约束保证重复 Webhook 只产生一个许可证。
 7. 返回成功响应，避免供应商持续重试。
 
-### `GET /pay/{session_id}`
-
-提供极简响应式支付页：
-
-- 显示商品名和固定价格 9.90 元。
-- 提供微信支付和支付宝支付按钮。
-- 移动端调用面包多 H5/WAP 支付。
-- 桌面端同时显示当前支付页二维码，用户可用手机继续付款。
-- 支付返回页只负责用户体验，不能作为许可证签发依据。
+激活服务只公开以上三个接口。面包多微信 H5 下单返回 URL，支付宝下单返回自动
+提交表单 HTML；CLI 分别打开 URL，或把 HTML 原子写入权限为 `0600` 的临时文件
+后用浏览器打开。桌面端微信 URL 同时生成本地二维码供手机扫码。不额外建设或
+托管支付选择页，支付返回行为也不能作为许可证签发依据。
 
 ## 设备指纹
 
@@ -285,8 +293,12 @@ opub-device-v1\n<platform>\n<normalized-stable-identifiers>
 
 ```bash
 opub --license-status
-opub --activate
+opub --activate --pay-with wechat
+opub --activate --pay-with alipay
 ```
+
+`--pay-with` 只在 `--activate` 时有效，取值为 `wechat` 或 `alipay`。交互式终端中
+未指定时提示选择；非交互环境必须显式传入，避免 Agent 进程因等待输入而挂起。
 
 以下操作无需许可证：
 
@@ -306,7 +318,8 @@ opub --activate
 
 1. 已有有效许可证时直接成功退出。
 2. 有未过期待支付会话时恢复轮询，不新建订单。
-3. 否则创建设备绑定订单并用默认浏览器打开支付页。
+3. 否则按 `--pay-with` 创建设备绑定订单；微信打开 H5 URL 并显示本地二维码，
+   支付宝打开供应商返回的本地临时表单页。
 4. 最长轮询 10 分钟。
 5. 收到许可证后先在本地验签，再原子写入许可证文件。
 6. 超时保留待支付会话，用户可再次执行命令继续。
@@ -317,7 +330,8 @@ opub --activate
 
 1. 用户要求发布时，Agent 先运行 `opub --license-status`。
 2. 已激活时继续收集或使用用户明确提供的发布参数。
-3. 未激活时自动运行 `opub --activate`。
+3. 未激活时询问用户选择微信或支付宝，并自动运行对应的
+   `opub --activate --pay-with <wechat|alipay>`。
 4. Agent 只向用户提示已打开激活支付页，不展示设备哈希、轮询令牌或内部日志。
 5. 激活成功后继续原发布任务，不要求用户重新提供素材、标题或平台。
 6. 激活失败时只报告稳定错误码和可执行建议。
@@ -376,6 +390,7 @@ LIC-012  支付订单验证失败
 - 有效许可证离线验证成功，不发生网络调用。
 - 未授权发布在环境预检、Cookie 读取和浏览器启动之前返回。
 - `--help`、`--version`、`--license-status`、`--activate` 不被门禁阻断。
+- `--pay-with` 仅接受 `wechat` 或 `alipay`，且非激活命令不能使用。
 - 现有发布参数行为保持兼容。
 
 ### 服务端单元测试
@@ -407,7 +422,8 @@ LIC-012  支付订单验证失败
 - Ed25519 私钥保存一份服务器秘密和两份离线备份。
 - 支付订单查询失败时保持待确认或标记 `verification_failed`，绝不猜测成功。
 - 初期不建设管理后台；通过只读数据库查询和结构化日志排查订单。
-- 投诉 Webhook 记录订单状态，但已签发的离线许可证不撤销。
+- 投诉 Webhook 只记录本地订单号和匿名化事件类型，不保存投诉者电话或投诉详情；
+  已签发的离线许可证不撤销。
 - 面包多 Pay 审核是上线前置条件；若产品未通过审核，停止正式收款并切换到官方
   商户接口方案，不回退到个人静态收款码自动监听。
 

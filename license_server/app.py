@@ -19,6 +19,9 @@ from license_server.service import LicenseService
 
 logger = logging.getLogger("opub.license")
 
+_POLLING_LIMIT = 360
+_POLLING_WINDOW_SECONDS = 600
+
 
 class ActivationRequest(BaseModel):
     device_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -76,7 +79,7 @@ def create_app(settings: Settings, database: Database, provider: MianbaoduoClien
     service = LicenseService(settings, database, provider)
     creation_limiter = RateLimiter(60, 3600)
     creation_ip_limiter = RateLimiter(120, 3600)
-    polling_limiter = RateLimiter(180, 600)
+    polling_limiter = RateLimiter(_POLLING_LIMIT, _POLLING_WINDOW_SECONDS)
     app = FastAPI(title="opub License Service", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.post("/v1/activation-sessions", status_code=status.HTTP_201_CREATED)
@@ -95,7 +98,7 @@ def create_app(settings: Settings, database: Database, provider: MianbaoduoClien
     @app.get("/v1/activation-sessions/{session_id}")
     def get_activation(session_id: str, request: Request, token: str = Depends(bearer_token)):
         client_ip = request.client.host if request.client else "unknown"
-        if not polling_limiter.allow(f"{client_ip}:{session_id}"):
+        if not polling_limiter.allow(client_ip):
             raise HTTPException(status_code=429, detail="rate limited")
         try:
             # get_session hashes the raw token internally; the raw value never

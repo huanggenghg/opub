@@ -114,7 +114,8 @@ class LicenseService:
             return {"status": "licensed"}
         verified = self.provider.query_order(provider_order_id)
         if (
-            verified.state not in _VERIFIED_PROVIDER_STATES
+            verified.order_id != provider_order_id
+            or verified.state not in _VERIFIED_PROVIDER_STATES
             or verified.amount != self.settings.price_fen
             or verified.description != self.settings.product_name
             or verified.payway != _PROVIDER_PAYWAY[order["payway"]]

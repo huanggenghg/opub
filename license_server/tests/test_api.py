@@ -17,7 +17,6 @@ from license_server.models import Checkout, ProviderOrder
 
 DEVICE_HASH = "a" * 64
 PRODUCT_NAME = "opub 永久设备许可证"
-VERIFIED_ORDER = ProviderOrder(1, 990, PRODUCT_NAME, "charge-x", 1, {})
 CREATION_BODY = {
     "device_hash": DEVICE_HASH,
     "client_nonce": "b" * 32,
@@ -57,7 +56,11 @@ def provider() -> Mock:
         return Checkout("url", "https://pay.test/order")
 
     provider.create_checkout = Mock(side_effect=create_checkout)
-    provider.query_order = Mock(return_value=VERIFIED_ORDER)
+    provider.query_order = Mock(
+        side_effect=lambda order_id: ProviderOrder(
+            order_id, 1, 990, PRODUCT_NAME, "charge-x", 1, {}
+        )
+    )
     return provider
 
 
@@ -231,7 +234,9 @@ def test_charge_succeeded_verification_failure_is_audited_in_logs(
     client: TestClient, provider: Mock, caplog: pytest.LogCaptureFixture
 ) -> None:
     create_session(client)
-    provider.query_order.return_value = ProviderOrder(1, 991, PRODUCT_NAME, "charge-x", 1, {})
+    provider.query_order.side_effect = lambda order_id: ProviderOrder(
+        order_id, 1, 991, PRODUCT_NAME, "charge-x", 1, {}
+    )
     with caplog.at_level(logging.WARNING, logger="opub.license"):
         response = client.post(
             "/v1/webhooks/mianbaoduo",
@@ -347,11 +352,27 @@ def test_creation_rate_limited_per_ip_after_120_requests(client: TestClient) -> 
     assert client.post("/v1/activation-sessions", json=fresh_device).status_code == 429
 
 
-def test_polling_rate_limited_after_180_requests(client: TestClient) -> None:
+def test_polling_fixed_session_has_full_ten_minute_budget(client: TestClient) -> None:
     created = create_session(client)
-    for _ in range(180):
+    for _ in range(360):
         assert poll(client, created).status_code == 200
     assert poll(client, created).status_code == 429
+
+
+def test_polling_rate_limit_cannot_be_bypassed_by_rotating_session_ids(
+    client: TestClient,
+) -> None:
+    headers = {"Authorization": "Bearer invalid-token"}
+    for index in range(360):
+        response = client.get(
+            f"/v1/activation-sessions/random-{index}",
+            headers=headers,
+        )
+        assert response.status_code == 401
+    assert (
+        client.get("/v1/activation-sessions/one-more", headers=headers).status_code
+        == 429
+    )
 
 
 def test_provider_failure_returns_redacted_503(client: TestClient, provider: Mock) -> None:

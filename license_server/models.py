@@ -15,6 +15,7 @@ class Checkout:
 
 @dataclass(frozen=True)
 class ProviderOrder:
+    order_id: str
     state: int
     amount: int
     description: str

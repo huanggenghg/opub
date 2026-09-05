@@ -190,6 +190,7 @@ def test_value_objects_are_frozen_with_exact_fields() -> None:
         "value": str,
     }
     assert get_type_hints(ProviderOrder) == {
+        "order_id": str,
         "state": int,
         "amount": int,
         "description": str,
@@ -199,10 +200,10 @@ def test_value_objects_are_frozen_with_exact_fields() -> None:
     }
     assert [field.name for field in fields(Checkout)] == ["kind", "value"]
     assert [field.name for field in fields(ProviderOrder)] == [
-        "state", "amount", "description", "charge_id", "payway", "raw"
+        "order_id", "state", "amount", "description", "charge_id", "payway", "raw"
     ]
     checkout = Checkout("url", "https://pay.example")
-    provider_order = ProviderOrder(1, 990, "opub", "charge-1", 2, {"state": 1})
+    provider_order = ProviderOrder("order-1", 1, 990, "opub", "charge-1", 2, {"state": 1})
     with pytest.raises(FrozenInstanceError):
         checkout.kind = "html"  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):

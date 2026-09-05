@@ -120,7 +120,7 @@ def test_create_alipay_checkout_posts_both_return_urls_and_returns_html():
 def test_query_order_normalizes_numeric_strings_and_copies_raw_payload():
     from license_server.mianbaoduo import QUERY_URL, MianbaoduoClient, sign_parameters
 
-    payload = {"state": "1", "amount": "990", "description": "opub", "charge_id": "charge-1", "payway": "2"}
+    payload = {"order_id": "order-1", "state": "1", "amount": "990", "description": "opub", "charge_id": "charge-1", "payway": "2"}
     session = FakeSession(FakeResponse(payload))
     client = MianbaoduoClient("app", "secret", "https://opub.test/done", session)
 
@@ -128,7 +128,7 @@ def test_query_order_normalizes_numeric_strings_and_copies_raw_payload():
 
     expected = {"app_id": "app", "out_trade_no": "order-1"}
     expected["sign"] = sign_parameters(expected, "secret")
-    assert order == ProviderOrder(1, 990, "opub", "charge-1", 2, payload)
+    assert order == ProviderOrder("order-1", 1, 990, "opub", "charge-1", 2, payload)
     assert order.raw is not payload
     assert session.calls == [(QUERY_URL, expected, (5, 15))]
 
@@ -136,10 +136,32 @@ def test_query_order_normalizes_numeric_strings_and_copies_raw_payload():
 def test_query_order_accepts_only_canonical_nonnegative_decimal_fields():
     from license_server.mianbaoduo import MianbaoduoClient
 
-    payload = {"state": 0, "amount": "0", "description": "opub", "charge_id": "charge-1", "payway": "2"}
+    payload = {"order_id": "order-1", "state": 0, "amount": "0", "description": "opub", "charge_id": "charge-1", "payway": "2"}
     client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse(payload)))
     order = client.query_order("order-1")
     assert (order.state, order.amount, order.payway) == (0, 0, 2)
+
+
+@pytest.mark.parametrize("order_id", [None, "", "   "])
+def test_query_order_requires_nonempty_order_id_in_response(order_id):
+    from license_server.mianbaoduo import MianbaoduoClient, ProviderError
+
+    payload = {
+        "order_id": order_id,
+        "state": 1,
+        "amount": 990,
+        "description": "opub",
+        "charge_id": "charge-1",
+        "payway": 1,
+    }
+    client = MianbaoduoClient(
+        "app",
+        "secret",
+        "https://opub.test/done",
+        FakeSession(FakeResponse(payload)),
+    )
+    with pytest.raises(ProviderError):
+        client.query_order("order-1")
 
 
 @pytest.mark.parametrize("payway", ["stripe", "", None])
@@ -381,6 +403,8 @@ def test_alipay_parser_failure_is_redacted(monkeypatch):
 def test_invalid_query_payload_fails_closed(payload):
     from license_server.mianbaoduo import MianbaoduoClient, ProviderError
 
+    if isinstance(payload, dict):
+        payload = {"order_id": "order-1", **payload}
     client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse(payload)))
     with pytest.raises(ProviderError):
         client.query_order("order-1")

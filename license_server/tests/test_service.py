@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -23,7 +24,7 @@ PRODUCT_NAME = "opub 永久设备许可证"
 class FakeProvider:
     def __init__(self) -> None:
         self.create_calls: List[Dict[str, Any]] = []
-        self.query_result: ProviderOrder = ProviderOrder(1, 990, PRODUCT_NAME, "charge-1", 1, {})
+        self.query_result: ProviderOrder | None = None
 
     def create_checkout(self, payway: str, order_id: str, description: str, amount_fen: int) -> Checkout:
         self.create_calls.append(
@@ -34,7 +35,9 @@ class FakeProvider:
         return Checkout("html", "<form></form>")
 
     def query_order(self, order_id: str) -> ProviderOrder:
-        return self.query_result
+        return self.query_result or ProviderOrder(
+            order_id, 1, 990, PRODUCT_NAME, "charge-1", 1, {}
+        )
 
 
 def build_service(tmp_path: Path):
@@ -92,18 +95,30 @@ def test_verified_webhook_is_idempotent_and_device_recovers_license(tmp_path: Pa
 @pytest.mark.parametrize(
     "result",
     [
-        ProviderOrder(0, 990, PRODUCT_NAME, "charge-1", 1, {}),
-        ProviderOrder(3, 990, PRODUCT_NAME, "charge-1", 1, {}),
-        ProviderOrder(1, 991, PRODUCT_NAME, "charge-1", 1, {}),
-        ProviderOrder(1, 990, "wrong product", "charge-1", 1, {}),
-        ProviderOrder(1, 990, PRODUCT_NAME, "charge-1", 2, {}),
+        ProviderOrder("placeholder", 0, 990, PRODUCT_NAME, "charge-1", 1, {}),
+        ProviderOrder("placeholder", 3, 990, PRODUCT_NAME, "charge-1", 1, {}),
+        ProviderOrder("placeholder", 1, 991, PRODUCT_NAME, "charge-1", 1, {}),
+        ProviderOrder("placeholder", 1, 990, "wrong product", "charge-1", 1, {}),
+        ProviderOrder("placeholder", 1, 990, PRODUCT_NAME, "charge-1", 2, {}),
     ],
 )
 def test_unverified_provider_result_never_issues(tmp_path: Path, result: ProviderOrder) -> None:
     service, database, provider = build_service(tmp_path)
     created = service.create_session(DEVICE_HASH, "wechat")
     order_id = provider_order_id_for(database, created["session_id"])
-    provider.query_result = result
+    provider.query_result = replace(result, order_id=order_id)
+    assert service.handle_charge_succeeded(order_id)["status"] == "verification_failed"
+    assert database.row("SELECT COUNT(*) AS count FROM licenses")["count"] == 0
+
+
+def test_provider_order_id_mismatch_never_issues(tmp_path: Path) -> None:
+    service, database, provider = build_service(tmp_path)
+    created = service.create_session(DEVICE_HASH, "wechat")
+    order_id = provider_order_id_for(database, created["session_id"])
+    provider.query_result = ProviderOrder(
+        f"{order_id}-different", 1, 990, PRODUCT_NAME, "charge-1", 1, {}
+    )
+
     assert service.handle_charge_succeeded(order_id)["status"] == "verification_failed"
     assert database.row("SELECT COUNT(*) AS count FROM licenses")["count"] == 0
 
@@ -201,8 +216,8 @@ def test_verification_failed_order_recovers_when_provider_confirms_payment(tmp_p
     service, database, provider = build_service(tmp_path)
     created = service.create_session(DEVICE_HASH, "wechat")
     order_id = provider_order_id_for(database, created["session_id"])
-    provider.query_result = ProviderOrder(0, 990, PRODUCT_NAME, "charge-1", 1, {})
+    provider.query_result = ProviderOrder(order_id, 0, 990, PRODUCT_NAME, "charge-1", 1, {})
     assert service.handle_charge_succeeded(order_id)["status"] == "verification_failed"
-    provider.query_result = ProviderOrder(1, 990, PRODUCT_NAME, "charge-1", 1, {})
+    provider.query_result = ProviderOrder(order_id, 1, 990, PRODUCT_NAME, "charge-1", 1, {})
     assert service.handle_charge_succeeded(order_id)["status"] == "licensed"
     assert service.get_session(created["session_id"], created["poll_token"])["status"] == "licensed"

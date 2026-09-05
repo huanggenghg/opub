@@ -107,7 +107,12 @@ The unit runs uvicorn on `127.0.0.1:8013` with
 proxy is trusted to supply the real client IP (the rate limiters key on it).
 Session creation is capped at 60/hour per (IP, device) and 120/hour per IP —
 the per-IP gate is checked first, so one client cannot buy unlimited provider
-checkouts by rotating device hashes.
+checkouts by rotating device hashes. Polling is capped at 360 requests per
+rolling 10 minutes per IP, regardless of session ID. This gives the client's
+2-second polling loop 20% headroom over its maximum 300 requests in 600
+seconds, while session-ID rotation cannot multiply the allowance. Expired
+in-memory limiter keys are removed during later requests instead of being kept
+for the life of the process.
 
 ## 4. Reverse proxy (Caddy)
 
@@ -159,7 +164,9 @@ In the mianbaoduo merchant console, configure the webhook URL as:
 Use the exact path with **no query parameters** — e.g.
 `https://license.example.com/v1/webhooks/mianbaoduo`. The URL carries no
 secret; every delivery is re-verified server-side by querying the provider
-order API before any license is issued, and repeated deliveries are
+order API before any license is issued. The returned provider `order_id` must
+be non-empty and exactly match the local `provider_order_id`; amount, product,
+payment state, and payment method must also match. Repeated deliveries are
 idempotent.
 
 ## 8. Database backup

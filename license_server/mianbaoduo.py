@@ -310,12 +310,13 @@ class MianbaoduoClient:
         for field in ("state", "amount", "payway"):
             if field not in result:
                 raise ProviderError(f"Mianbaoduo order response is missing {field}")
-        for field in ("description", "charge_id"):
+        for field in ("order_id", "description", "charge_id"):
             value = result.get(field)
             if not isinstance(value, str) or not value.strip():
                 raise ProviderError(f"Mianbaoduo order response has invalid {field}")
 
         return ProviderOrder(
+            order_id=result["order_id"],
             state=_safe_int(result["state"], "state"),
             amount=_safe_int(result["amount"], "amount"),
             description=result["description"],

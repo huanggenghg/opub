@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import argparse
+import base64
+import os
+import secrets
+import tempfile
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+
+def _normalize_base_url(base_url: str) -> str:
+    parts = urlsplit(base_url.strip())
+    if (
+        parts.scheme != "https"
+        or not parts.hostname
+        or parts.username
+        or parts.password
+        or parts.query
+        or parts.fragment
+    ):
+        raise ValueError("base_url must be a valid https URL")
+
+    path = parts.path.rstrip("/")
+    return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+
+def _validate_key_id(key_id: str) -> str:
+    normalized = key_id.strip()
+    if not normalized:
+        raise ValueError("key_id must be non-empty")
+    return normalized
+
+
+def _write_private_seed(private_file: Path, private_seed: bytes) -> None:
+    private_file.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd = os.open(private_file, flags, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb", closefd=False) as handle:
+            handle.write(base64.b64encode(private_seed))
+            handle.write(b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        os.close(fd)
+        raise
+    else:
+        os.close(fd)
+
+
+def _write_client_module(client_file: Path, base_url: str, key_id: str, public_key_b64: str) -> None:
+    client_file.parent.mkdir(parents=True, exist_ok=True)
+    content = (
+        f"LICENSE_API_BASE_URL={base_url!r}\n"
+        f"TRUSTED_PUBLIC_KEYS={{{key_id!r}: {public_key_b64!r}}}\n"
+    )
+    fd, temp_path = tempfile.mkstemp(dir=str(client_file.parent), prefix=f".{client_file.name}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n", closefd=False) as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        os.close(fd)
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+        raise
+    else:
+        os.close(fd)
+        os.replace(temp_path, client_file)
+
+
+def generate(
+    *,
+    private_file: Path,
+    client_file: Path,
+    base_url: str,
+    key_id: str,
+) -> int:
+    normalized_base_url = _normalize_base_url(base_url)
+    normalized_key_id = _validate_key_id(key_id)
+    private_seed = secrets.token_bytes(32)
+    public_key = Ed25519PrivateKey.from_private_bytes(private_seed).public_key()
+    public_key_b64 = base64.b64encode(
+        public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
+    ).decode("ascii")
+
+    _write_private_seed(private_file, private_seed)
+    _write_client_module(client_file, normalized_base_url, normalized_key_id, public_key_b64)
+
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="keygen")
+    parser.add_argument("--private-file", type=Path, required=True)
+    parser.add_argument("--client-file", type=Path, required=True)
+    parser.add_argument("--base-url", required=True)
+    parser.add_argument("--key-id", required=True)
+    args = parser.parse_args(argv)
+
+    return generate(
+        private_file=args.private_file,
+        client_file=args.client_file,
+        base_url=args.base_url,
+        key_id=args.key_id,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

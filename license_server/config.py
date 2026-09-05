@@ -29,13 +29,17 @@ class Settings:
             "OPUB_LICENSE_KEY_ID",
             "OPUB_LICENSE_DB_PATH",
         )
-        missing_names = [name for name in required_names if name not in env]
+        missing_names = [
+            name
+            for name in required_names
+            if name not in env or not env[name].strip()
+        ]
         if missing_names:
             missing = ", ".join(missing_names)
             raise ValueError(f"Missing required environment variables: {missing}")
 
-        public_base_url = env["OPUB_PUBLIC_BASE_URL"].rstrip("/")
-        payment_return_url = env["OPUB_PAYMENT_RETURN_URL"]
+        public_base_url = env["OPUB_PUBLIC_BASE_URL"].strip().rstrip("/")
+        payment_return_url = env["OPUB_PAYMENT_RETURN_URL"].strip()
         if not public_base_url.startswith("https://"):
             raise ValueError("OPUB_PUBLIC_BASE_URL must start with https://")
         if not payment_return_url.startswith("https://"):
@@ -44,9 +48,9 @@ class Settings:
         return cls(
             public_base_url=public_base_url,
             payment_return_url=payment_return_url,
-            mbd_app_id=env["OPUB_MBD_APP_ID"],
-            mbd_app_key=env["OPUB_MBD_APP_KEY"],
-            license_private_key=env["OPUB_LICENSE_PRIVATE_KEY"],
-            license_key_id=env["OPUB_LICENSE_KEY_ID"],
-            database_path=Path(env["OPUB_LICENSE_DB_PATH"]),
+            mbd_app_id=env["OPUB_MBD_APP_ID"].strip(),
+            mbd_app_key=env["OPUB_MBD_APP_KEY"].strip(),
+            license_private_key=env["OPUB_LICENSE_PRIVATE_KEY"].strip(),
+            license_key_id=env["OPUB_LICENSE_KEY_ID"].strip(),
+            database_path=Path(env["OPUB_LICENSE_DB_PATH"].strip()),
         )

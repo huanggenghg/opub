@@ -5,11 +5,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError, fields
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, Dict, Literal, get_args, get_type_hints
 
 import pytest
 
 from license_server.database import Database, RepositoryError
-from license_server.models import Checkout, ProviderOrder
+from license_server.models import Checkout, Payway, ProviderOrder
 
 
 def _database(tmp_path: Path) -> Database:
@@ -182,6 +183,19 @@ def test_provider_charge_uniqueness_prevents_reuse(tmp_path: Path) -> None:
 
 
 def test_value_objects_are_frozen_with_exact_fields() -> None:
+    assert get_args(Payway) == get_args(Literal["wechat", "alipay"])
+    assert get_type_hints(Checkout) == {
+        "kind": Literal["url", "html"],
+        "value": str,
+    }
+    assert get_type_hints(ProviderOrder) == {
+        "state": int,
+        "amount": int,
+        "description": str,
+        "charge_id": str,
+        "payway": int,
+        "raw": Dict[str, Any],
+    }
     assert [field.name for field in fields(Checkout)] == ["kind", "value"]
     assert [field.name for field in fields(ProviderOrder)] == [
         "state", "amount", "description", "charge_id", "payway", "raw"
@@ -194,39 +208,114 @@ def test_value_objects_are_frozen_with_exact_fields() -> None:
         provider_order.amount = 1  # type: ignore[misc]
 
 
-def test_order_and_license_constraints_and_lookup_contract(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "null_column",
+    [
+        "session_id",
+        "provider_order_id",
+        "device_hash",
+        "poll_token_hash",
+        "created_at",
+        "expires_at",
+        "payway",
+        "checkout_kind",
+        "checkout_value",
+    ],
+)
+def test_order_columns_are_not_null(tmp_path: Path, null_column: str) -> None:
+    database = _database(tmp_path)
+    values = {
+        "session_id": "session-1",
+        "provider_order_id": "provider-1",
+        "device_hash": "device-1",
+        "product_id": "opub-lifetime-v1",
+        "amount_fen": 990,
+        "status": "pending",
+        "poll_token_hash": "token-1",
+        "created_at": "now",
+        "expires_at": "later",
+        "payway": "wechat",
+        "checkout_kind": "url",
+        "checkout_value": "x",
+    }
+    values[null_column] = None
+    columns = ", ".join(values)
+    with pytest.raises(sqlite3.IntegrityError):
+        database.row(
+            f"INSERT INTO orders ({columns}) VALUES ({','.join('?' for _ in values)})",
+            tuple(values.values()),
+        )
+
+
+def test_order_by_provider_id_returns_exact_order_row(tmp_path: Path) -> None:
     database = _database(tmp_path)
     _insert(database)
-    first = database.order_by_session("session-1")
-    assert database.order_by_provider_id("provider-1") == first
+    assert database.order_by_provider_id("provider-1") == database.order_by_session("session-1")
+
+
+def test_order_session_primary_key_rejects_duplicate_with_valid_other_values(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    _insert(database)
+    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
 
     with pytest.raises(sqlite3.IntegrityError):
         database.row(
             "INSERT INTO orders (session_id, provider_order_id, device_hash, product_id, amount_fen, status, poll_token_hash, created_at, expires_at, payway, checkout_kind, checkout_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("session-1", "provider-2", "device-2", "opub-lifetime-v1", 990, "pending", "token-2", "now", "later", "wechat", "url", "x"),
+            ("session-1", "provider-3", "device-3", "opub-lifetime-v1", 990, "pending", "token-3", "now", "later", "wechat", "url", "x"),
         )
+
+
+def test_order_provider_id_unique_rejects_duplicate_with_valid_other_values(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    _insert(database)
+    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
     with pytest.raises(sqlite3.IntegrityError):
         database.row(
             "INSERT INTO orders (session_id, provider_order_id, device_hash, product_id, amount_fen, status, poll_token_hash, created_at, expires_at, payway, checkout_kind, checkout_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("session-2", "provider-1", "device-2", "opub-lifetime-v1", 990, "pending", "token-2", "now", "later", "wechat", "url", "x"),
+            ("session-3", "provider-1", "device-3", "opub-lifetime-v1", 990, "pending", "token-3", "now", "later", "wechat", "url", "x"),
         )
 
+
+def test_license_id_unique_isolated_from_other_license_constraints(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    _insert(database)
+    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
     database.issue_license("session-1", "charge-1", "payload-1", "license-1", "time-1")
     with pytest.raises(sqlite3.IntegrityError):
         database.row(
             "INSERT INTO licenses (license_id, session_id, device_hash, signed_payload, issued_at) VALUES (?, ?, ?, ?, ?)",
-            ("license-1", "session-1", "device-1", "payload-2", "time-2"),
+            ("license-1", "session-2", "device-2", "payload-2", "time-2"),
         )
+
+
+def test_license_session_unique_isolated_from_other_license_constraints(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    _insert(database)
+    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
+    database.issue_license("session-1", "charge-1", "payload-1", "license-1", "time-1")
     with pytest.raises(sqlite3.IntegrityError):
         database.row(
             "INSERT INTO licenses (license_id, session_id, device_hash, signed_payload, issued_at) VALUES (?, ?, ?, ?, ?)",
             ("license-2", "session-1", "device-2", "payload-2", "time-2"),
         )
+
+
+def test_license_device_unique_isolated_from_other_license_constraints(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    _insert(database)
+    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
+    database.issue_license("session-1", "charge-1", "payload-1", "license-1", "time-1")
     with pytest.raises(sqlite3.IntegrityError):
         database.row(
             "INSERT INTO licenses (license_id, session_id, device_hash, signed_payload, issued_at) VALUES (?, ?, ?, ?, ?)",
             ("license-2", "session-2", "device-1", "payload-2", "time-2"),
         )
+
+
+def test_license_foreign_key_rejects_orphan_with_valid_shaped_values(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    _insert(database)
+    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
     with pytest.raises(sqlite3.IntegrityError):
         database.row(
             "INSERT INTO licenses (license_id, session_id, device_hash, signed_payload, issued_at) VALUES (?, ?, ?, ?, ?)",

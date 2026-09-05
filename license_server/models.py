@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Dict, Literal
 
 
 Payway = Literal["wechat", "alipay"]
@@ -20,4 +20,4 @@ class ProviderOrder:
     description: str
     charge_id: str
     payway: int
-    raw: dict[str, Any]
+    raw: Dict[str, Any]

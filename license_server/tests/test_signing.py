@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import tempfile
 import stat
 from pathlib import Path
 
@@ -156,6 +157,38 @@ def test_keygen_refuses_existing_private_before_touching_client(tmp_path: Path) 
     assert client_file.read_text(encoding="utf-8") == "sentinel = True\n"
 
 
+def test_keygen_rejects_casefold_alias_paths_without_touching_outputs(
+    tmp_path: Path,
+) -> None:
+    from license_server import keygen
+
+    private_file = tmp_path / "Secret" / "license.private"
+    client_file = tmp_path / "secret" / "license.private"
+    client_file.parent.mkdir(parents=True, exist_ok=True)
+    client_file.write_text("sentinel = True\n", encoding="utf-8")
+    files_before = {
+        path.relative_to(tmp_path)
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+
+    with pytest.raises(ValueError):
+        keygen.generate(
+            private_file=private_file,
+            client_file=client_file,
+            base_url="https://example.com/license",
+            key_id="kid-1",
+        )
+
+    files_after = {
+        path.relative_to(tmp_path)
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+    assert files_after == files_before
+    assert client_file.read_text(encoding="utf-8") == "sentinel = True\n"
+
+
 def test_keygen_does_not_use_fchmod(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from license_server import keygen
 
@@ -182,6 +215,38 @@ def _files_in(root: Path) -> set[Path]:
 def _assert_no_temp_files(root: Path) -> None:
     temp_files = [path for path in root.rglob("*") if path.is_file() and path.name.startswith(".")]
     assert temp_files == []
+
+
+def _make_tracking_mkstemp(monkeypatch: pytest.MonkeyPatch, created: list[Path]) -> None:
+    real_mkstemp = tempfile.mkstemp
+
+    def _tracking_mkstemp(*args, **kwargs):  # noqa: ANN001, ANN002
+        fd, temp_path = real_mkstemp(*args, **kwargs)
+        created.append(Path(temp_path))
+        return fd, temp_path
+
+    from license_server import keygen
+
+    monkeypatch.setattr(keygen.tempfile, "mkstemp", _tracking_mkstemp)
+
+
+def _install_private_temp_unlink_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    temp_paths: list[Path],
+) -> None:
+    from license_server import keygen
+
+    real_unlink = keygen.os.unlink
+    triggered = {"done": False}
+
+    def _unlink(path: str | bytes | Path) -> None:
+        if not triggered["done"] and temp_paths and Path(path) == temp_paths[0]:
+            triggered["done"] = True
+            raise PermissionError("private temp unlink boom")
+        real_unlink(path)
+
+    monkeypatch.setattr(keygen.os, "unlink", _unlink)
 
 
 def _assert_retryable_atomic_failure(
@@ -247,6 +312,49 @@ def test_keygen_recovers_after_private_write_fsync_failure(
         fail_attr="fsync",
         expected_exception=OSError,
     )
+
+
+def test_keygen_recovers_after_private_temp_unlink_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from license_server import keygen
+
+    private_file = tmp_path / "keys" / "license.private"
+    client_file = tmp_path / "client" / "license_client.py"
+    client_file.parent.mkdir(parents=True, exist_ok=True)
+    client_file.write_text("sentinel = True\n", encoding="utf-8")
+
+    temp_paths: list[Path] = []
+    _make_tracking_mkstemp(monkeypatch, temp_paths)
+    _install_private_temp_unlink_failure(monkeypatch, temp_paths=temp_paths)
+
+    with pytest.raises(RuntimeError, match="license key generation"):
+        keygen.generate(
+            private_file=private_file,
+            client_file=client_file,
+            base_url="https://example.com:8443/license/",
+            key_id="kid-1",
+        )
+
+    assert not private_file.exists()
+    assert client_file.read_text(encoding="utf-8") == "sentinel = True\n"
+    assert temp_paths
+    assert not temp_paths[0].exists()
+    assert len(temp_paths) == 1 or not temp_paths[1].exists()
+
+    assert (
+        keygen.generate(
+            private_file=private_file,
+            client_file=client_file,
+            base_url="https://example.com:8443/license/",
+            key_id="kid-1",
+        )
+        == 0
+    )
+
+    assert private_file.exists()
+    assert client_file.read_text(encoding="utf-8").startswith("LICENSE_API_BASE_URL='https://example.com:8443/license'")
+    _assert_no_temp_files(tmp_path)
 
 
 def test_keygen_recovers_after_private_publication_failure(

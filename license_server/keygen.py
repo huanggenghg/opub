@@ -79,12 +79,32 @@ def _validate_key_id(key_id: str) -> str:
     return normalized
 
 
-def _write_private_seed(private_file: Path, private_seed: bytes) -> None:
+def _paths_alias(private_file: Path, client_file: Path) -> bool:
+    private_resolved = private_file.resolve(strict=False)
+    client_resolved = client_file.resolve(strict=False)
+    if str(private_resolved).casefold() == str(client_resolved).casefold():
+        return True
+
+    try:
+        return os.path.samefile(private_file, client_file)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise ValueError("private_file and client_file must be different paths") from exc
+
+
+def _write_private_seed(
+    private_file: Path,
+    private_seed: bytes,
+    temp_paths: list[Path],
+) -> None:
     private_file.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(
         dir=str(private_file.parent),
         prefix=f".{private_file.name}.",
     )
+    temp_path = Path(temp_path)
+    temp_paths.append(temp_path)
     try:
         os.chmod(temp_path, 0o600)
         with os.fdopen(fd, "wb") as handle:
@@ -98,13 +118,16 @@ def _write_private_seed(private_file: Path, private_seed: bytes) -> None:
             os.close(fd)
         except OSError:
             pass
-        try:
-            os.unlink(temp_path)
-        except FileNotFoundError:
-            pass
 
 
-def _write_client_module(client_file: Path, base_url: str, key_id: str, public_key_b64: str) -> None:
+def _write_client_module(
+    private_file: Path,
+    client_file: Path,
+    base_url: str,
+    key_id: str,
+    public_key_b64: str,
+    temp_paths: list[Path],
+) -> None:
     client_file.parent.mkdir(parents=True, exist_ok=True)
     content = (
         f"LICENSE_API_BASE_URL={base_url!r}\n"
@@ -114,21 +137,62 @@ def _write_client_module(client_file: Path, base_url: str, key_id: str, public_k
         dir=str(client_file.parent),
         prefix=f".{client_file.name}.",
     )
+    temp_path = Path(temp_path)
+    temp_paths.append(temp_path)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
+        if _paths_alias(private_file, client_file):
+            raise ValueError("private_file and client_file must be different paths")
         os.replace(temp_path, client_file)
     finally:
         try:
             os.close(fd)
         except OSError:
             pass
+
+
+def _unlink_if_exists(path: Path) -> None:
+    if not os.path.lexists(path):
+        return
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
+def _cleanup_transaction(
+    *,
+    private_file: Path,
+    private_published: bool,
+    temp_paths: list[Path],
+) -> BaseException | None:
+    paths = ([private_file] if private_published else []) + list(temp_paths)
+    failures: list[tuple[Path, BaseException]] = []
+    for path in paths:
         try:
-            os.unlink(temp_path)
-        except FileNotFoundError:
-            pass
+            _unlink_if_exists(path)
+        except BaseException as exc:  # noqa: BLE001 - cleanup must continue independently
+            failures.append((path, exc))
+
+    # A transient unlink failure must not strand a transaction's files. Retry
+    # each failed path once after all paths have received their first attempt.
+    remaining_failures: list[BaseException] = []
+    for path, _ in failures:
+        try:
+            _unlink_if_exists(path)
+        except BaseException as exc:  # noqa: BLE001 - preserve cleanup progress
+            remaining_failures.append(exc)
+    return remaining_failures[0] if remaining_failures else None
+
+
+def _unlink_private_temp_or_raise(temp_path: Path) -> None:
+    try:
+        _unlink_if_exists(temp_path)
+    except BaseException as exc:  # noqa: BLE001 - expose cleanup as generation failure
+        raise RuntimeError("license key generation cleanup failed") from exc
 
 
 def generate(
@@ -138,7 +202,7 @@ def generate(
     base_url: str,
     key_id: str,
 ) -> int:
-    if private_file.resolve(strict=False) == client_file.resolve(strict=False):
+    if _paths_alias(private_file, client_file):
         raise ValueError("private_file and client_file must be different paths")
 
     normalized_base_url = _normalize_base_url(base_url)
@@ -150,16 +214,26 @@ def generate(
     ).decode("ascii")
 
     private_published = False
+    temp_paths: list[Path] = []
     try:
-        _write_private_seed(private_file, private_seed)
+        _write_private_seed(private_file, private_seed, temp_paths)
         private_published = True
-        _write_client_module(client_file, normalized_base_url, normalized_key_id, public_key_b64)
-    except Exception:
-        if private_published:
-            try:
-                private_file.unlink()
-            except FileNotFoundError:
-                pass
+        _unlink_private_temp_or_raise(temp_paths[0])
+        temp_paths.pop(0)
+        _write_client_module(
+            private_file,
+            client_file,
+            normalized_base_url,
+            normalized_key_id,
+            public_key_b64,
+            temp_paths,
+        )
+    except BaseException:
+        _cleanup_transaction(
+            private_file=private_file,
+            private_published=private_published,
+            temp_paths=temp_paths,
+        )
         raise
 
     return 0

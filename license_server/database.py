@@ -38,7 +38,7 @@ class Database:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS orders (
-                    session_id TEXT PRIMARY KEY,
+                    session_id TEXT PRIMARY KEY NOT NULL,
                     provider_order_id TEXT NOT NULL UNIQUE,
                     device_hash TEXT NOT NULL,
                     product_id TEXT NOT NULL CHECK (product_id = 'opub-lifetime-v1'),
@@ -55,7 +55,7 @@ class Database:
                 );
 
                 CREATE TABLE IF NOT EXISTS licenses (
-                    license_id TEXT PRIMARY KEY,
+                    license_id TEXT PRIMARY KEY NOT NULL,
                     session_id TEXT NOT NULL UNIQUE REFERENCES orders(session_id),
                     device_hash TEXT NOT NULL UNIQUE,
                     signed_payload TEXT NOT NULL,
@@ -218,10 +218,7 @@ class Database:
                 connection.commit()
                 return str(existing["signed_payload"])
 
-            if order["status"] != "pending":
-                if existing is not None:
-                    connection.commit()
-                    return str(existing["signed_payload"])
+            if order["status"] not in {"pending", "expired", "verification_failed"}:
                 raise RepositoryError(
                     f"cannot issue license for {order['status']} order: {session_id}"
                 )
@@ -230,7 +227,7 @@ class Database:
                 """
                 UPDATE orders
                 SET status = 'paid', provider_charge_id = ?, paid_at = ?
-                WHERE session_id = ? AND status = 'pending'
+                WHERE session_id = ? AND status IN ('pending', 'expired', 'verification_failed')
                 """,
                 (charge_id, issued_at, session_id),
             )

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import ipaddress
 import re
 from collections.abc import Mapping
 from typing import Any, Dict, Mapping as TypingMapping, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 import requests
 
@@ -19,6 +20,7 @@ QUERY_URL = "https://newapi.mbd.pub/release/main/search_order"
 _TIMEOUT = (5, 15)
 _MAX_CHECKOUT_HTML_BYTES = 256 * 1024
 _FORM_RE = re.compile(r"<form\b[^>]*>.*?</form\s*>", re.IGNORECASE | re.DOTALL)
+_DNS_LABEL_RE = re.compile(r"[A-Za-z0-9-]+\Z")
 
 
 class ProviderError(RuntimeError):
@@ -61,6 +63,53 @@ def _safe_int(value: object, field: str) -> int:
         except ValueError:
             pass
     raise ProviderError(f"Mianbaoduo order response has invalid {field}")
+
+
+def _valid_host(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+
+    try:
+        ascii_host = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    if ascii_host.endswith("."):
+        ascii_host = ascii_host[:-1]
+    if not ascii_host or len(ascii_host) > 253:
+        return False
+    labels = ascii_host.split(".")
+    return all(
+        label
+        and len(label) <= 63
+        and _DNS_LABEL_RE.fullmatch(label) is not None
+        and not label.startswith("-")
+        and not label.endswith("-")
+        for label in labels
+    )
+
+
+def _valid_h5_url(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() != "https" or not parsed.hostname:
+            return False
+        if "@" in parsed.netloc or parsed.username is not None or parsed.password is not None:
+            return False
+        if parsed.fragment or parsed.netloc.endswith(":"):
+            return False
+        port = parsed.port
+        if port is not None and not 1 <= port <= 65535:
+            return False
+        return _valid_host(parsed.hostname)
+    except (ValueError, UnicodeError):
+        return False
 
 
 class MianbaoduoClient:
@@ -121,10 +170,7 @@ class MianbaoduoClient:
             values["channel"] = "h5"
             result = self._post("wechat checkout", WX_URL, values)
             value = result.get("h5_url")
-            if not isinstance(value, str):
-                raise ProviderError("Mianbaoduo wechat checkout returned no usable URL")
-            parsed = urlparse(value)
-            if parsed.scheme.lower() != "https" or not parsed.hostname:
+            if not _valid_h5_url(value):
                 raise ProviderError("Mianbaoduo wechat checkout returned an invalid URL")
             return Checkout("url", value)
 

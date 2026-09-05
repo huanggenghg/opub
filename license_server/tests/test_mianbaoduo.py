@@ -22,6 +22,13 @@ class FakeResponse:
         return self.payload
 
 
+class HTTPErrorResponse(FakeResponse):
+    def raise_for_status(self) -> None:
+        from requests import HTTPError
+
+        raise HTTPError("raw HTTP details")
+
+
 class FakeSession:
     def __init__(self, response: FakeResponse):
         self.response = response
@@ -32,12 +39,12 @@ class FakeSession:
         return self.response
 
 
-class HTTPErrorSession(FakeSession):
+class TransportErrorSession(FakeSession):
     def post(self, url, *, json, timeout):
         self.calls.append((url, json, timeout))
-        from requests import HTTPError
+        from requests import Timeout
 
-        raise HTTPError("raw HTTP details")
+        raise Timeout("raw timeout details")
 
 
 def test_sign_parameters_known_vector_and_omits_empty_values_without_mutating_input():
@@ -136,8 +143,6 @@ def test_invalid_amount_fails_before_network(amount):
 
 
 def test_provider_and_transport_failures_are_redacted():
-    from requests import RequestException
-
     from license_server.mianbaoduo import MianbaoduoClient, ProviderError
 
     secret = "TOP-SECRET-APP-KEY"
@@ -151,17 +156,13 @@ def test_provider_and_transport_failures_are_redacted():
         assert secret not in str(exc_info.value)
         assert "raw" not in str(exc_info.value)
 
-    class ErrorSession(FakeSession):
-        def post(self, url, *, json, timeout):
-            raise RequestException("secret transport details")
-
-    client = MianbaoduoClient("app", secret, "https://opub.test/done", ErrorSession(FakeResponse()))
+    client = MianbaoduoClient("app", secret, "https://opub.test/done", TransportErrorSession(FakeResponse()))
     with pytest.raises(ProviderError) as exc_info:
         client.create_checkout("wechat", "order-1", "opub", 990)
     assert secret not in str(exc_info.value)
-    assert "secret transport" not in str(exc_info.value)
+    assert "raw timeout" not in str(exc_info.value)
 
-    client = MianbaoduoClient("app", secret, "https://opub.test/done", HTTPErrorSession(FakeResponse()))
+    client = MianbaoduoClient("app", secret, "https://opub.test/done", FakeSession(HTTPErrorResponse({})))
     with pytest.raises(ProviderError) as exc_info:
         client.create_checkout("wechat", "order-1", "opub", 990)
     assert secret not in str(exc_info.value)
@@ -178,6 +179,45 @@ def test_invalid_wechat_payload_fails_closed(payload):
     client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse(payload)))
     with pytest.raises(ProviderError):
         client.create_checkout("wechat", "order-1", "opub", 990)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://pay.example:not-a-port/path",
+        "https://pay.example:99999/path",
+        "https://pay. example/path",
+        "https://[",
+        "https://user:password@pay.example/path",
+        "https://user@pay.example/path",
+        "https://pay.example/path#fragment",
+        "https://-pay.example/path",
+        "https://pay-.example/path",
+        "https://pay..example/path",
+        "https://pay_example/path",
+    ],
+)
+def test_invalid_wechat_url_structure_fails_closed(url):
+    from license_server.mianbaoduo import MianbaoduoClient, ProviderError
+
+    client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse({"h5_url": url})))
+    with pytest.raises(ProviderError):
+        client.create_checkout("wechat", "order-1", "opub", 990)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://pay.example:443/path?checkout=1",
+        "https://192.0.2.10/pay",
+        "https://[2001:db8::1]:8443/pay",
+    ],
+)
+def test_valid_wechat_url_structure_is_returned(url):
+    from license_server.mianbaoduo import MianbaoduoClient
+
+    client = MianbaoduoClient("app", "secret", "https://opub.test/done", FakeSession(FakeResponse({"h5_url": url})))
+    assert client.create_checkout("wechat", "order-1", "opub", 990) == Checkout("url", url)
 
 
 @pytest.mark.parametrize("body", ["", "not html", "<html>" + ("x" * (256 * 1024))])
@@ -198,6 +238,13 @@ def test_invalid_alipay_html_fails_closed(body):
         {"state": "done", "amount": 990, "description": "opub", "charge_id": "id", "payway": 1},
         {"state": 1, "amount": 990, "description": "", "charge_id": "id", "payway": 1},
         {"state": 1, "amount": 990, "description": "opub", "charge_id": "id", "payway": 1.5},
+        {"state": 1, "description": "opub", "charge_id": "id", "payway": 1},
+        {"state": 1, "amount": "not-a-number", "description": "opub", "charge_id": "id", "payway": 1},
+        {"state": 1, "amount": 990, "description": "opub", "payway": 1},
+        {"state": 1, "amount": 990, "description": "opub", "charge_id": 123, "payway": 1},
+        {"state": 1, "amount": 990, "description": "opub", "charge_id": " ", "payway": 1},
+        {"state": 1, "amount": 990, "description": "opub", "charge_id": "id", "payway": "no"},
+        {"state": "no", "amount": 990, "description": "opub", "charge_id": "id", "payway": 1},
     ],
 )
 def test_invalid_query_payload_fails_closed(payload):

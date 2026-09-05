@@ -75,12 +75,19 @@ def create_app(settings: Settings, database: Database, provider: MianbaoduoClien
     database.initialize()
     service = LicenseService(settings, database, provider)
     creation_limiter = RateLimiter(60, 3600)
+    creation_ip_limiter = RateLimiter(120, 3600)
     polling_limiter = RateLimiter(180, 600)
     app = FastAPI(title="opub License Service", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.post("/v1/activation-sessions", status_code=status.HTTP_201_CREATED)
     def create_activation(body: ActivationRequest, request: Request):
         client_ip = request.client.host if request.client else "unknown"
+        # The per-IP gate runs before the per-(IP, device) one: device_hash is
+        # client-chosen, so without this cap one IP could rotate hashes and
+        # create unlimited provider checkouts. A request rejected here never
+        # reaches the combined bucket below.
+        if not creation_ip_limiter.allow(client_ip):
+            raise HTTPException(status_code=429, detail="rate limited")
         if not creation_limiter.allow(f"{client_ip}:{body.device_hash}"):
             raise HTTPException(status_code=429, detail="rate limited")
         return service.create_session(body.device_hash, body.payway)
@@ -108,7 +115,16 @@ def create_app(settings: Settings, database: Database, provider: MianbaoduoClien
         if body.type != "charge_succeeded":
             return {"status": "ignored"}
         order_id = str(body.data.get("out_trade_no", ""))
-        return service.handle_charge_succeeded(order_id)
+        result = service.handle_charge_succeeded(order_id)
+        # Unknown orders and failed verifications are audit events: they are
+        # recorded with the sanitized order id only, never the raw payload.
+        if result.get("status") in ("ignored", "verification_failed"):
+            logger.warning(
+                "charge_succeeded webhook %s order=%s",
+                result.get("status"),
+                _sanitize_order_id(order_id or "unknown"),
+            )
+        return result
 
     # ProviderError and RepositoryError subclass RuntimeError, and Starlette
     # resolves handlers through the exception MRO, so both are covered here.

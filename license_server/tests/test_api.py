@@ -212,6 +212,56 @@ def test_charge_succeeded_without_order_id_is_ignored(client: TestClient, provid
     provider.query_order.assert_not_called()
 
 
+def test_charge_succeeded_for_unknown_order_is_audited_in_logs(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="opub.license"):
+        response = client.post(
+            "/v1/webhooks/mianbaoduo",
+            json={"type": "charge_succeeded", "data": {"out_trade_no": "opub_missing"}},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored"}
+    messages = _charge_succeeded_warning_records(caplog)
+    assert len(messages) == 1
+    assert "opub_missing" in messages[0]
+
+
+def test_charge_succeeded_verification_failure_is_audited_in_logs(
+    client: TestClient, provider: Mock, caplog: pytest.LogCaptureFixture
+) -> None:
+    create_session(client)
+    provider.query_order.return_value = ProviderOrder(1, 991, PRODUCT_NAME, "charge-x", 1, {})
+    with caplog.at_level(logging.WARNING, logger="opub.license"):
+        response = client.post(
+            "/v1/webhooks/mianbaoduo",
+            json={"type": "charge_succeeded", "data": {"out_trade_no": provider.last_order_id}},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"status": "verification_failed"}
+    messages = _charge_succeeded_warning_records(caplog)
+    assert len(messages) == 1
+    assert provider.last_order_id in messages[0]
+
+
+def test_charge_succeeded_audit_log_cannot_inject_log_lines(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="opub.license"):
+        response = client.post(
+            "/v1/webhooks/mianbaoduo",
+            json={"type": "charge_succeeded", "data": {"out_trade_no": "evil\nFAKE-LOG ev\ril"}},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored"}
+    messages = _charge_succeeded_warning_records(caplog)
+    assert len(messages) == 1
+    assert "\n" not in messages[0]
+    assert "\r" not in messages[0]
+    # The forged marker survives only inline, flattened onto the single line.
+    assert "evil FAKE-LOG evil" in messages[0]
+
+
 def test_complaint_webhook_is_acknowledged_without_issuance(
     client: TestClient, provider: Mock
 ) -> None:
@@ -234,6 +284,14 @@ def _complaint_records(caplog: pytest.LogCaptureFixture) -> list[str]:
         record.getMessage()
         for record in caplog.records
         if "payment complaint" in record.getMessage()
+    ]
+
+
+def _charge_succeeded_warning_records(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.WARNING and "charge_succeeded webhook" in record.getMessage()
     ]
 
 
@@ -276,6 +334,17 @@ def test_creation_rate_limited_after_sixty_requests(client: TestClient) -> None:
     # A different device from the same IP is a separate bucket.
     other_device = {**CREATION_BODY, "device_hash": "c" * 64}
     assert client.post("/v1/activation-sessions", json=other_device).status_code == 201
+
+
+def test_creation_rate_limited_per_ip_after_120_requests(client: TestClient) -> None:
+    # device_hash is client-chosen: a single IP must not be able to create
+    # unlimited checkouts by rotating hashes, so creations are also capped
+    # per IP regardless of the hashes submitted.
+    for index in range(120):
+        rotating = {**CREATION_BODY, "device_hash": f"{index:064x}"}
+        assert client.post("/v1/activation-sessions", json=rotating).status_code == 201
+    fresh_device = {**CREATION_BODY, "device_hash": "d" * 64}
+    assert client.post("/v1/activation-sessions", json=fresh_device).status_code == 429
 
 
 def test_polling_rate_limited_after_180_requests(client: TestClient) -> None:

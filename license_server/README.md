@@ -78,15 +78,23 @@ licenses can ever be issued; leaking it means anyone can forge licenses.
 ```bash
 # 1) System user and code checkout
 sudo useradd --system --home /opt/opub --shell /usr/sbin/nologin opub-license
-sudo git clone <repo> /opt/opub && cd /opt/opub
-sudo -u opub-license python -m venv .venv
+sudo git clone <repo> /opt/opub
+# The clone is root-owned; hand it to the service user or the venv step
+# below fails with EACCES.
+sudo chown -R opub-license:opub-license /opt/opub
+cd /opt/opub
+sudo -u opub-license python3 -m venv .venv
 sudo -u opub-license .venv/bin/python -m pip install -r license_server/requirements.txt
 # (with the venv active, the equivalent is:)
-python -m pip install -r license_server/requirements.txt
+python3 -m pip install -r license_server/requirements.txt
 
 # 2) Environment file (see section 1) and runtime directories
 sudo install -o opub-license -g opub-license -m 600 /dev/null /etc/opub-license.env
-sudo -u opub-license mkdir -p /opt/opub/license_server/data /var/backups/opub-license
+# /var/backups is root-owned: create and hand over the backup directory as
+# root first, or the service user's mkdir fails with EACCES.
+sudo mkdir -p /var/backups/opub-license
+sudo chown opub-license:opub-license /var/backups/opub-license
+sudo -u opub-license mkdir -p /opt/opub/license_server/data
 
 # 3) systemd unit (single worker — see section 5)
 sudo cp license_server/deploy/opub-license.service /etc/systemd/system/
@@ -97,6 +105,9 @@ sudo systemctl enable --now opub-license
 The unit runs uvicorn on `127.0.0.1:8013` with
 `--proxy-headers --forwarded-allow-ips=127.0.0.1`, so only the local reverse
 proxy is trusted to supply the real client IP (the rate limiters key on it).
+Session creation is capped at 60/hour per (IP, device) and 120/hour per IP —
+the per-IP gate is checked first, so one client cannot buy unlimited provider
+checkouts by rotating device hashes.
 
 ## 4. Reverse proxy (Caddy)
 

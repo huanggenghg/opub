@@ -1,0 +1,23 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Literal
+
+
+Payway = Literal["wechat", "alipay"]
+
+
+@dataclass(frozen=True)
+class Checkout:
+    kind: Literal["url", "html"]
+    value: str
+
+
+@dataclass(frozen=True)
+class ProviderOrder:
+    state: int
+    amount: int
+    description: str
+    charge_id: str
+    payway: int
+    raw: dict[str, Any]

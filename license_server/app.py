@@ -39,6 +39,11 @@ def bearer_token(authorization: str | None = Header(default=None)) -> str:
     return authorization.removeprefix("Bearer ")
 
 
+def _sanitize_order_id(raw: object) -> str:
+    """Flatten an attacker-controlled order id so it cannot forge log lines."""
+    return str(raw).replace("\r", "").replace("\n", " ")[:128]
+
+
 async def service_unavailable(request: Request, exc: Exception) -> JSONResponse:
     """Answer 503 with an opaque request id; log the exception class, never its message."""
     request_id = secrets.token_hex(8)
@@ -96,7 +101,8 @@ def create_app(settings: Settings, database: Database, provider: MianbaoduoClien
     def webhook(body: WebhookRequest):
         if body.type == "complaint":
             logger.warning(
-                "payment complaint order=%s", str(body.data.get("out_trade_no", "unknown"))
+                "payment complaint order=%s",
+                _sanitize_order_id(body.data.get("out_trade_no", "unknown")),
             )
             return {"status": "ignored"}
         if body.type != "charge_succeeded":

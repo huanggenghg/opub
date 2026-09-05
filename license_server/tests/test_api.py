@@ -229,6 +229,46 @@ def test_complaint_webhook_is_acknowledged_without_issuance(
     assert poll(client, created).json() == {"status": "pending"}
 
 
+def _complaint_records(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if "payment complaint" in record.getMessage()
+    ]
+
+
+def test_complaint_webhook_order_id_cannot_inject_log_lines(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="opub.license"):
+        response = client.post(
+            "/v1/webhooks/mianbaoduo",
+            json={"type": "complaint", "data": {"out_trade_no": "evil\nFAKE-LOG ev\ril"}},
+        )
+    assert response.status_code == 200
+    messages = _complaint_records(caplog)
+    assert len(messages) == 1
+    assert "\n" not in messages[0]
+    assert "\r" not in messages[0]
+    # The forged marker survives only inline, flattened onto the single line.
+    assert "evil FAKE-LOG evil" in messages[0]
+
+
+def test_complaint_webhook_order_id_is_truncated_in_logs(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="opub.license"):
+        response = client.post(
+            "/v1/webhooks/mianbaoduo",
+            json={"type": "complaint", "data": {"out_trade_no": "x" * 200}},
+        )
+    assert response.status_code == 200
+    messages = _complaint_records(caplog)
+    assert len(messages) == 1
+    assert "x" * 128 in messages[0]
+    assert "x" * 129 not in messages[0]
+
+
 def test_creation_rate_limited_after_sixty_requests(client: TestClient) -> None:
     for _ in range(60):
         assert client.post("/v1/activation-sessions", json=CREATION_BODY).status_code == 201

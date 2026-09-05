@@ -165,13 +165,14 @@ class Database:
             (session_id,),
         )
         stored = "" if row is None or row["poll_token_hash"] is None else row["poll_token_hash"]
-        return hmac.compare_digest(
+        comparison_result = hmac.compare_digest(
             hashlib.sha256(poll_token_hash.encode("utf-8")).digest(),
             hashlib.sha256(stored.encode("utf-8")).digest(),
         ) if row is not None else hmac.compare_digest(
             hashlib.sha256(poll_token_hash.encode("utf-8")).digest(),
             hashlib.sha256(b"__unknown_order_token__").digest(),
         )
+        return row is not None and comparison_result
 
     def expire_pending(self, device_hash: str, expired_at: str) -> None:
         with self._connect() as connection:

@@ -92,6 +92,7 @@ def test_token_rotation_invalidates_old_and_unknown_tokens_do_not_match(tmp_path
     _insert(database)
     assert database.poll_token_matches("session-1", "token-1")
     assert not database.poll_token_matches("session-1", "unknown")
+    assert not database.poll_token_matches("missing-session", "__unknown_order_token__")
     database.rotate_poll_token("session-1", "token-2")
     assert not database.poll_token_matches("session-1", "token-1")
     assert database.poll_token_matches("session-1", "token-2")

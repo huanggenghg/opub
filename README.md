@@ -65,7 +65,19 @@ Agent 的完整接口契约见 [skills/opub-cli/SKILL.md](./skills/opub-cli/SKIL
 
 ## 付费许可
 
-一次购买 ¥9.90，绑定一个设备；首次激活后永久离线使用，不需账号。许可不迁移、不解绑、不提供换机重置，新电脑重新购买。公开 Python 包是诚实用户门禁，属于非强 DRM。状态与激活命令为 `opub --license-status`、`opub --activate --pay-with wechat`、`opub --activate --pay-with alipay`；退出码 13 时选择支付方式，`LIC001`–`LIC012` 建议见 [docs/CLI.md](docs/CLI.md)。
+一次购买 ¥9.90，绑定一个设备；首次激活后永久离线使用，不需账号。许可不迁移、不解绑、不提供换机重置，新电脑重新购买。公开 Python 包是诚实用户门禁，属于非强 DRM。状态与激活命令为 `opub --license-status`、`opub --activate --pay-with wechat`、`opub --activate --pay-with alipay`；退出码 13 时选择支付方式。
+
+| 错误码 | 含义 | 建议 |
+| --- | --- | --- |
+| `LIC-001` | 尚未激活 | 执行激活命令 |
+| `LIC-002` | 损坏签名 | 联系支持并提供错误码 |
+| `LIC-003` | 许可属于其他设备 | 新电脑重新购买 |
+| `LIC-004` | 稳定设备标识不可用 | 联系支持并提供错误码 |
+| `LIC-010` | 未支付/超时 | 完成付款后重试 |
+| `LIC-011` | 服务不可用 | 稍后重试 |
+| `LIC-012` | 订单核验失败 | 完成付款后重新运行激活命令 |
+
+完整 CLI 说明见 [docs/CLI.md](docs/CLI.md)。
 
 技能与运行时分发相互独立：Agent 平台安装技能时即获得 SKILL.md，运行时依赖由 Agent 按 SKILL.md 指引自行动 `pip install opub` 安装。
 

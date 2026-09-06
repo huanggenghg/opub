@@ -247,9 +247,23 @@ class SkillDocBlackboxTests(unittest.TestCase):
 
     def test_documents_license_exit_codes_and_suggestions(self):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
-        for code in ["LIC001", "LIC002", "LIC003", "LIC004", "LIC010", "LIC011", "LIC012"]:
-            self.assertIn(code, text)
-        self.assertIn("建议", text)
+        expected = {
+            "LIC-001": ("尚未激活", "激活"),
+            "LIC-002": ("损坏签名", "联系支持"),
+            "LIC-003": ("其他设备", "重新购买"),
+            "LIC-004": ("稳定设备标识", "联系支持"),
+            "LIC-010": ("未支付/超时", "完成付款"),
+            "LIC-011": ("服务不可用", "稍后重试"),
+            "LIC-012": ("订单核验失败", "完成付款"),
+        }
+        for code, (meaning, suggestion) in expected.items():
+            rows = [line for line in text.splitlines() if f"`{code}`" in line]
+            self.assertTrue(rows, f"missing complete mapping for {code}")
+            row = rows[0]
+            self.assertIn(meaning, row)
+            self.assertIn(suggestion, row)
+        for undashed in ["LIC001", "LIC002", "LIC003", "LIC004", "LIC010", "LIC011", "LIC012"]:
+            self.assertNotIn(f"`{undashed}`", text)
 
     def test_documents_license_commands(self):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
@@ -298,11 +312,26 @@ class PublicSingleAccountContractTests(unittest.TestCase):
                 self.assertNotIn("每个账号各发一遍", text)
 
     def test_public_docs_share_paid_license_contract(self):
+        expected = {
+            "LIC-001": ("尚未激活", "激活"),
+            "LIC-002": ("损坏签名", "联系支持"),
+            "LIC-003": ("其他设备", "重新购买"),
+            "LIC-004": ("稳定设备标识", "联系支持"),
+            "LIC-010": ("未支付/超时", "完成付款"),
+            "LIC-011": ("服务不可用", "稍后重试"),
+            "LIC-012": ("订单核验失败", "完成付款"),
+        }
         for path in self.DOC_PATHS:
             with self.subTest(path=path):
                 text = path.read_text(encoding="utf-8")
                 for fragment in ["¥9.90", "一个设备", "不需账号", "新电脑重新购买"]:
                     self.assertIn(fragment, text)
+                for code, (meaning, suggestion) in expected.items():
+                    rows = [line for line in text.splitlines() if f"`{code}`" in line]
+                    self.assertTrue(rows, f"missing complete mapping for {code}")
+                    row = rows[0]
+                    self.assertIn(meaning, row)
+                    self.assertIn(suggestion, row)
 
 
 if __name__ == "__main__":

@@ -396,6 +396,7 @@ git commit -m "feat: generate afdian activation code inventory"
 **Files:**
 - Rewrite: `license_server/service.py`
 - Rewrite: `license_server/app.py`
+- Modify: `license_server/database.py`
 - Rewrite: `license_server/tests/test_service.py`
 - Rewrite: `license_server/tests/test_api.py`
 - Delete: `license_server/mianbaoduo.py`
@@ -509,7 +510,9 @@ Change `app_from_env()` to instantiate only `Settings`, `Database`, and `License
 
 - [ ] **Step 6: Delete provider runtime and run server tests**
 
-Delete the three Mianbaoduo files listed above, then run:
+Delete the three Mianbaoduo files listed above. In `license_server/database.py`, remove the
+`Checkout`/`Payway` import and the unused legacy order repository methods while preserving the
+legacy `orders` and `licenses` DDL exactly for rollback/audit. Then run:
 
 ```bash
 python -m pytest license_server/tests -q

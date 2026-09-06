@@ -36,8 +36,8 @@ class RateLimiter:
                 del self.events[key]
 
     def allow(self, key: str) -> bool:
-        now = time.monotonic()
         with self.lock:
+            now = time.monotonic()
             self._expire(now)
             events = self.events.get(key)
             if events is None:

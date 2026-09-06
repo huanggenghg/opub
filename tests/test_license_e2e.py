@@ -5,6 +5,7 @@ import json
 import shutil
 import stat
 from pathlib import Path
+from typing import Optional
 from unittest.mock import AsyncMock, patch
 from urllib.parse import urlsplit
 
@@ -48,7 +49,7 @@ class FakeProvider:
     """Deterministic Mianbaoduo protocol fake; it never performs network I/O."""
 
     def __init__(self) -> None:
-        self.order_id: str | None = None
+        self.order_id: Optional[str] = None
         self.created: list[tuple[str, str, str, int]] = []
         self.queried: list[str] = []
 

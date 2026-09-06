@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from typing import Optional
 
 
 CLIENT_LICENSE_FILES = {
@@ -33,7 +34,7 @@ def _assert_client_license_files(
     test_case: unittest.TestCase,
     names: set[str],
     *,
-    deployment_file: str | None = None,
+    deployment_file: Optional[str] = None,
 ) -> None:
     """Assert client modules, optionally including generated deployment config."""
     required = set(CLIENT_LICENSE_FILES)

@@ -3,14 +3,15 @@ from __future__ import annotations
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError, fields
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Literal, get_args, get_type_hints
+from typing import Literal, Optional, get_type_hints
 
 import pytest
 
-from license_server.database import Database, RepositoryError
-from license_server.models import Checkout, Payway, ProviderOrder
+from license_server.database import Database, RedemptionResult
+
+
+PRODUCT_ID = "opub-major-0"
 
 
 def _database(tmp_path: Path) -> Database:
@@ -19,349 +20,188 @@ def _database(tmp_path: Path) -> Database:
     return database
 
 
-def _insert(database: Database, *, session_id: str = "session-1", device_hash: str = "device-1", provider_order_id: str = "provider-1", token_hash: str = "token-1", expires_at: str | None = None) -> None:
-    now = datetime.now(timezone.utc).replace(microsecond=0)
-    database.insert_pending(
-        session_id=session_id,
-        provider_order_id=provider_order_id,
-        device_hash=device_hash,
-        poll_token_hash=token_hash,
-        created_at=now.isoformat(),
-        expires_at=expires_at or (now + timedelta(minutes=15)).isoformat(),
-        payway="wechat",
-        checkout=Checkout("url", "https://pay.example/order-1"),
-    )
+def _import(database: Database, code_hash: str = "code-1") -> None:
+    database.import_activation_code(code_hash, PRODUCT_ID, "2026-09-06T00:00:00Z")
 
 
-def test_initialize_creates_tables_wal_and_foreign_keys(tmp_path: Path) -> None:
+def test_initialize_creates_inventory_tables_wal_foreign_keys_and_legacy_tables(tmp_path: Path) -> None:
     database = _database(tmp_path)
 
-    assert database.row("SELECT name FROM sqlite_master WHERE type='table' AND name=?", ("orders",))[0] == "orders"
-    assert database.row("SELECT name FROM sqlite_master WHERE type='table' AND name=?", ("licenses",))[0] == "licenses"
+    for table in ("orders", "licenses", "activation_codes", "code_licenses"):
+        assert database.row(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+        )[0] == table
     assert database.row("PRAGMA journal_mode")[0].lower() == "wal"
     assert database.row("PRAGMA foreign_keys")[0] == 1
 
-    with database._connect() as connection:
-        assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
-        assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
 
-
-def test_insert_pending_persists_fixed_product_amount_checkout_and_expiry(tmp_path: Path) -> None:
+def test_rows_returns_all_query_results(tmp_path: Path) -> None:
     database = _database(tmp_path)
-    _insert(database)
+    database.import_activation_codes(
+        [("code-1", PRODUCT_ID, "created-1"), ("code-2", PRODUCT_ID, "created-2")]
+    )
 
-    row = database.order_by_session("session-1")
-    assert row["product_id"] == "opub-lifetime-v1"
-    assert row["amount_fen"] == 990
-    assert row["status"] == "pending"
-    assert row["checkout_kind"] == "url"
-    assert row["checkout_value"] == "https://pay.example/order-1"
-    assert row["expires_at"]
+    assert [row["code_hash"] for row in database.rows(
+        "SELECT code_hash FROM activation_codes ORDER BY code_hash"
+    )] == ["code-1", "code-2"]
+
+
+def test_redemption_result_is_frozen_with_exact_contract() -> None:
+    assert get_type_hints(RedemptionResult) == {
+        "status": Literal["created", "same_device", "used", "invalid", "existing_device"],
+        "signed_payload": Optional[str],
+    }
+    assert [field.name for field in fields(RedemptionResult)] == ["status", "signed_payload"]
+    result = RedemptionResult("invalid")
+    with pytest.raises(FrozenInstanceError):
+        result.status = "created"  # type: ignore[misc]
 
 
 @pytest.mark.parametrize(
     ("column", "value"),
-    [("product_id", "wrong"), ("amount_fen", 1), ("status", "unknown"), ("payway", "stripe"), ("checkout_kind", "json"), ("poll_token_hash", None)],
+    [
+        ("product_id", "other-product"),
+        ("status", "invalid"),
+        ("code_hash", None),
+        ("product_id", None),
+        ("status", None),
+        ("created_at", None),
+    ],
 )
-def test_sqlite_rejects_invalid_order_values(tmp_path: Path, column: str, value: object) -> None:
+def test_activation_code_schema_rejects_invalid_values(
+    tmp_path: Path, column: str, value: object
+) -> None:
     database = _database(tmp_path)
     values = {
-        "session_id": "session-1", "provider_order_id": "provider-1", "device_hash": "device-1",
-        "product_id": "opub-lifetime-v1", "amount_fen": 990, "status": "pending", "poll_token_hash": "token",
-        "created_at": "now", "expires_at": "later", "payway": "wechat", "checkout_kind": "url", "checkout_value": "x",
+        "code_hash": "code-1",
+        "product_id": PRODUCT_ID,
+        "status": "available",
+        "created_at": "created",
+        "redeemed_at": None,
+        "device_hash": None,
     }
     values[column] = value
     columns = ", ".join(values)
     with pytest.raises(sqlite3.IntegrityError):
-        database.row(f"INSERT INTO orders ({columns}) VALUES ({','.join('?' for _ in values)})", tuple(values.values()))
+        database.row(
+            "INSERT INTO activation_codes ({}) VALUES ({})".format(
+                columns, ", ".join("?" for _ in values)
+            ),
+            tuple(values.values()),
+        )
 
 
-def test_one_pending_per_device_and_expiring_allows_replacement(tmp_path: Path) -> None:
+def test_code_license_constraints_reject_orphan_duplicate_code_and_duplicate_device(tmp_path: Path) -> None:
     database = _database(tmp_path)
-    _insert(database)
-    with pytest.raises(RepositoryError):
-        _insert(database, session_id="session-2", provider_order_id="provider-2")
+    _import(database)
+    database.redeem_activation_code("code-1", "device-1", "license-1", "payload-1", "issued-1")
 
-    database.expire_pending("device-1", "expired-at")
-    _insert(database, session_id="session-2", provider_order_id="provider-2")
-    assert database.pending_for_device("device-1")["session_id"] == "session-2"
+    with pytest.raises(sqlite3.IntegrityError):
+        database.row(
+            "INSERT INTO code_licenses VALUES (?, ?, ?, ?, ?)",
+            ("license-2", "missing", "device-2", "payload-2", "issued-2"),
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        database.row(
+            "INSERT INTO code_licenses VALUES (?, ?, ?, ?, ?)",
+            ("license-2", "code-1", "device-2", "payload-2", "issued-2"),
+        )
+    database.import_activation_code("code-2", PRODUCT_ID, "created-2")
+    with pytest.raises(sqlite3.IntegrityError):
+        database.row(
+            "INSERT INTO code_licenses VALUES (?, ?, ?, ?, ?)",
+            ("license-2", "code-2", "device-1", "payload-2", "issued-2"),
+        )
 
 
-def test_token_rotation_invalidates_old_and_unknown_tokens_do_not_match(tmp_path: Path) -> None:
+def test_batch_import_is_atomic_and_enforces_unique_code_hashes(tmp_path: Path) -> None:
     database = _database(tmp_path)
-    _insert(database)
-    assert database.poll_token_matches("session-1", "token-1")
-    assert not database.poll_token_matches("session-1", "unknown")
-    assert not database.poll_token_matches("missing-session", "__unknown_order_token__")
-    database.rotate_poll_token("session-1", "token-2")
-    assert not database.poll_token_matches("session-1", "token-1")
-    assert database.poll_token_matches("session-1", "token-2")
+    database.import_activation_codes(
+        [("code-1", PRODUCT_ID, "created-1"), ("code-2", PRODUCT_ID, "created-2")]
+    )
+    assert database.code_stats() == {"available": 2, "redeemed": 0, "total": 2}
+
+    with pytest.raises(sqlite3.IntegrityError):
+        database.import_activation_codes(
+            [("code-3", PRODUCT_ID, "created-3"), ("code-1", PRODUCT_ID, "created-4")]
+        )
+    assert database.code_stats() == {"available": 2, "redeemed": 0, "total": 2}
 
 
-def test_issue_stores_paid_order_and_license_and_lookup(tmp_path: Path) -> None:
+def test_redeem_unknown_code_returns_invalid_without_mutation(tmp_path: Path) -> None:
     database = _database(tmp_path)
-    _insert(database)
-    payload = '{"license_id":"license-1"}'
-    assert database.issue_license("session-1", "charge-1", payload, "license-1", "2026-09-05T00:00:00Z") == payload
-    order = database.order_by_session("session-1")
-    assert order["status"] == "paid"
-    assert order["provider_charge_id"] == "charge-1"
-    assert database.license_for_device("device-1")["signed_payload"] == payload
+
+    assert database.redeem_activation_code(
+        "missing", "device-1", "license-1", "payload-1", "issued-1"
+    ) == RedemptionResult("invalid")
+    assert database.code_stats() == {"available": 0, "redeemed": 0, "total": 0}
 
 
-def test_verified_expired_order_becomes_paid_and_issues_license(tmp_path: Path) -> None:
+def test_redeem_available_code_creates_license_and_preserves_exact_payload(tmp_path: Path) -> None:
     database = _database(tmp_path)
-    _insert(database)
-    database.expire_pending("device-1", "expired-at")
+    _import(database)
+    payload = '{"license_id":"license-1","signature":"exact"}'
 
-    assert database.issue_license("session-1", "charge-1", "payload-1", "license-1", "time-1") == "payload-1"
-    order = database.order_by_session("session-1")
-    assert order["status"] == "paid"
-    assert order["provider_charge_id"] == "charge-1"
-    assert order["paid_at"] == "time-1"
-    assert database.license_for_device("device-1")["signed_payload"] == "payload-1"
+    assert database.redeem_activation_code(
+        "code-1", "device-1", "license-1", payload, "issued-1"
+    ) == RedemptionResult("created", payload)
+    assert database.code_stats() == {"available": 0, "redeemed": 1, "total": 1}
+    assert database.row("SELECT signed_payload FROM code_licenses WHERE code_hash = ?", ("code-1",))[0] == payload
+    row = database.row(
+        "SELECT redeemed_at, device_hash FROM activation_codes WHERE code_hash = ?", ("code-1",)
+    )
+    assert tuple(row) == ("issued-1", "device-1")
 
 
-def test_verified_failed_order_becomes_paid_and_returns_original_license(tmp_path: Path) -> None:
+def test_redeem_same_device_returns_stored_payload(tmp_path: Path) -> None:
     database = _database(tmp_path)
-    _insert(database)
-    database.issue_license("session-1", "charge-1", "payload-1", "license-1", "time-1")
-    _insert(database, session_id="session-2", provider_order_id="provider-2")
-    database.mark_verification_failed("session-2")
+    _import(database)
+    database.redeem_activation_code("code-1", "device-1", "license-1", "payload-1", "issued-1")
 
-    assert database.issue_license("session-2", "charge-2", "payload-2", "license-2", "time-2") == "payload-1"
-    order = database.order_by_session("session-2")
-    assert order["status"] == "paid"
-    assert order["provider_charge_id"] == "charge-2"
-    assert order["paid_at"] == "time-2"
-    assert database.row("SELECT COUNT(*) FROM licenses")[0] == 1
+    assert database.redeem_activation_code(
+        "code-1", "device-1", "license-2", "payload-2", "issued-2"
+    ) == RedemptionResult("same_device", "payload-1")
+    assert database.row("SELECT COUNT(*) FROM code_licenses")[0] == 1
 
 
-def test_repeated_issue_for_paid_order_is_idempotent(tmp_path: Path) -> None:
+def test_redeem_other_device_returns_used_without_mutation(tmp_path: Path) -> None:
     database = _database(tmp_path)
-    _insert(database)
-    database.issue_license("session-1", "charge-1", "payload-1", "license-1", "time-1")
+    _import(database)
+    database.redeem_activation_code("code-1", "device-1", "license-1", "payload-1", "issued-1")
 
-    assert database.issue_license("session-1", "charge-1", "payload-2", "license-2", "time-2") == "payload-1"
-    order = database.order_by_session("session-1")
-    assert order["status"] == "paid"
-    assert order["provider_charge_id"] == "charge-1"
-    assert order["paid_at"] == "time-1"
+    assert database.redeem_activation_code(
+        "code-1", "device-2", "license-2", "payload-2", "issued-2"
+    ) == RedemptionResult("used")
+    assert database.row("SELECT device_hash FROM activation_codes WHERE code_hash = ?", ("code-1",))[0] == "device-1"
+    assert database.row("SELECT COUNT(*) FROM code_licenses")[0] == 1
 
 
-def test_second_order_for_paid_device_returns_original_license(tmp_path: Path) -> None:
+def test_redeem_new_code_for_existing_device_preserves_available_code(tmp_path: Path) -> None:
     database = _database(tmp_path)
-    _insert(database)
-    database.issue_license("session-1", "charge-1", "payload-1", "license-1", "time-1")
-    _insert(database, session_id="session-2", provider_order_id="provider-2")
-    assert database.issue_license("session-2", "charge-2", "payload-2", "license-2", "time-2") == "payload-1"
-    assert database.row("SELECT COUNT(*) FROM licenses")[0] == 1
+    database.import_activation_codes(
+        [("code-1", PRODUCT_ID, "created-1"), ("code-2", PRODUCT_ID, "created-2")]
+    )
+    database.redeem_activation_code("code-1", "device-1", "license-1", "payload-1", "issued-1")
+
+    assert database.redeem_activation_code(
+        "code-2", "device-1", "license-2", "payload-2", "issued-2"
+    ) == RedemptionResult("existing_device", "payload-1")
+    assert database.code_stats() == {"available": 1, "redeemed": 1, "total": 2}
+    assert database.row("SELECT status FROM activation_codes WHERE code_hash = ?", ("code-2",))[0] == "available"
 
 
-def test_concurrent_issuance_returns_stored_payload(tmp_path: Path) -> None:
+def test_concurrent_redemption_of_one_code_allows_one_created_and_one_used(tmp_path: Path) -> None:
     database = _database(tmp_path)
-    _insert(database)
+    _import(database)
 
-    def issue(index: int) -> str:
-        return database.issue_license("session-1", "charge-1", f"payload-{index}", f"license-{index}", "time")
+    def redeem(index: int) -> RedemptionResult:
+        return database.redeem_activation_code(
+            "code-1", "device-{}".format(index), "license-{}".format(index),
+            "payload-{}".format(index), "issued-{}".format(index),
+        )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        payloads = list(pool.map(issue, [1, 2]))
-    assert payloads[0] == payloads[1]
-    assert database.row("SELECT COUNT(*) FROM licenses")[0] == 1
+        results = list(pool.map(redeem, [1, 2]))
 
-
-def test_provider_charge_uniqueness_prevents_reuse(tmp_path: Path) -> None:
-    database = _database(tmp_path)
-    _insert(database)
-    database.issue_license("session-1", "charge-1", "payload-1", "license-1", "time-1")
-    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
-    with pytest.raises(sqlite3.IntegrityError):
-        database.issue_license("session-2", "charge-1", "payload-2", "license-2", "time-2")
-    assert database.order_by_session("session-2")["status"] == "pending"
-    assert database.order_by_session("session-2")["provider_charge_id"] is None
-    assert database.row("SELECT COUNT(*) FROM licenses")[0] == 1
-
-
-def test_value_objects_are_frozen_with_exact_fields() -> None:
-    assert get_args(Payway) == get_args(Literal["wechat", "alipay"])
-    assert get_type_hints(Checkout) == {
-        "kind": Literal["url", "html"],
-        "value": str,
-    }
-    assert get_type_hints(ProviderOrder) == {
-        "order_id": str,
-        "state": int,
-        "amount": int,
-        "description": str,
-        "charge_id": str,
-        "payway": int,
-        "raw": Dict[str, Any],
-    }
-    assert [field.name for field in fields(Checkout)] == ["kind", "value"]
-    assert [field.name for field in fields(ProviderOrder)] == [
-        "order_id", "state", "amount", "description", "charge_id", "payway", "raw"
-    ]
-    checkout = Checkout("url", "https://pay.example")
-    provider_order = ProviderOrder("order-1", 1, 990, "opub", "charge-1", 2, {"state": 1})
-    with pytest.raises(FrozenInstanceError):
-        checkout.kind = "html"  # type: ignore[misc]
-    with pytest.raises(FrozenInstanceError):
-        provider_order.amount = 1  # type: ignore[misc]
-
-
-@pytest.mark.parametrize(
-    "null_column",
-    [
-        "session_id",
-        "provider_order_id",
-        "device_hash",
-        "product_id",
-        "amount_fen",
-        "status",
-        "poll_token_hash",
-        "created_at",
-        "expires_at",
-        "payway",
-        "checkout_kind",
-        "checkout_value",
-    ],
-)
-def test_order_columns_are_not_null(tmp_path: Path, null_column: str) -> None:
-    database = _database(tmp_path)
-    values = {
-        "session_id": "session-1",
-        "provider_order_id": "provider-1",
-        "device_hash": "device-1",
-        "product_id": "opub-lifetime-v1",
-        "amount_fen": 990,
-        "status": "pending",
-        "poll_token_hash": "token-1",
-        "created_at": "now",
-        "expires_at": "later",
-        "payway": "wechat",
-        "checkout_kind": "url",
-        "checkout_value": "x",
-    }
-    values[null_column] = None
-    columns = ", ".join(values)
-    with pytest.raises(sqlite3.IntegrityError):
-        database.row(
-            f"INSERT INTO orders ({columns}) VALUES ({','.join('?' for _ in values)})",
-            tuple(values.values()),
-        )
-
-
-def test_order_by_provider_id_returns_exact_order_row(tmp_path: Path) -> None:
-    database = _database(tmp_path)
-    _insert(database)
-    assert database.order_by_provider_id("provider-1") == database.order_by_session("session-1")
-
-
-def test_order_session_primary_key_rejects_duplicate_with_valid_other_values(tmp_path: Path) -> None:
-    database = _database(tmp_path)
-    _insert(database)
-    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
-
-    with pytest.raises(sqlite3.IntegrityError):
-        database.row(
-            "INSERT INTO orders (session_id, provider_order_id, device_hash, product_id, amount_fen, status, poll_token_hash, created_at, expires_at, payway, checkout_kind, checkout_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("session-1", "provider-3", "device-3", "opub-lifetime-v1", 990, "pending", "token-3", "now", "later", "wechat", "url", "x"),
-        )
-
-
-def test_order_provider_id_unique_rejects_duplicate_with_valid_other_values(tmp_path: Path) -> None:
-    database = _database(tmp_path)
-    _insert(database)
-    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
-    with pytest.raises(sqlite3.IntegrityError):
-        database.row(
-            "INSERT INTO orders (session_id, provider_order_id, device_hash, product_id, amount_fen, status, poll_token_hash, created_at, expires_at, payway, checkout_kind, checkout_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("session-3", "provider-1", "device-3", "opub-lifetime-v1", 990, "pending", "token-3", "now", "later", "wechat", "url", "x"),
-        )
-
-
-def test_license_id_unique_isolated_from_other_license_constraints(tmp_path: Path) -> None:
-    database = _database(tmp_path)
-    _insert(database)
-    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
-    database.issue_license("session-1", "charge-1", "payload-1", "license-1", "time-1")
-    with pytest.raises(sqlite3.IntegrityError):
-        database.row(
-            "INSERT INTO licenses (license_id, session_id, device_hash, signed_payload, issued_at) VALUES (?, ?, ?, ?, ?)",
-            ("license-1", "session-2", "device-2", "payload-2", "time-2"),
-        )
-
-
-def test_license_session_unique_isolated_from_other_license_constraints(tmp_path: Path) -> None:
-    database = _database(tmp_path)
-    _insert(database)
-    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
-    database.issue_license("session-1", "charge-1", "payload-1", "license-1", "time-1")
-    with pytest.raises(sqlite3.IntegrityError):
-        database.row(
-            "INSERT INTO licenses (license_id, session_id, device_hash, signed_payload, issued_at) VALUES (?, ?, ?, ?, ?)",
-            ("license-2", "session-1", "device-2", "payload-2", "time-2"),
-        )
-
-
-def test_license_device_unique_isolated_from_other_license_constraints(tmp_path: Path) -> None:
-    database = _database(tmp_path)
-    _insert(database)
-    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
-    database.issue_license("session-1", "charge-1", "payload-1", "license-1", "time-1")
-    with pytest.raises(sqlite3.IntegrityError):
-        database.row(
-            "INSERT INTO licenses (license_id, session_id, device_hash, signed_payload, issued_at) VALUES (?, ?, ?, ?, ?)",
-            ("license-2", "session-2", "device-1", "payload-2", "time-2"),
-        )
-
-
-def test_license_foreign_key_rejects_orphan_with_valid_shaped_values(tmp_path: Path) -> None:
-    database = _database(tmp_path)
-    _insert(database)
-    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
-    with pytest.raises(sqlite3.IntegrityError):
-        database.row(
-            "INSERT INTO licenses (license_id, session_id, device_hash, signed_payload, issued_at) VALUES (?, ?, ?, ?, ?)",
-            ("license-2", "missing", "device-2", "payload-2", "time-2"),
-        )
-
-
-@pytest.mark.parametrize("null_column", ["license_id", "session_id", "device_hash", "signed_payload", "issued_at"])
-def test_license_columns_are_not_null(tmp_path: Path, null_column: str) -> None:
-    database = _database(tmp_path)
-    _insert(database)
-    values = {
-        "license_id": "license-1",
-        "session_id": "session-1",
-        "device_hash": "device-1",
-        "signed_payload": "payload-1",
-        "issued_at": "time-1",
-    }
-    values[null_column] = None
-    with pytest.raises(sqlite3.IntegrityError):
-        database.row(
-            "INSERT INTO licenses (license_id, session_id, device_hash, signed_payload, issued_at) VALUES (?, ?, ?, ?, ?)",
-            tuple(values.values()),
-        )
-
-
-def test_nullable_provider_charges_can_repeat(tmp_path: Path) -> None:
-    database = _database(tmp_path)
-    _insert(database, device_hash="device-1")
-    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2")
-    assert database.row("SELECT COUNT(*) FROM orders WHERE provider_charge_id IS NULL")[0] == 2
-
-
-def test_expire_and_verification_failed_only_affect_pending(tmp_path: Path) -> None:
-    database = _database(tmp_path)
-    _insert(database)
-    _insert(database, session_id="session-2", device_hash="device-2", provider_order_id="provider-2", token_hash="token-2")
-    database.mark_verification_failed("session-1")
-    database.expire_pending("device-2", "expired-at")
-    assert database.order_by_session("session-1")["status"] == "verification_failed"
-    assert database.order_by_session("session-2")["status"] == "expired"
-    database.mark_verification_failed("session-1")
-    database.expire_pending("device-1", "again")
-    assert database.order_by_session("session-1")["status"] == "verification_failed"
+    assert sorted(result.status for result in results) == ["created", "used"]
+    assert database.row("SELECT COUNT(*) FROM code_licenses")[0] == 1

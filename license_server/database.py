@@ -3,14 +3,23 @@ from __future__ import annotations
 import hashlib
 import hmac
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal, Optional, Tuple
 
 from .models import Checkout, Payway
 
 
 class RepositoryError(RuntimeError):
     """An order could not be persisted because of a business constraint."""
+
+
+@dataclass(frozen=True)
+class RedemptionResult:
+    """The result of an activation-code redemption attempt."""
+
+    status: Literal["created", "same_device", "used", "invalid", "existing_device"]
+    signed_payload: Optional[str] = None
 
 
 class Database:
@@ -64,6 +73,23 @@ class Database:
 
                 CREATE UNIQUE INDEX IF NOT EXISTS one_pending_order_per_device
                     ON orders(device_hash) WHERE status = 'pending';
+
+                CREATE TABLE IF NOT EXISTS activation_codes (
+                    code_hash TEXT PRIMARY KEY NOT NULL,
+                    product_id TEXT NOT NULL CHECK(product_id='opub-major-0'),
+                    status TEXT NOT NULL CHECK(status IN ('available','redeemed')),
+                    created_at TEXT NOT NULL,
+                    redeemed_at TEXT,
+                    device_hash TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS code_licenses (
+                    license_id TEXT PRIMARY KEY NOT NULL,
+                    code_hash TEXT NOT NULL UNIQUE REFERENCES activation_codes(code_hash),
+                    device_hash TEXT NOT NULL UNIQUE,
+                    signed_payload TEXT NOT NULL,
+                    issued_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -72,6 +98,112 @@ class Database:
         with self._connect() as connection:
             cursor = connection.execute(query, tuple(values))
             return cursor.fetchone()
+
+    def rows(self, query: str, values: Iterable[Any] = ()) -> list[sqlite3.Row]:
+        """Execute a repository/test query and return all result rows."""
+        with self._connect() as connection:
+            cursor = connection.execute(query, tuple(values))
+            return cursor.fetchall()
+
+    def import_activation_code(self, code_hash: str, product_id: str, created_at: str) -> None:
+        """Add one available activation code to the inventory."""
+        self.import_activation_codes(((code_hash, product_id, created_at),))
+
+    def import_activation_codes(
+        self, activation_codes: Iterable[Tuple[str, str, str]]
+    ) -> None:
+        """Add activation codes atomically, leaving inventory unchanged on failure."""
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            connection.executemany(
+                """
+                INSERT INTO activation_codes (code_hash, product_id, status, created_at)
+                VALUES (?, ?, 'available', ?)
+                """,
+                activation_codes,
+            )
+            connection.commit()
+
+    def code_stats(self) -> dict[str, int]:
+        """Return the exact number of available, redeemed, and total codes."""
+        row = self.row(
+            """
+            SELECT
+                COALESCE(SUM(status = 'available'), 0) AS available,
+                COALESCE(SUM(status = 'redeemed'), 0) AS redeemed,
+                COUNT(*) AS total
+            FROM activation_codes
+            """
+        )
+        assert row is not None
+        return {
+            "available": int(row["available"]),
+            "redeemed": int(row["redeemed"]),
+            "total": int(row["total"]),
+        }
+
+    def redeem_activation_code(
+        self,
+        code_hash: str,
+        device_hash: str,
+        license_id: str,
+        signed_payload: str,
+        issued_at: str,
+    ) -> RedemptionResult:
+        """Atomically redeem one code for at most one device."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                code = connection.execute(
+                    """
+                    SELECT activation_codes.status, activation_codes.device_hash,
+                           code_licenses.signed_payload
+                    FROM activation_codes
+                    LEFT JOIN code_licenses
+                        ON code_licenses.code_hash = activation_codes.code_hash
+                    WHERE activation_codes.code_hash = ?
+                    """,
+                    (code_hash,),
+                ).fetchone()
+                if code is None:
+                    connection.commit()
+                    return RedemptionResult("invalid")
+
+                if code["status"] == "redeemed":
+                    connection.commit()
+                    if code["device_hash"] == device_hash:
+                        return RedemptionResult("same_device", code["signed_payload"])
+                    return RedemptionResult("used")
+
+                existing_device = connection.execute(
+                    "SELECT signed_payload FROM code_licenses WHERE device_hash = ?",
+                    (device_hash,),
+                ).fetchone()
+                if existing_device is not None:
+                    connection.commit()
+                    return RedemptionResult("existing_device", existing_device["signed_payload"])
+
+                connection.execute(
+                    """
+                    UPDATE activation_codes
+                    SET status = 'redeemed', redeemed_at = ?, device_hash = ?
+                    WHERE code_hash = ? AND status = 'available'
+                    """,
+                    (issued_at, device_hash, code_hash),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO code_licenses
+                        (license_id, code_hash, device_hash, signed_payload, issued_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (license_id, code_hash, device_hash, signed_payload, issued_at),
+                )
+                connection.commit()
+                return RedemptionResult("created", signed_payload)
+            except Exception:
+                connection.rollback()
+                raise
 
     def insert_pending(
         self,

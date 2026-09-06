@@ -138,3 +138,29 @@ def test_open_checkout_rejects_non_https_or_unknown_kind(tmp_path):
         open_checkout({"kind": "url", "value": "http://bad.test"}, tmp_path)
     with pytest.raises(ActivationError):
         open_checkout({"kind": "other", "value": "x"}, tmp_path)
+
+
+def test_recovered_session_refreshes_checkout_before_opening(tmp_path):
+    saved = pending()
+    saved.update({"payway": "wechat", "device_hash": "d" * 64})
+    (tmp_path / "activation.json").write_text(json.dumps(saved), encoding="utf-8")
+    api = Mock()
+    refreshed = pending()
+    refreshed["checkout"] = {"kind": "url", "value": "https://authoritative.test/new"}
+    api.create_session.return_value = refreshed
+    api.get_session.return_value = {"status": "verification_failed"}
+    opener = Mock()
+    with pytest.raises(ActivationError):
+        activate("wechat", "d" * 64, api, tmp_path, Mock(), opener, timeout_seconds=1, sleep=lambda _: None, monotonic=iter([0, 0]).__next__)
+    assert opener.call_args[0][0]["value"] == "https://authoritative.test/new"
+    assert api.create_session.call_count == 1
+
+
+def test_server_http_checkout_is_rejected_before_opening_or_persisting(tmp_path):
+    response = pending()
+    response["checkout"] = {"kind": "url", "value": "http://evil.test/pay"}
+    api = Mock(create_session=Mock(return_value=response))
+    with pytest.raises(ActivationError) as exc:
+        activate("wechat", "d" * 64, api, tmp_path, Mock(), Mock())
+    assert exc.value.code == "LIC-011"
+    assert not (tmp_path / "activation.json").exists()

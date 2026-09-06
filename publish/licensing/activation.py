@@ -45,6 +45,24 @@ def _atomic_text(path: Path, value: str) -> None:
     _atomic_bytes(path, value.encode("utf-8"))
 
 
+def _validate_checkout(checkout: Any) -> bool:
+    if not isinstance(checkout, Mapping):
+        return False
+    kind, value = checkout.get("kind"), checkout.get("value")
+    if not isinstance(kind, str) or not isinstance(value, str) or not value:
+        return False
+    if kind == "html":
+        return True
+    if kind != "url":
+        return False
+    parsed = urllib.parse.urlparse(value)
+    return (
+        parsed.scheme == "https" and bool(parsed.hostname) and
+        not parsed.username and not parsed.password and
+        not any(ord(char) < 32 or ord(char) == 127 for char in value)
+    )
+
+
 def open_checkout(checkout: Mapping[str, Any], data_path: Path) -> None:
     if not isinstance(checkout, Mapping):
         raise ActivationError("LIC-011", "invalid checkout")
@@ -54,7 +72,7 @@ def open_checkout(checkout: Mapping[str, Any], data_path: Path) -> None:
     data_path = Path(data_path)
     if kind == "url":
         parsed = urllib.parse.urlparse(value)
-        if parsed.scheme.lower() != "https" or not parsed.netloc:
+        if not _validate_checkout(checkout):
             raise ActivationError("LIC-011", "invalid checkout")
         try:
             image = qrcode.make(value)
@@ -98,7 +116,7 @@ def _valid_saved_session(candidate: Any, payway: str, device_hash: str) -> bool:
     checkout = candidate["checkout"]
     if not isinstance(checkout, dict) or set(checkout) != {"kind", "value"}:
         return False
-    return checkout.get("kind") in {"url", "html"} and isinstance(checkout.get("value"), str) and bool(checkout["value"])
+    return _validate_checkout(checkout)
 
 
 def _response_status(response: Any) -> str:
@@ -131,23 +149,24 @@ def activate(
                 session_file.unlink()
             except OSError:
                 pass
-    if session is None:
-        response = api.create_session(device_hash, client_version, payway, secrets.token_urlsafe(24))
-        status = _response_status(response)
-        if status == "licensed":
-            license_doc = response.get("license")
-            if not isinstance(license_doc, dict):
-                raise ActivationServiceError("activation service unavailable")
-            verify(license_doc, device_hash)
-            atomic_write_json(data_path / "license.json", license_doc)
-            return 0
-        if status != "pending" or not all(isinstance(response.get(k), str) and response.get(k) for k in ("session_id", "poll_token", "expires_at")):
+    # A persisted checkout is untrusted. Always ask the service to refresh the
+    # session and checkout; only its current response may be opened.
+    response = api.create_session(device_hash, client_version, payway, secrets.token_urlsafe(24))
+    status = _response_status(response)
+    if status == "licensed":
+        license_doc = response.get("license")
+        if not isinstance(license_doc, dict):
             raise ActivationServiceError("activation service unavailable")
-        checkout = response.get("checkout")
-        if not isinstance(checkout, dict) or checkout.get("kind") not in {"url", "html"} or not isinstance(checkout.get("value"), str):
-            raise ActivationServiceError("activation service unavailable")
-        session = {"session_id": response["session_id"], "poll_token": response["poll_token"], "payway": payway, "device_hash": device_hash, "expires_at": response["expires_at"], "checkout": {"kind": checkout["kind"], "value": checkout["value"]}}
-        atomic_write_json(session_file, session)
+        verify(license_doc, device_hash)
+        atomic_write_json(data_path / "license.json", license_doc)
+        return 0
+    if status != "pending" or not all(isinstance(response.get(k), str) and response.get(k) for k in ("session_id", "poll_token", "expires_at")):
+        raise ActivationError("LIC-011", "invalid activation response")
+    checkout = response.get("checkout")
+    if not _validate_checkout(checkout):
+        raise ActivationError("LIC-011", "invalid activation response")
+    session = {"session_id": response["session_id"], "poll_token": response["poll_token"], "payway": payway, "device_hash": device_hash, "expires_at": response["expires_at"], "checkout": {"kind": checkout["kind"], "value": checkout["value"]}}
+    atomic_write_json(session_file, session)
     checkout_opener(session["checkout"], data_path)
     started = monotonic()
     while monotonic() - started < timeout_seconds:

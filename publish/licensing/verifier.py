@@ -5,6 +5,8 @@ from typing import Any, Mapping
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+from publish.licensing.deployment import LICENSE_PRODUCT_ID
+
 
 class LicenseValidationError(RuntimeError):
     def __init__(self, code: str, message: str):
@@ -24,7 +26,7 @@ def verify_license(document: Mapping[str, Any], device_hash: str, trusted_keys: 
         if not isinstance(payload, Mapping):
             raise LicenseValidationError("LIC-002", "license schema or product is invalid")
         required = {"schema_version", "key_id", "license_id", "product", "device_hash", "issued_at"}
-        if set(payload) != required or type(payload["schema_version"]) is not int or payload["schema_version"] != 1 or payload["product"] != "opub-lifetime-v1":
+        if set(payload) != required or type(payload["schema_version"]) is not int or payload["schema_version"] != 1 or payload["product"] != LICENSE_PRODUCT_ID:
             raise LicenseValidationError("LIC-002", "license schema or product is invalid")
         if any(not isinstance(payload[name], str) for name in required - {"schema_version"}):
             raise LicenseValidationError("LIC-002", "license schema or product is invalid")

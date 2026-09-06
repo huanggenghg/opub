@@ -7,9 +7,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from publish.licensing.verifier import LicenseValidationError, canonical_json, verify_license
 
 
-def signed_document(device_hash="a" * 64):
+def signed_document(device_hash="a" * 64, product="opub-major-0"):
     private = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
-    payload = {"schema_version": 1, "key_id": "test", "license_id": "lic-1", "product": "opub-lifetime-v1", "device_hash": device_hash, "issued_at": "2026-09-05T00:00:00Z"}
+    payload = {"schema_version": 1, "key_id": "test", "license_id": "lic-1", "product": product, "device_hash": device_hash, "issued_at": "2026-09-05T00:00:00Z"}
     signature = base64.b64encode(private.sign(canonical_json(payload))).decode("ascii")
     public = base64.b64encode(private.public_key().public_bytes_raw()).decode("ascii")
     return {"payload": payload, "signature": signature}, {"test": public}
@@ -20,6 +20,15 @@ def test_valid_license_passes_without_network(monkeypatch):
     import requests
     monkeypatch.setattr(requests.Session, "request", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network")))
     verify_license(document, "a" * 64, keys)
+
+
+def test_correctly_signed_legacy_product_is_rejected():
+    document, keys = signed_document(product="opub-lifetime-v1")
+
+    with pytest.raises(LicenseValidationError) as exc:
+        verify_license(document, "a" * 64, keys)
+
+    assert exc.value.code == "LIC-002"
 
 
 @pytest.mark.parametrize("mutation,code", [

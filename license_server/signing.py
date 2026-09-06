@@ -23,6 +23,7 @@ def sign_license(
     license_id: str,
     device_hash: str,
     issued_at: str,
+    product_id: str = "opub-major-0",
 ) -> dict[str, object]:
     private_seed = base64.b64decode(private_key_b64, validate=True)
     if len(private_seed) != 32:
@@ -32,7 +33,7 @@ def sign_license(
         "schema_version": 1,
         "key_id": key_id,
         "license_id": license_id,
-        "product": "opub-lifetime-v1",
+        "product": product_id,
         "device_hash": device_hash,
         "issued_at": issued_at,
     }

@@ -47,7 +47,7 @@ def test_sign_license_creates_verifiable_license_payload() -> None:
         "schema_version": 1,
         "key_id": "kid-1",
         "license_id": "lic-1",
-        "product": "opub-lifetime-v1",
+        "product": "opub-major-0",
         "device_hash": "device-hash-1",
         "issued_at": issued_at,
     }

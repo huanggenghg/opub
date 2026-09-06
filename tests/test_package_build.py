@@ -15,6 +15,7 @@ CLIENT_LICENSE_FILES = {
     "publish/licensing/__init__.py",
     "publish/licensing/activation.py",
     "publish/licensing/api.py",
+    "publish/licensing/deployment.py",
     "publish/licensing/fingerprint.py",
     "publish/licensing/storage.py",
     "publish/licensing/verifier.py",

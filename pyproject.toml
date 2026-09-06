@@ -26,6 +26,7 @@ keywords = ["social-media", "auto-upload", "video", "douyin", "xiaohongshu", "ku
 dependencies = [
   "loguru==0.7.3",
   "opencv-python>=4.13.0.92",
+  "cryptography>=45,<51",
   "patchright==1.58.2",
   "qrcode==8.2",
   "requests==2.32.3",

@@ -220,6 +220,46 @@ class SkillDocBlackboxTests(unittest.TestCase):
         self.assertIn("不要自行检索文件系统", text, "SKILL.md 必须禁止 agent 自行检索文件系统挑素材")
         self.assertIn("仅当用户明确", text, "自动生成只允许在用户明确授权时使用")
 
+    def test_documents_paid_license_contract_and_agent_flow(self):
+        text = self.SKILL_PATH.read_text(encoding="utf-8")
+        for fragment in [
+            "¥9.90",
+            "一个设备",
+            "首次激活后永久离线",
+            "不需账号",
+            "不迁移",
+            "解绑",
+            "换机重置",
+            "新电脑重新购买",
+            "诚实用户门禁",
+            "非强 DRM",
+            "opub --license-status",
+            "exit 13",
+            "--activate --pay-with wechat",
+            "--activate --pay-with alipay",
+            "付款窗口打开",
+            "不重复问参数",
+        ]:
+            self.assertIn(fragment, text)
+
+        for hidden in ["设备 hash", "poll token", "form", "internal log"]:
+            self.assertIn(hidden, text)
+
+    def test_documents_license_exit_codes_and_suggestions(self):
+        text = self.SKILL_PATH.read_text(encoding="utf-8")
+        for code in ["LIC001", "LIC002", "LIC003", "LIC004", "LIC010", "LIC011", "LIC012"]:
+            self.assertIn(code, text)
+        self.assertIn("建议", text)
+
+    def test_documents_license_commands(self):
+        text = self.SKILL_PATH.read_text(encoding="utf-8")
+        for command in [
+            "opub --license-status",
+            "opub --activate --pay-with wechat",
+            "opub --activate --pay-with alipay",
+        ]:
+            self.assertIn(command, text)
+
     def test_agent_hides_publish_process_logs_and_reports_only_milestones(self):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
         feedback = text.split("## Agent 用户反馈", 1)[1].split("## 读取结果", 1)[0]
@@ -246,6 +286,7 @@ class PublicSingleAccountContractTests(unittest.TestCase):
         Path("README.md"),
         Path("AGENT.md"),
         Path("skills/opub-cli/SKILL.md"),
+        Path("docs/CLI.md"),
     ]
 
     def test_docs_document_one_canonical_account_per_platform(self):
@@ -255,6 +296,13 @@ class PublicSingleAccountContractTests(unittest.TestCase):
                 self.assertIn("每个平台只自动发现一个规范账号文件", text)
                 self.assertNotIn("微博多账号", text)
                 self.assertNotIn("每个账号各发一遍", text)
+
+    def test_public_docs_share_paid_license_contract(self):
+        for path in self.DOC_PATHS:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                for fragment in ["¥9.90", "一个设备", "不需账号", "新电脑重新购买"]:
+                    self.assertIn(fragment, text)
 
 
 if __name__ == "__main__":

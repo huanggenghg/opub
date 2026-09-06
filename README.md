@@ -63,6 +63,10 @@ opub --help                           # 全部参数说明
 
 Agent 的完整接口契约见 [skills/opub-cli/SKILL.md](./skills/opub-cli/SKILL.md)，安装、配置、调用、读取结果所需信息全部在其中。
 
+## 付费许可
+
+一次购买 ¥9.90，绑定一个设备；首次激活后永久离线使用，不需账号。许可不迁移、不解绑、不提供换机重置，新电脑重新购买。公开 Python 包是诚实用户门禁，属于非强 DRM。状态与激活命令为 `opub --license-status`、`opub --activate --pay-with wechat`、`opub --activate --pay-with alipay`；退出码 13 时选择支付方式，`LIC001`–`LIC012` 建议见 [docs/CLI.md](docs/CLI.md)。
+
 技能与运行时分发相互独立：Agent 平台安装技能时即获得 SKILL.md，运行时依赖由 Agent 按 SKILL.md 指引自行动 `pip install opub` 安装。
 
 从源码运行（开发）：

@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from publish.licensing.activation import ActivationError, activate, open_checkout
+from publish.licensing.activation import ActivationError, _atomic_bytes, activate, open_checkout
 from publish.licensing.api import ActivationServiceError, LicenseApi
 
 
@@ -36,7 +36,7 @@ def test_license_api_contract_and_json_shape():
     session.request.side_effect = [Response({"status": "pending"}), Response({"status": "licensed"})]
     api = LicenseApi("https://license.test///", session=session)
     assert api.create_session("d" * 64, "1.2.3", "wechat", "nonce") == {"status": "pending"}
-    assert api.get_session("s1", "secret-token") == {"status": "licensed"}
+    assert api.get_session("a" * 32, "secret-token") == {"status": "licensed"}
     assert session.request.call_args_list[0].kwargs == {
         "timeout": (5, 20),
         "json": {"device_hash": "d" * 64, "client_nonce": "nonce", "client_version": "1.2.3", "payway": "wechat"},
@@ -53,6 +53,14 @@ def test_license_api_maps_transport_http_and_json_errors(response):
     with pytest.raises(ActivationServiceError) as exc:
         LicenseApi("https://license.test", session=session).get_session("s", "t")
     assert exc.value.code == "LIC-011"
+
+
+def test_license_api_rejects_invalid_session_id_without_request():
+    session = Mock()
+    with pytest.raises(ActivationServiceError) as exc:
+        LicenseApi("https://license.test", session=session).get_session("../secret", "token")
+    assert exc.value.code == "LIC-011"
+    session.request.assert_not_called()
 
 
 def test_activation_opens_checkout_polls_verifies_then_writes(tmp_path):
@@ -99,6 +107,16 @@ def test_corrupt_session_is_discarded_and_direct_license_is_verified(tmp_path):
     assert activate("alipay", "d" * 64, api, tmp_path, verify, Mock()) == 0
     verify.assert_called_once_with(license_doc, "d" * 64)
     assert json.loads((tmp_path / "license.json").read_text()) == license_doc
+
+
+def test_direct_license_removes_stale_activation_session(tmp_path):
+    stale = pending()
+    stale.update({"payway": "wechat", "device_hash": "d" * 64})
+    (tmp_path / "activation.json").write_text(json.dumps(stale), encoding="utf-8")
+    license_doc = {"payload": {"x": 1}, "signature": "sig"}
+    api = Mock(create_session=Mock(return_value={"status": "licensed", "license": license_doc}))
+    assert activate("wechat", "d" * 64, api, tmp_path, Mock()) == 0
+    assert not (tmp_path / "activation.json").exists()
 
 
 def test_invalid_license_never_writes_license(tmp_path):
@@ -164,3 +182,21 @@ def test_server_http_checkout_is_rejected_before_opening_or_persisting(tmp_path)
         activate("wechat", "d" * 64, api, tmp_path, Mock(), Mock())
     assert exc.value.code == "LIC-011"
     assert not (tmp_path / "activation.json").exists()
+
+
+def test_atomic_checkout_does_not_chmod_after_successful_replace(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("publish.licensing.activation.os.chmod", lambda *args: calls.append(args))
+    _atomic_bytes(tmp_path / "artifact", b"safe")
+    assert (tmp_path / "artifact").read_bytes() == b"safe"
+    assert calls == []
+
+
+def test_atomic_checkout_replace_failure_preserves_old_and_cleans_temp(tmp_path, monkeypatch):
+    target = tmp_path / "artifact"
+    target.write_bytes(b"old")
+    monkeypatch.setattr("publish.licensing.activation.os.replace", lambda *_: (_ for _ in ()).throw(OSError("replace failed")))
+    with pytest.raises(OSError):
+        _atomic_bytes(target, b"new")
+    assert target.read_bytes() == b"old"
+    assert list(tmp_path.glob(".artifact.*")) == []

@@ -1,4 +1,5 @@
 """Small, fail-closed client for the activation service."""
+import re
 from typing import Any, Dict, Optional
 
 import requests
@@ -21,6 +22,8 @@ class LicenseApi:
         )
 
     def get_session(self, session_id: str, poll_token: str) -> Dict[str, Any]:
+        if not isinstance(session_id, str) or not re.fullmatch(r"[0-9a-f]{32}", session_id):
+            raise ActivationServiceError("activation service unavailable")
         return self._json(
             "GET", "/v1/activation-sessions/" + str(session_id),
             headers={"Authorization": "Bearer " + str(poll_token)},

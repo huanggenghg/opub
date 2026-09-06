@@ -32,7 +32,6 @@ def _atomic_bytes(path: Path, value: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(name, str(path))
-        os.chmod(path, 0o600)
     except BaseException:
         try:
             os.unlink(name)
@@ -159,6 +158,10 @@ def activate(
             raise ActivationServiceError("activation service unavailable")
         verify(license_doc, device_hash)
         atomic_write_json(data_path / "license.json", license_doc)
+        try:
+            session_file.unlink()
+        except FileNotFoundError:
+            pass
         return 0
     if status != "pending" or not all(isinstance(response.get(k), str) and response.get(k) for k in ("session_id", "poll_token", "expires_at")):
         raise ActivationError("LIC-011", "invalid activation response")

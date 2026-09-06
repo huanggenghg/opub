@@ -25,9 +25,16 @@ from publish.errors import (
     EXIT_AUTH_ERROR,
     EXIT_CONFIG_ERROR,
     EXIT_ENV_ERROR,
+    EXIT_LICENSE_ERROR,
     EXIT_OK,
     EXIT_PARTIAL_FAIL,
     print_error,
+)
+from publish.licensing import (
+    print_license_error,
+    require_valid_license,
+    run_activation,
+    show_license_status,
 )
 from publish.reporter import print_header, print_results, print_summary
 from publish.runtime import runtime_preflight
@@ -313,6 +320,14 @@ def build_parser() -> argparse.ArgumentParser:
     except PackageNotFoundError:
         _version = "0.0.0.dev0"
     parser.add_argument("--version", action="version", version=f"opub {_version}")
+    license_group = parser.add_mutually_exclusive_group()
+    license_group.add_argument("--license-status", action="store_true", help="检查本机许可证状态")
+    license_group.add_argument("--activate", action="store_true", help="购买或恢复本机永久许可证")
+    parser.add_argument(
+        "--pay-with",
+        choices=("wechat", "alipay"),
+        help="激活支付渠道，仅与 --activate 一起使用",
+    )
     parser.add_argument("--platforms", default=None, help="启用的平台，逗号分隔（必填）")
     parser.add_argument("--video", default=None, help="视频文件或目录路径")
     parser.add_argument("--note", action="store_true", help="图文模式：以 --images 的图片发布图文")
@@ -348,6 +363,32 @@ def _build_overrides(args: argparse.Namespace) -> PublishOverrides:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.pay_with and not args.activate:
+        parser.error("--pay-with 只能与 --activate 一起使用")
+    if args.license_status:
+        return show_license_status()
+    if args.activate:
+        payway = args.pay_with
+        if payway is None and sys.stdin.isatty():
+            try:
+                selection = input("选择支付方式 [1=微信, 2=支付宝]: ").strip()
+            except EOFError:
+                selection = ""
+            payway = {"1": "wechat", "2": "alipay"}.get(selection)
+        if payway not in ("wechat", "alipay"):
+            print_error(
+                "LIC-001",
+                "非交互激活必须指定支付方式",
+                "使用 --activate --pay-with wechat 或 alipay",
+            )
+            return EXIT_LICENSE_ERROR
+        return run_activation(payway)
+
+    valid, code = require_valid_license()
+    if not valid:
+        print_license_error(code or "LIC-002")
+        return EXIT_LICENSE_ERROR
+
     try:
         return asyncio.run(run_publish(_build_overrides(args)))
     except Exception as exc:

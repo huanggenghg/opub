@@ -97,7 +97,8 @@ class PublishCliParserTests(unittest.TestCase):
             parser.parse_args(["--config", "my.ini"])
 
     def test_main_calls_run_publish_with_overrides(self):
-        with patch("publish.orchestrator.run_publish", new=AsyncMock(return_value=0)) as run_publish:
+        with patch("publish.orchestrator.require_valid_license", return_value=(True, None)), \
+             patch("publish.orchestrator.run_publish", new=AsyncMock(return_value=0)) as run_publish:
             code = publish_all.main(["--platforms", "weibo", "--title", "标题"])
 
         self.assertEqual(code, 0)
@@ -107,7 +108,8 @@ class PublishCliParserTests(unittest.TestCase):
 
     def test_main_wraps_exception_with_run001_and_exit_code_2(self):
         stderr = io.StringIO()
-        with patch("publish.orchestrator.run_publish", new=AsyncMock(side_effect=RuntimeError("boom"))):
+        with patch("publish.orchestrator.require_valid_license", return_value=(True, None)), \
+             patch("publish.orchestrator.run_publish", new=AsyncMock(side_effect=RuntimeError("boom"))):
             with contextlib.redirect_stderr(stderr):
                 code = publish_all.main([])
 

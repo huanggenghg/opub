@@ -8,6 +8,7 @@ EXIT_ALL_FAIL = 2
 EXIT_CONFIG_ERROR = 10
 EXIT_ENV_ERROR = 11
 EXIT_AUTH_ERROR = 12
+EXIT_LICENSE_ERROR = 13
 
 
 def print_error(code: str, message: str, action: str) -> None:

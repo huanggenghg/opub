@@ -7,6 +7,7 @@ from publish.errors import (
     EXIT_AUTH_ERROR,
     EXIT_CONFIG_ERROR,
     EXIT_ENV_ERROR,
+    EXIT_LICENSE_ERROR,
     EXIT_OK,
     EXIT_PARTIAL_FAIL,
     print_error,
@@ -21,6 +22,7 @@ class ExitCodeConstantsTests(unittest.TestCase):
         self.assertEqual(EXIT_CONFIG_ERROR, 10)
         self.assertEqual(EXIT_ENV_ERROR, 11)
         self.assertEqual(EXIT_AUTH_ERROR, 12)
+        self.assertEqual(EXIT_LICENSE_ERROR, 13)
 
 
 class PrintErrorTests(unittest.TestCase):

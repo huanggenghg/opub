@@ -16,7 +16,11 @@ def normalize_activation_code(value: Any) -> str:
     if not isinstance(value, str):
         raise ActivationCodeFormatError("invalid activation code")
 
-    normalized = value.strip().upper().replace("-", "")
+    stripped = value.strip()
+    if not stripped.isascii():
+        raise ActivationCodeFormatError("invalid activation code")
+
+    normalized = stripped.upper().replace("-", "")
     if _ACTIVATION_CODE_PATTERN.fullmatch(normalized) is None:
         raise ActivationCodeFormatError("invalid activation code")
     return normalized

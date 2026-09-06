@@ -17,6 +17,7 @@ def test_normalize_activation_code_accepts_lowercase_display_form() -> None:
         "",
         "OPUB1-01234-56789-ABCDE-FGHJK-MNPQR-STVWX",
         "OPUB0-01234-56789-ABODE-FGHJK-MNPQR-STVWX",
+        "OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-\u017fTVWX",
         "../../OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWX",
         "OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWXYZZ",
         "OPUB0-012345-6789A-BCDEF-GHJKM-NPQRS-TVWXYZ",

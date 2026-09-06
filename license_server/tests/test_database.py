@@ -190,6 +190,25 @@ def test_redeem_new_code_for_existing_device_preserves_available_code(tmp_path: 
     assert database.row("SELECT status FROM activation_codes WHERE code_hash = ?", ("code-2",))[0] == "available"
 
 
+def test_redeem_rolls_back_code_update_when_license_insert_fails(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    database.import_activation_codes(
+        [("code-1", PRODUCT_ID, "created-1"), ("code-2", PRODUCT_ID, "created-2")]
+    )
+    database.redeem_activation_code("code-1", "device-1", "license-1", "payload-1", "issued-1")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        database.redeem_activation_code(
+            "code-2", "device-2", "license-1", "payload-2", "issued-2"
+        )
+
+    row = database.row(
+        "SELECT status, redeemed_at, device_hash FROM activation_codes WHERE code_hash = ?", ("code-2",)
+    )
+    assert tuple(row) == ("available", None, None)
+    assert database.row("SELECT COUNT(*) FROM code_licenses WHERE code_hash = ?", ("code-2",))[0] == 0
+
+
 def test_concurrent_redemption_of_one_code_allows_one_created_and_one_used(tmp_path: Path) -> None:
     database = _database(tmp_path)
     _import(database)

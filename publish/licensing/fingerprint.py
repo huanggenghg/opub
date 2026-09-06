@@ -6,7 +6,6 @@ from __future__ import annotations
 import hashlib
 import platform
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -33,6 +32,13 @@ def _sha256_material(platform_name: str, value: str) -> str:
 def _safe_read(read: Callable[[str], str], path: str) -> str:
     try:
         return read(path) or ""
+    except Exception:
+        return ""
+
+
+def _default_read(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8").strip()
     except Exception:
         return ""
 
@@ -93,7 +99,7 @@ def _windows_machine_guid(run: Callable[..., object]) -> str:
 def build_device_hash(
     system: Optional[str] = None,
     run: Callable[..., object] = subprocess.run,
-    read: Callable[[str], str] = Path.read_text,
+    read: Callable[[str], str] = _default_read,
 ) -> str:
     system_name = system or platform.system()
 

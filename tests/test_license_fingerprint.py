@@ -1,9 +1,12 @@
 import contextlib
 import hashlib
 import io
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
+from publish.licensing import fingerprint as fingerprint_module
 from publish.licensing.fingerprint import DeviceFingerprintError, build_device_hash
 
 
@@ -13,6 +16,19 @@ def _digest(system, *values):
 
 
 class DeviceFingerprintTests(unittest.TestCase):
+    def test_default_read_reads_text_from_string_path(self):
+        helper = getattr(fingerprint_module, "_default_read", None)
+        self.assertIsNotNone(helper)
+
+        with tempfile.NamedTemporaryFile("w", delete=False) as handle:
+            handle.write("  'DEFAULT-READ' \n")
+            temp_path = handle.name
+
+        try:
+            self.assertEqual(helper(temp_path), "'DEFAULT-READ'")
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
     def test_darwin_hashes_normalized_ioreg_platform_uuid(self):
         calls = []
 

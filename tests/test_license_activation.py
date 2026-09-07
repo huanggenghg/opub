@@ -62,6 +62,7 @@ def test_license_api_posts_code_activation_once_with_exact_payload() -> None:
             "activation_code": VALID_CODE,
         },
         "kwargs": {
+            "allow_redirects": False,
             "timeout": (5, 20),
             "json": {
                 "device_hash": DEVICE_HASH,
@@ -70,6 +71,25 @@ def test_license_api_posts_code_activation_once_with_exact_payload() -> None:
             },
         },
     }
+
+
+@pytest.mark.parametrize("status", [307, 308])
+def test_license_api_does_not_follow_redirects(status) -> None:
+    session = MockSession(
+        Response(status, {"detail": {"code": "LIC-013", "location": "https://evil.test"}})
+    )
+
+    with pytest.raises(ActivationServiceError) as exc_info:
+        LicenseApi("https://license.test", session=session).activate_code(
+            DEVICE_HASH, "0.8.0", VALID_CODE
+        )
+
+    assert exc_info.value.code == "LIC-011"
+    assert str(exc_info.value) == "activation service unavailable"
+    assert len(session.calls) == 1
+    assert session.calls[0]["kwargs"]["allow_redirects"] is False
+    assert VALID_CODE not in str(exc_info.value)
+    assert DEVICE_HASH not in str(exc_info.value)
 
 
 @pytest.mark.parametrize(

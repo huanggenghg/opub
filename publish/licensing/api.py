@@ -42,6 +42,7 @@ class LicenseApi:
             response = self.session.request(
                 "POST",
                 self.base_url + path,
+                allow_redirects=False,
                 timeout=(5, 20),
                 **kwargs,
             )

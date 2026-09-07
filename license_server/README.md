@@ -1,235 +1,169 @@
-# opub license service — deployment runbook
+# opub 许可服务部署手册
 
-`license_server/` is the **private** activation/licensing service for opub. It
-never ships to PyPI: `pyproject.toml` does not declare it as a package,
-`MANIFEST.in` prunes it (plus `.secrets/` and `*.sqlite3*`) from the source
-distribution, and `tests/test_package_build.py` asserts that both the built
-wheel and the sdist contain no `license_server/`, `.secrets/`, or `*.sqlite3*`
-entries.
+`license_server/` 是只部署在服务器上的私有激活服务，不会进入 opub 的 wheel 或
+sdist。生产地址使用现有阿里云服务器上的 `https://dachitech.xyz/license`。
 
-Routes (the service exposes exactly three):
+公网只开放一个接口：
 
-| Route | Purpose |
+| 方法与路径 | 用途 |
 | --- | --- |
-| `POST /v1/activation-sessions` | create an activation session, returns checkout URL + poll token |
-| `GET /v1/activation-sessions/{session_id}` | poll session status (Bearer poll token required) |
-| `POST /v1/webhooks/mianbaoduo` | payment provider webhook |
+| `POST /v1/code-activations` | 将一个爱发电激活码绑定到首次兑换的设备并返回签名许可 |
 
-## 1. Environment variables
+没有公网管理、库存查询、重签或文档接口。库存管理仅通过服务器本地命令完成。
 
-All seven are required — the service refuses to start when any is missing or
-blank. Write them to `/etc/opub-license.env` (mode `600`, owner
-`opub-license:opub-license`):
+## 1. 四个服务环境变量
+
+服务只读取以下四项。将它们写入 `/etc/opub-license.env`，文件所有者设为
+`opub-license:opub-license`，权限设为 `0600`：
 
 ```bash
-OPUB_PUBLIC_BASE_URL=https://license.example.com
-OPUB_PAYMENT_RETURN_URL=https://opub.example.com/thanks
-OPUB_MBD_APP_ID=<mianbaoduo app id>
-OPUB_MBD_APP_KEY=<mianbaoduo app key>
-OPUB_LICENSE_PRIVATE_KEY=<base64 32-byte Ed25519 seed from keygen>
-OPUB_LICENSE_KEY_ID=<key id, e.g. opub-license-2026-09>
+OPUB_PUBLIC_BASE_URL=https://dachitech.xyz/license
+OPUB_LICENSE_PRIVATE_KEY=<base64 编码的 32 字节 Ed25519 私钥种子>
+OPUB_LICENSE_KEY_ID=opub-license-2026-09
 OPUB_LICENSE_DB_PATH=/opt/opub/license_server/data/license.sqlite3
 ```
 
-Rules enforced at startup (`config.py`):
+私钥只能保存在服务器环境文件和加密离线备份中，不得进入 Git、日志、聊天记录或
+发行包。数据库目录只能由 `opub-license` 服务用户写入。
 
-- Both URLs must be `https`; `OPUB_PUBLIC_BASE_URL` must not carry a query
-  string or fragment, and its trailing slash is stripped.
-- `OPUB_LICENSE_PRIVATE_KEY` must be valid base64 decoding to exactly 32 bytes.
-- `OPUB_MBD_APP_KEY` and `OPUB_LICENSE_PRIVATE_KEY` are secrets: they live only
-  in this env file, never in Git and never in a distribution.
+## 2. 首次安装与密钥生成
 
-For Caddy, additionally set `OPUB_LICENSE_HOST` to the **host portion of
-`OPUB_PUBLIC_BASE_URL`** — e.g. `https://license.example.com` →
-`OPUB_LICENSE_HOST=license.example.com` — and make it visible to the `caddy`
-process (e.g. a systemd drop-in for the caddy unit):
-
-```ini
-# /etc/systemd/system/caddy.service.d/opub-license.conf
-[Service]
-Environment=OPUB_LICENSE_HOST=license.example.com
-```
-
-## 2. Key generation
-
-From a trusted machine, in the repo root (this writes the private seed with
-mode `600` and the matching public key into a client-side module):
+将项目部署到 `/opt/opub` 后，在服务器上安装服务：
 
 ```bash
-python -m license_server.keygen \
-    --private-file .secrets/license-ed25519-private.b64 \
-    --client-file <path-to-client-public-key-module> \
-    --base-url https://license.example.com \
-    --key-id opub-license-2026-09
-```
-
-The base64 line inside the private file is the value for
-`OPUB_LICENSE_PRIVATE_KEY`.
-
-**Offline copies:** keep exactly **two offline copies** of the Ed25519 private
-key (e.g. one encrypted USB stick and one printed base64 hardcopy in a safe,
-or a password-manager entry) in addition to the live env file. The private key
-must otherwise exist only in `.secrets/` on the generating machine and in
-`/etc/opub-license.env` on the server. Losing all copies means no further
-licenses can ever be issued; leaking it means anyone can forge licenses.
-
-## 3. Install and start
-
-```bash
-# 1) System user and code checkout
 sudo useradd --system --home /opt/opub --shell /usr/sbin/nologin opub-license
-sudo git clone <repo> /opt/opub
-# The clone is root-owned; hand it to the service user or the venv step
-# below fails with EACCES.
-sudo chown -R opub-license:opub-license /opt/opub
+sudo mkdir -p /opt/opub/license_server/data /var/backups/opub-license
+sudo chown -R opub-license:opub-license /opt/opub /var/backups/opub-license
 cd /opt/opub
 sudo -u opub-license python3 -m venv .venv
 sudo -u opub-license .venv/bin/python -m pip install -r license_server/requirements.txt
-# (with the venv active, the equivalent is:)
-python3 -m pip install -r license_server/requirements.txt
-
-# 2) Environment file (see section 1) and runtime directories
 sudo install -o opub-license -g opub-license -m 600 /dev/null /etc/opub-license.env
-# /var/backups is root-owned: create and hand over the backup directory as
-# root first, or the service user's mkdir fails with EACCES.
-sudo mkdir -p /var/backups/opub-license
-sudo chown opub-license:opub-license /var/backups/opub-license
-sudo -u opub-license mkdir -p /opt/opub/license_server/data
+```
 
-# 3) systemd unit (single worker — see section 5)
+首次上线时在受信任环境生成一对密钥，并同时生成客户端公开配置：
+
+```bash
+.venv/bin/python -m license_server.keygen \
+  --private-file .secrets/license-ed25519-private.b64 \
+  --client-file publish/licensing/deployment.py \
+  --base-url https://dachitech.xyz/license \
+  --purchase-url https://afdian.com/item/69bf71f0a9f511f1bc065254001e7c00 \
+  --key-id opub-license-2026-09
+```
+
+私钥文件权限为 `0600`。把其中唯一一行写入服务器环境文件的私钥项；客户端配置只
+包含公开 URL、产品标识和公钥，可以随 opub 发布。妥善保存私钥的加密离线备份；
+丢失私钥将无法继续签发许可，泄露私钥将允许伪造许可。
+
+## 3. systemd 与 Caddy
+
+安装并启动单进程服务：
+
+```bash
 sudo cp license_server/deploy/opub-license.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now opub-license
+sudo systemctl status opub-license
 ```
 
-The unit runs uvicorn on `127.0.0.1:8013` with
-`--proxy-headers --forwarded-allow-ips=127.0.0.1`, so only the local reverse
-proxy is trusted to supply the real client IP (the rate limiters key on it).
-Session creation is capped at 60/hour per (IP, device) and 120/hour per IP —
-the per-IP gate is checked first, so one client cannot buy unlimited provider
-checkouts by rotating device hashes. Polling is capped at 360 requests per
-rolling 10 minutes per IP, regardless of session ID. This gives the client's
-2-second polling loop 20% headroom over its maximum 300 requests in 600
-seconds, while session-ID rotation cannot multiply the allowance. Expired
-in-memory limiter keys are removed during later requests instead of being kept
-for the life of the process.
-
-## 4. Reverse proxy (Caddy)
+必须保持一个 worker。兑换的一致性由 SQLite 事务保障，但限流窗口保存在进程内；
+增加 worker 会把限流拆成多份。服务仅监听 `127.0.0.1:8013`，公网入口由 Caddy
+提供。将 `license_server/deploy/Caddyfile.example` 中的两个许可路由合并到现有
+`dachitech.xyz` 站点块后，先检查再重载：
 
 ```bash
-sudo cp license_server/deploy/Caddyfile.example /etc/caddy/Caddyfile.d/opub-license
-# ensure the main Caddyfile imports the snippet:  import Caddyfile.d/*
-sudo systemctl reload caddy   # after setting OPUB_LICENSE_HOST (section 1)
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
 ```
 
-`Caddyfile.example` terminates TLS for `{$OPUB_LICENSE_HOST}` and proxies to
-`127.0.0.1:8013`.
+Caddy 只把外部 `/license/v1/code-activations` 改写为内部
+`/v1/code-activations`。`/license` 下的其他路径统一返回 `404`，不能把服务根路径
+或文档路径反向代理到公网。
 
-## 5. Why exactly one worker
+## 4. 本地激活码库存
 
-Do **not** raise `--workers`. Two pieces of state are process-local:
-
-- The activation-session **creation lock** (`threading.Lock` in
-  `service.py`) serializes check-then-insert for pending sessions and order
-  creation.
-- The **rate limiters** (`limiter.py`) are in-memory sliding windows.
-
-With more than one worker, duplicate checkouts could be created and the rate
-limits would only be per-worker. If throughput ever demands scaling, the lock
-and limiter must move to shared storage first.
-
-## 6. Smoke test
-
-After start (and after every deploy):
+以下命令只能在服务器本地运行，并使用与服务相同的数据库路径。正式库存只能在确认
+部署配置和备份后生成：
 
 ```bash
-curl -fsS -o /dev/null -w '%{http_code}\n' "$OPUB_PUBLIC_BASE_URL/v1/activation-sessions/not-found"
+set -a
+. /etc/opub-license.env
+set +a
+
+.venv/bin/python -m license_server.codes generate \
+  --count 100 \
+  --output /opt/opub/license_server/data/afdian-codes.txt
+
+.venv/bin/python -m license_server.codes stats
 ```
 
-Expected output: `401`. The polling route exists but requires a Bearer poll
-token, and unknown sessions deliberately answer 401 (not 404) to avoid
-session enumeration — so 401 proves routing, TLS and the app are all alive.
+`generate` 会以 `0600` 权限创建新文件，文件已存在时拒绝覆盖，同时只把激活码哈希
+写入 SQLite。`stats` 只输出 `available`、`redeemed` 和 `total` 数量，不输出激活
+码、设备哈希或许可内容。生成后确认 `available` 与文件行数一致。
 
-Note: with `-f`, curl exits non-zero on any 4xx even though `-w` still prints
-the status; seeing `401` printed is the expected, healthy result.
+明文库存文件是一次性商品库存，必须遵守：
 
-## 7. Provider webhook
+1. 通过受保护的管理连接下载或直接从受信任浏览器上传到爱发电商品的随机激活码发放设置。
+2. 一行一个激活码，不编辑、不排序、不复制到剪贴板工具、工单或聊天软件。
+3. 不执行会打印文件内容的命令，不把命令跟踪或调试日志打开。
+4. 绝不提交 Git，也不放入 wheel、sdist、普通云盘或公开备份。
+5. 爱发电确认接收且数量一致后，将本地明文移入加密离线存档或安全销毁；数据库只保留哈希。
 
-In the mianbaoduo merchant console, configure the webhook URL as:
+## 5. 备份与恢复
 
-```
-{OPUB_PUBLIC_BASE_URL}/v1/webhooks/mianbaoduo
-```
-
-Use the exact path with **no query parameters** — e.g.
-`https://license.example.com/v1/webhooks/mianbaoduo`. The URL carries no
-secret; every delivery is re-verified server-side by querying the provider
-order API before any license is issued. The returned provider `order_id` must
-be non-empty and exactly match the local `provider_order_id`; amount, product,
-payment state, and payment method must also match. Repeated deliveries are
-idempotent.
-
-## 8. Database backup
-
-Daily backup (cron or systemd timer, run as `root` or `opub-license`):
+SQLite 处于 WAL 模式。在线备份必须使用 SQLite 的备份命令，不能在服务写入时直接
+复制活动数据库：
 
 ```bash
-sqlite3 "$OPUB_LICENSE_DB_PATH" '.backup /var/backups/opub-license/latest.sqlite3'
+sudo -u opub-license sqlite3 /opt/opub/license_server/data/license.sqlite3 \
+  ".backup '/var/backups/opub-license/license-$(date +%F).sqlite3'"
+sudo -u opub-license sqlite3 /var/backups/opub-license/license-$(date +%F).sqlite3 \
+  'PRAGMA integrity_check;'
 ```
 
-Keep **30 days** of retention by rotating a dated copy:
+每日执行并保留至少 30 天；备份与私钥分开加密保存。恢复前先在副本上运行
+`PRAGMA integrity_check`。正式恢复时停止服务，将验证通过的备份安装为
+`/opt/opub/license_server/data/license.sqlite3`（所有者
+`opub-license:opub-license`、权限 `0600`），再启动服务并运行下方空 JSON
+冒烟测试。不要用生产激活码做恢复验证。
 
 ```bash
-cp -p /var/backups/opub-license/latest.sqlite3 \
-      /var/backups/opub-license/license-$(date +%F).sqlite3
-find /var/backups/opub-license -name 'license-*.sqlite3' -mtime +30 -delete
+sudo systemctl stop opub-license
+sudo sqlite3 /var/backups/opub-license/license-YYYY-MM-DD.sqlite3 \
+  'PRAGMA integrity_check;'
+sudo mv /opt/opub/license_server/data/license.sqlite3 \
+  /opt/opub/license_server/data/license.sqlite3.before-restore
+sudo rm -f /opt/opub/license_server/data/license.sqlite3-wal \
+  /opt/opub/license_server/data/license.sqlite3-shm
+sudo install -o opub-license -g opub-license -m 600 \
+  /var/backups/opub-license/license-YYYY-MM-DD.sqlite3 \
+  /opt/opub/license_server/data/license.sqlite3
+sudo systemctl start opub-license
 ```
 
-`.backup` is the safe online-backup command: it holds a read lock only, so the
-service can stay up. Never copy the live file with `cp` while the service is
-writing.
+## 6. 无敏感数据冒烟测试
 
-**Restore drill (before go-live, on a disposable copy — never the live DB):**
+每次部署或恢复后运行：
 
 ```bash
-sqlite3 /var/backups/opub-license/latest.sqlite3 'PRAGMA integrity_check;'
-cp /var/backups/opub-license/latest.sqlite3 /tmp/restore-drill.sqlite3
-OPUB_LICENSE_DB_PATH=/tmp/restore-drill.sqlite3 \
-OPUB_PUBLIC_BASE_URL=https://license.example.com \
-OPUB_PAYMENT_RETURN_URL=https://opub.example.com/thanks \
-OPUB_MBD_APP_ID=... OPUB_MBD_APP_KEY=... \
-OPUB_LICENSE_PRIVATE_KEY=... OPUB_LICENSE_KEY_ID=... \
-/opt/opub/.venv/bin/uvicorn license_server.app:app_from_env --factory --port 8014
-# then poll a known session id from the backup and confirm its status
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  -X POST https://dachitech.xyz/license/v1/code-activations \
+  -H 'content-type: application/json' \
+  --data '{}'
 ```
 
-## 9. Release hygiene (client package)
+预期输出 `422`。这同时证明 TLS、Caddy 路由、路径改写和请求校验已生效，而且没有
+发送激活码。若不是 `422`，先查看 `systemctl status opub-license` 和 Caddy 日志；
+排查时仍不得记录请求体、激活码、设备哈希、私钥或许可内容。
 
-`tests/test_package_build.py` builds the wheel and sdist and asserts the
-private service stays out of both. When cutting a release:
+## 7. 上线检查
 
-```bash
-rm -rf build/ dist/ && python -m build
-```
+- 服务环境文件恰好包含上面的四项，权限与所有者正确。
+- systemd 只有一个 worker，监听回环地址，Caddy 只开放兑换路径。
+- 数据库和私钥已有可恢复的加密备份。
+- 生成库存前已确认爱发电随机激活码发放格式和商品设置。
+- 明文库存不在 Git、日志、聊天记录、发行包或普通备份中。
+- 退款后无法吊销已经签发并可离线使用的许可；商品说明必须明确这一点。
 
-Always delete `build/` first: `bdist_wheel` archives the **accumulated**
-`build/lib` tree, so files left there by any earlier experimental build would
-leak into later wheels (this has been observed with a stale
-`build/lib/license_server/`). `.secrets/` is pruned by `MANIFEST.in` and
-ignored by Git; the runtime database lives under
-`license_server/data/`, which `.gitignore` also excludes.
-
-## 10. Go-live gate
-
-Do not expose the client paywall until all of these are confirmed:
-
-- [ ] The provider has approved the payment scene and both payment methods
-      (wechat + alipay).
-- [ ] A real HTTPS hostname is in `OPUB_PUBLIC_BASE_URL`.
-- [ ] The webhook URL is configured with no query parameters.
-- [ ] One internal ¥9.90 order reaches `licensed` exactly once
-      (webhook delivery repeated → still exactly one license).
-- [ ] SQLite backup restoration has been exercised on a disposable copy
-      (section 8).
-- [ ] The generated private key exists only in `.secrets/`, the server env
-      file, and the two offline backups.
+本手册只描述部署流程。不要在开发、测试或文档更新任务中生成生产码、部署服务、
+上传库存或发布软件。

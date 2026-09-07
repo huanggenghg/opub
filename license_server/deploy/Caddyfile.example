@@ -1,5 +1,22 @@
-# license_server/deploy/Caddyfile.example
-{$OPUB_LICENSE_HOST} {
-    encode zstd gzip
-    reverse_proxy 127.0.0.1:8013
+# Merge these handlers into the existing dachitech.xyz site block. Do not add a
+# second dachitech.xyz block if that site is already declared elsewhere.
+dachitech.xyz {
+    @opub_license_activation {
+        method POST
+        path /license/v1/code-activations
+    }
+    handle @opub_license_activation {
+        # Do not use handle_path with the complete endpoint: it would strip the
+        # whole endpoint. Strip only /license so the upstream receives
+        # /v1/code-activations.
+        uri strip_prefix /license
+        reverse_proxy 127.0.0.1:8013
+    }
+
+    @opub_license_private path /license /license/*
+    handle @opub_license_private {
+        respond 404
+    }
+
+    # Keep the existing dachitech.xyz handlers below this line.
 }

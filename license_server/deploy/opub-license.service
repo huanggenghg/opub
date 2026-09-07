@@ -2,6 +2,7 @@
 [Unit]
 Description=opub license service
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -9,9 +10,27 @@ WorkingDirectory=/opt/opub
 EnvironmentFile=/etc/opub-license.env
 ExecStart=/opt/opub/.venv/bin/uvicorn license_server.app:app_from_env --factory --host 127.0.0.1 --port 8013 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
+RestartSec=5s
 User=opub-license
 Group=opub-license
 UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/opt/opub/license_server/data
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target

@@ -3,25 +3,29 @@ from __future__ import annotations
 import base64
 import logging
 from pathlib import Path
-from typing import Any
-from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from license_server.app import app_from_env, create_app
+from license_server.codes import code_hash
 from license_server.config import Settings
 from license_server.database import Database
-from license_server.mianbaoduo import ProviderError
-from license_server.models import Checkout, ProviderOrder
+from license_server.service import (
+    ActivationCodeUsed,
+    ClientVersionMismatch,
+    InvalidActivationCode,
+    LicenseService,
+)
+from publish.licensing.codes import normalize_activation_code
 
+
+VALID_CODE = "OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWX"
 DEVICE_HASH = "a" * 64
-PRODUCT_NAME = "opub 永久设备许可证"
-CREATION_BODY = {
+ACTIVATION_BODY = {
     "device_hash": DEVICE_HASH,
-    "client_nonce": "b" * 32,
-    "client_version": "0.7.0",
-    "payway": "wechat",
+    "activation_code": VALID_CODE,
+    "client_version": "0.8.0",
 }
 
 
@@ -30,11 +34,8 @@ def test_settings(tmp_path: Path) -> Settings:
     return Settings.from_env(
         {
             "OPUB_PUBLIC_BASE_URL": "https://license.opub.test",
-            "OPUB_PAYMENT_RETURN_URL": "https://opub.test/done",
-            "OPUB_MBD_APP_ID": "app",
-            "OPUB_MBD_APP_KEY": "key",
             "OPUB_LICENSE_PRIVATE_KEY": base64.b64encode(bytes(range(32))).decode("ascii"),
-            "OPUB_LICENSE_KEY_ID": "test",
+            "OPUB_LICENSE_KEY_ID": "test-key",
             "OPUB_LICENSE_DB_PATH": str(tmp_path / "db.sqlite3"),
         }
     )
@@ -46,55 +47,66 @@ def database(test_settings: Settings) -> Database:
 
 
 @pytest.fixture()
-def provider() -> Mock:
-    """A Mianbaoduo-compatible mock: no network, tracks the created order id."""
-    provider = Mock()
-    provider.last_order_id = None
-
-    def create_checkout(payway: str, order_id: str, description: str, amount_fen: int) -> Checkout:
-        provider.last_order_id = order_id
-        return Checkout("url", "https://pay.test/order")
-
-    provider.create_checkout = Mock(side_effect=create_checkout)
-    provider.query_order = Mock(
-        side_effect=lambda order_id: ProviderOrder(
-            order_id, 1, 990, PRODUCT_NAME, "charge-x", 1, {}
-        )
-    )
-    return provider
+def client(test_settings: Settings, database: Database) -> TestClient:
+    return TestClient(create_app(test_settings, database))
 
 
 @pytest.fixture()
-def client(test_settings: Settings, database: Database, provider: Mock) -> TestClient:
-    return TestClient(create_app(test_settings, database, provider))
+def seeded_code(database: Database) -> str:
+    database.import_activation_code(
+        code_hash(normalize_activation_code(VALID_CODE)),
+        "opub-major-0",
+        "2026-09-06T00:00:00Z",
+    )
+    return VALID_CODE
 
 
-def create_session(client: TestClient, body: dict[str, Any] | None = None) -> dict[str, Any]:
-    response = client.post("/v1/activation-sessions", json=body or CREATION_BODY)
-    assert response.status_code == 201
-    return response.json()
+def test_app_exposes_only_code_activation(client: TestClient) -> None:
+    paths = {
+        route.path
+        for route in client.app.routes
+        if getattr(route, "path", "").startswith("/v1/")
+    }
+    assert paths == {"/v1/code-activations"}
 
 
-def poll(client: TestClient, session: dict[str, Any]) -> Any:
-    return client.get(
-        f"/v1/activation-sessions/{session['session_id']}",
-        headers={"Authorization": f"Bearer {session['poll_token']}"},
+def test_code_activation_returns_real_license(
+    client: TestClient, seeded_code: str
+) -> None:
+    response = client.post(
+        "/v1/code-activations",
+        json={**ACTIVATION_BODY, "activation_code": seeded_code},
     )
 
+    assert response.status_code == 200
+    assert response.json()["status"] == "licensed"
+    assert response.json()["license"]["payload"]["device_hash"] == DEVICE_HASH
+    assert response.json()["license"]["payload"]["product"] == "opub-major-0"
 
-def test_create_and_poll_pending_session(client: TestClient) -> None:
-    created = client.post("/v1/activation-sessions", json=CREATION_BODY)
-    assert created.status_code == 201
-    body = created.json()
-    assert body["status"] == "pending"
-    assert body["session_id"]
-    assert body["poll_token"]
-    assert body["checkout"] == {"kind": "url", "value": "https://pay.test/order"}
-    assert body["expires_at"]
 
-    polled = poll(client, body)
-    assert polled.status_code == 200
-    assert polled.json() == {"status": "pending"}
+@pytest.mark.parametrize(
+    ("error", "status_code", "code"),
+    [
+        (InvalidActivationCode, 400, "LIC-013"),
+        (ActivationCodeUsed, 409, "LIC-014"),
+        (ClientVersionMismatch, 422, "LIC-015"),
+    ],
+)
+def test_public_errors_are_stable(
+    error: type[ValueError],
+    status_code: int,
+    code: str,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(*_args, **_kwargs):
+        raise error()
+
+    monkeypatch.setattr(LicenseService, "redeem", fail)
+    response = client.post("/v1/code-activations", json=ACTIVATION_BODY)
+
+    assert response.status_code == status_code
+    assert response.json() == {"detail": {"code": code}}
 
 
 @pytest.mark.parametrize(
@@ -103,314 +115,90 @@ def test_create_and_poll_pending_session(client: TestClient) -> None:
         {"device_hash": "xyz"},
         {"device_hash": "A" * 64},
         {"device_hash": "a" * 63},
-        {"client_nonce": "b" * 10},
-        {"client_nonce": "b" * 257},
+        {"activation_code": ""},
+        {"activation_code": "x" * 65},
         {"client_version": ""},
         {"client_version": "x" * 65},
-        {"payway": "paypal"},
     ],
 )
-def test_invalid_creation_payload_is_rejected(client: TestClient, overrides: dict[str, Any]) -> None:
-    response = client.post("/v1/activation-sessions", json={**CREATION_BODY, **overrides})
+def test_invalid_request_is_rejected_without_echoing_values(
+    client: TestClient, overrides: dict[str, str]
+) -> None:
+    body = {**ACTIVATION_BODY, **overrides}
+    response = client.post("/v1/code-activations", json=body)
+
     assert response.status_code == 422
+    for submitted in body.values():
+        if submitted:
+            assert submitted not in response.text
 
 
-def test_missing_creation_field_is_rejected(client: TestClient) -> None:
-    body = {key: value for key, value in CREATION_BODY.items() if key != "client_version"}
-    response = client.post("/v1/activation-sessions", json=body)
+def test_missing_request_field_is_rejected(client: TestClient) -> None:
+    body = {key: value for key, value in ACTIVATION_BODY.items() if key != "client_version"}
+
+    response = client.post("/v1/code-activations", json=body)
+
     assert response.status_code == 422
+    assert DEVICE_HASH not in response.text
+    assert VALID_CODE not in response.text
 
 
-def test_validation_errors_do_not_echo_submitted_values(client: TestClient) -> None:
-    response = client.post(
-        "/v1/activation-sessions",
-        json={
-            "device_hash": "A" * 64,
-            "client_nonce": "b" * 32,
-            "client_version": "0.7.0",
-            "payway": "paypal",
-        },
-    )
-    assert response.status_code == 422
-    assert "A" * 64 not in response.text
-    assert "b" * 32 not in response.text
-
-
-def test_poll_rejects_missing_and_wrong_bearer_token(client: TestClient) -> None:
-    created = create_session(client)
-    session_path = f"/v1/activation-sessions/{created['session_id']}"
-    assert client.get(session_path).status_code == 401
-    assert client.get(session_path, headers={"Authorization": "Basic abc"}).status_code == 401
-    assert (
-        client.get(session_path, headers={"Authorization": "Bearer wrong-token"}).status_code == 401
-    )
-    # Unknown sessions answer 401, not 404, to avoid session enumeration.
-    assert (
-        client.get("/v1/activation-sessions/missing", headers={"Authorization": "Bearer x"})
-        .status_code
-        == 401
-    )
-
-
-def test_charge_succeeded_webhook_licenses_and_poll_returns_license(
-    client: TestClient, provider: Mock
+def test_per_device_rate_limit_allows_sixty_requests_then_rejects(
+    client: TestClient, seeded_code: str
 ) -> None:
-    created = create_session(client)
-    notified = client.post(
-        "/v1/webhooks/mianbaoduo",
-        json={"type": "charge_succeeded", "data": {"out_trade_no": provider.last_order_id}},
-    )
-    assert notified.status_code == 200
-    assert notified.json() == {"status": "licensed"}
-
-    polled = poll(client, created)
-    assert polled.status_code == 200
-    assert polled.json()["status"] == "licensed"
-    assert polled.json()["license"]["payload"]["device_hash"] == DEVICE_HASH
-
-
-def test_charge_succeeded_webhook_is_idempotent(client: TestClient, provider: Mock) -> None:
-    create_session(client)
-    for _ in range(2):
-        notified = client.post(
-            "/v1/webhooks/mianbaoduo",
-            json={"type": "charge_succeeded", "data": {"out_trade_no": provider.last_order_id}},
-        )
-        assert notified.status_code == 200
-        assert notified.json() == {"status": "licensed"}
-    # The second delivery is answered from the database without a provider query.
-    assert provider.query_order.call_count == 1
-
-
-def test_unknown_webhook_type_is_acknowledged_without_issuance(
-    client: TestClient, provider: Mock
-) -> None:
-    created = create_session(client)
-    response = client.post(
-        "/v1/webhooks/mianbaoduo",
-        json={"type": "refund_succeeded", "data": {"out_trade_no": provider.last_order_id}},
-    )
-    assert response.status_code == 200
-    assert response.json() == {"status": "ignored"}
-    provider.query_order.assert_not_called()
-    assert poll(client, created).json() == {"status": "pending"}
-
-
-def test_charge_succeeded_for_unknown_order_is_ignored(client: TestClient, provider: Mock) -> None:
-    response = client.post(
-        "/v1/webhooks/mianbaoduo",
-        json={"type": "charge_succeeded", "data": {"out_trade_no": "opub_missing"}},
-    )
-    assert response.status_code == 200
-    assert response.json() == {"status": "ignored"}
-    provider.query_order.assert_not_called()
-
-
-def test_charge_succeeded_without_order_id_is_ignored(client: TestClient, provider: Mock) -> None:
-    response = client.post(
-        "/v1/webhooks/mianbaoduo", json={"type": "charge_succeeded", "data": {}}
-    )
-    assert response.status_code == 200
-    assert response.json() == {"status": "ignored"}
-    provider.query_order.assert_not_called()
-
-
-def test_charge_succeeded_for_unknown_order_is_audited_in_logs(
-    client: TestClient, caplog: pytest.LogCaptureFixture
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="opub.license"):
-        response = client.post(
-            "/v1/webhooks/mianbaoduo",
-            json={"type": "charge_succeeded", "data": {"out_trade_no": "opub_missing"}},
-        )
-    assert response.status_code == 200
-    assert response.json() == {"status": "ignored"}
-    messages = _charge_succeeded_warning_records(caplog)
-    assert len(messages) == 1
-    assert "opub_missing" in messages[0]
-
-
-def test_charge_succeeded_verification_failure_is_audited_in_logs(
-    client: TestClient, provider: Mock, caplog: pytest.LogCaptureFixture
-) -> None:
-    create_session(client)
-    provider.query_order.side_effect = lambda order_id: ProviderOrder(
-        order_id, 1, 991, PRODUCT_NAME, "charge-x", 1, {}
-    )
-    with caplog.at_level(logging.WARNING, logger="opub.license"):
-        response = client.post(
-            "/v1/webhooks/mianbaoduo",
-            json={"type": "charge_succeeded", "data": {"out_trade_no": provider.last_order_id}},
-        )
-    assert response.status_code == 200
-    assert response.json() == {"status": "verification_failed"}
-    messages = _charge_succeeded_warning_records(caplog)
-    assert len(messages) == 1
-    assert provider.last_order_id in messages[0]
-
-
-def test_charge_succeeded_audit_log_cannot_inject_log_lines(
-    client: TestClient, caplog: pytest.LogCaptureFixture
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="opub.license"):
-        response = client.post(
-            "/v1/webhooks/mianbaoduo",
-            json={"type": "charge_succeeded", "data": {"out_trade_no": "evil\nFAKE-LOG ev\ril"}},
-        )
-    assert response.status_code == 200
-    assert response.json() == {"status": "ignored"}
-    messages = _charge_succeeded_warning_records(caplog)
-    assert len(messages) == 1
-    assert "\n" not in messages[0]
-    assert "\r" not in messages[0]
-    # The forged marker survives only inline, flattened onto the single line.
-    assert "evil FAKE-LOG evil" in messages[0]
-
-
-def test_complaint_webhook_is_acknowledged_without_issuance(
-    client: TestClient, provider: Mock
-) -> None:
-    created = create_session(client)
-    response = client.post(
-        "/v1/webhooks/mianbaoduo",
-        json={
-            "type": "complaint",
-            "data": {"out_trade_no": provider.last_order_id, "reason": "not as described"},
-        },
-    )
-    assert response.status_code == 200
-    assert response.json() == {"status": "ignored"}
-    provider.query_order.assert_not_called()
-    assert poll(client, created).json() == {"status": "pending"}
-
-
-def _complaint_records(caplog: pytest.LogCaptureFixture) -> list[str]:
-    return [
-        record.getMessage()
-        for record in caplog.records
-        if "payment complaint" in record.getMessage()
-    ]
-
-
-def _charge_succeeded_warning_records(caplog: pytest.LogCaptureFixture) -> list[str]:
-    return [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno == logging.WARNING and "charge_succeeded webhook" in record.getMessage()
-    ]
-
-
-def test_complaint_webhook_order_id_cannot_inject_log_lines(
-    client: TestClient, caplog: pytest.LogCaptureFixture
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="opub.license"):
-        response = client.post(
-            "/v1/webhooks/mianbaoduo",
-            json={"type": "complaint", "data": {"out_trade_no": "evil\nFAKE-LOG ev\ril"}},
-        )
-    assert response.status_code == 200
-    messages = _complaint_records(caplog)
-    assert len(messages) == 1
-    assert "\n" not in messages[0]
-    assert "\r" not in messages[0]
-    # The forged marker survives only inline, flattened onto the single line.
-    assert "evil FAKE-LOG evil" in messages[0]
-
-
-def test_complaint_webhook_order_id_is_truncated_in_logs(
-    client: TestClient, caplog: pytest.LogCaptureFixture
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="opub.license"):
-        response = client.post(
-            "/v1/webhooks/mianbaoduo",
-            json={"type": "complaint", "data": {"out_trade_no": "x" * 200}},
-        )
-    assert response.status_code == 200
-    messages = _complaint_records(caplog)
-    assert len(messages) == 1
-    assert "x" * 128 in messages[0]
-    assert "x" * 129 not in messages[0]
-
-
-def test_creation_rate_limited_after_sixty_requests(client: TestClient) -> None:
     for _ in range(60):
-        assert client.post("/v1/activation-sessions", json=CREATION_BODY).status_code == 201
-    assert client.post("/v1/activation-sessions", json=CREATION_BODY).status_code == 429
-    # A different device from the same IP is a separate bucket.
-    other_device = {**CREATION_BODY, "device_hash": "c" * 64}
-    assert client.post("/v1/activation-sessions", json=other_device).status_code == 201
+        assert client.post("/v1/code-activations", json=ACTIVATION_BODY).status_code == 200
+
+    assert client.post("/v1/code-activations", json=ACTIVATION_BODY).status_code == 429
+    other_device = {**ACTIVATION_BODY, "device_hash": "b" * 64}
+    assert client.post("/v1/code-activations", json=other_device).status_code == 409
 
 
-def test_creation_rate_limited_per_ip_after_120_requests(client: TestClient) -> None:
-    # device_hash is client-chosen: a single IP must not be able to create
-    # unlimited checkouts by rotating hashes, so creations are also capped
-    # per IP regardless of the hashes submitted.
+def test_per_ip_rate_limit_prevents_bypass_by_rotating_devices(client: TestClient) -> None:
     for index in range(120):
-        rotating = {**CREATION_BODY, "device_hash": f"{index:064x}"}
-        assert client.post("/v1/activation-sessions", json=rotating).status_code == 201
-    fresh_device = {**CREATION_BODY, "device_hash": "d" * 64}
-    assert client.post("/v1/activation-sessions", json=fresh_device).status_code == 429
+        rotating = {**ACTIVATION_BODY, "device_hash": f"{index:064x}"}
+        assert client.post("/v1/code-activations", json=rotating).status_code == 400
+
+    fresh_device = {**ACTIVATION_BODY, "device_hash": "f" * 64}
+    assert client.post("/v1/code-activations", json=fresh_device).status_code == 429
 
 
-def test_polling_fixed_session_has_full_ten_minute_budget(client: TestClient) -> None:
-    created = create_session(client)
-    for _ in range(360):
-        assert poll(client, created).status_code == 200
-    assert poll(client, created).status_code == 429
-
-
-def test_polling_rate_limit_cannot_be_bypassed_by_rotating_session_ids(
+def test_runtime_failure_returns_opaque_503_and_safe_log(
     client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    headers = {"Authorization": "Bearer invalid-token"}
-    for index in range(360):
-        response = client.get(
-            f"/v1/activation-sessions/random-{index}",
-            headers=headers,
-        )
-        assert response.status_code == 401
-    assert (
-        client.get("/v1/activation-sessions/one-more", headers=headers).status_code
-        == 429
-    )
+    secret_message = f"failure {VALID_CODE} {DEVICE_HASH}"
 
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(secret_message)
 
-def test_provider_failure_returns_redacted_503(client: TestClient, provider: Mock) -> None:
-    provider.create_checkout.side_effect = RuntimeError(
-        "secret-app-key device-hash checkout-html"
-    )
-    response = client.post("/v1/activation-sessions", json=CREATION_BODY)
-    assert response.status_code == 503
-    body = response.text
-    assert "request_id" in body
-    for secret in ("secret-app-key", "device-hash", "checkout-html", "a" * 64):
-        assert secret not in body
-
-
-def test_provider_error_returns_503(client: TestClient, provider: Mock) -> None:
-    provider.create_checkout.side_effect = ProviderError(
-        "Mianbaoduo wechat checkout request failed"
-    )
-    response = client.post("/v1/activation-sessions", json=CREATION_BODY)
-    assert response.status_code == 503
-    assert "request_id" in response.text
-
-
-def test_database_failure_returns_redacted_503(client: TestClient, database: Database) -> None:
-    database.row("DROP TABLE licenses")
-    response = client.post("/v1/activation-sessions", json=CREATION_BODY)
-    assert response.status_code == 503
-    assert "request_id" in response.text
-
-
-def test_provider_failure_logs_only_the_exception_class(
-    client: TestClient, provider: Mock, caplog: pytest.LogCaptureFixture
-) -> None:
-    provider.create_checkout.side_effect = RuntimeError("secret-app-key")
+    monkeypatch.setattr(LicenseService, "redeem", fail)
     with caplog.at_level(logging.ERROR, logger="opub.license"):
-        client.post("/v1/activation-sessions", json=CREATION_BODY)
+        response = client.post("/v1/code-activations", json=ACTIVATION_BODY)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "service unavailable"
+    assert response.json()["request_id"]
     assert "RuntimeError" in caplog.text
-    assert "secret-app-key" not in caplog.text
+    assert "/v1/code-activations" in caplog.text
+    for secret in (secret_message, VALID_CODE, DEVICE_HASH):
+        assert secret not in response.text
+        assert secret not in caplog.text
+
+
+def test_sqlite_failure_returns_opaque_503(
+    client: TestClient, database: Database, seeded_code: str
+) -> None:
+    database.row("DROP TABLE activation_codes")
+
+    response = client.post("/v1/code-activations", json=ACTIVATION_BODY)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "service unavailable"
+    assert response.json()["request_id"]
+    assert VALID_CODE not in response.text
+    assert DEVICE_HASH not in response.text
 
 
 def test_documentation_routes_are_disabled(client: TestClient) -> None:
@@ -419,16 +207,30 @@ def test_documentation_routes_are_disabled(client: TestClient) -> None:
     assert client.get("/openapi.json").status_code == 404
 
 
-def test_app_from_env_requires_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in (
+def test_app_from_env_starts_with_only_four_required_variables(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    names = (
         "OPUB_PUBLIC_BASE_URL",
-        "OPUB_PAYMENT_RETURN_URL",
-        "OPUB_MBD_APP_ID",
-        "OPUB_MBD_APP_KEY",
         "OPUB_LICENSE_PRIVATE_KEY",
         "OPUB_LICENSE_KEY_ID",
         "OPUB_LICENSE_DB_PATH",
-    ):
+        "OPUB_PAYMENT_RETURN_URL",
+        "OPUB_MBD_APP_ID",
+        "OPUB_MBD_APP_KEY",
+    )
+    for name in names:
         monkeypatch.delenv(name, raising=False)
-    with pytest.raises(ValueError):
-        app_from_env()
+    monkeypatch.setenv("OPUB_PUBLIC_BASE_URL", "https://license.opub.test")
+    monkeypatch.setenv(
+        "OPUB_LICENSE_PRIVATE_KEY",
+        base64.b64encode(bytes(range(32))).decode("ascii"),
+    )
+    monkeypatch.setenv("OPUB_LICENSE_KEY_ID", "test-key")
+    monkeypatch.setenv("OPUB_LICENSE_DB_PATH", str(tmp_path / "env.sqlite3"))
+
+    application = app_from_env()
+
+    client = TestClient(application)
+    assert client.get("/docs").status_code == 404
+    assert Path(tmp_path / "env.sqlite3").exists()

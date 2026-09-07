@@ -27,6 +27,8 @@ from publish.licensing.verifier import LicenseValidationError, verify_license
 
 
 ACTIVATION_CODE = "OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWX"
+USER_ACTIVATION_CODE = "  opub0-01234-56789-abcde-fghjk-mnpqr-stvwx  "
+NORMALIZED_ACTIVATION_CODE = normalize_activation_code(ACTIVATION_CODE)
 DEVICE_HASH = "d" * 64
 OTHER_DEVICE_HASH = "e" * 64
 KEY_ID = "e2e-test"
@@ -50,6 +52,19 @@ class TestClientSession:
         return self.client.request(method, path, **kwargs)
 
 
+def test_deployment_runbook_limits_inventory_env_and_preserves_restore_rollback() -> None:
+    readme = (
+        Path(__file__).resolve().parents[1] / "license_server" / "README.md"
+    ).read_text(encoding="utf-8")
+
+    assert "set -a" not in readme
+    assert "sudo -u opub-license env \\\n  OPUB_LICENSE_DB_PATH=" in readme
+    assert "restore_stamp=" in readme
+    assert ".license.sqlite3.restore-" in readme
+    assert "license.sqlite3.before-restore" not in readme
+    assert "sqlite3 CLI" in readme
+
+
 def _test_signing_material() -> tuple[str, dict[str, str]]:
     private_key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
     private_b64 = base64.b64encode(bytes(range(32))).decode("ascii")
@@ -70,72 +85,86 @@ def _settings(tmp_path: Path, private_key: str) -> Settings:
     )
 
 
-def test_code_activation_installs_device_bound_offline_license(tmp_path, caplog):
+def test_code_activation_installs_device_bound_offline_license(tmp_path, caplog, capsys):
     caplog.set_level(logging.DEBUG)
     private_key, trusted_keys = _test_signing_material()
     settings = _settings(tmp_path, private_key)
     database = Database(settings.database_path)
-    server = TestClient(create_app(settings, database))
+    application = create_app(settings, database)
     database.import_activation_code(
-        code_hash(normalize_activation_code(ACTIVATION_CODE)),
+        code_hash(NORMALIZED_ACTIVATION_CODE),
         settings.product_id,
         "2026-09-06T00:00:00Z",
     )
     assert database.code_stats() == {"available": 1, "redeemed": 0, "total": 1}
 
-    transport = TestClientSession(server)
-    api = LicenseApi(settings.public_base_url, session=transport)
-    verify = lambda document, device_hash: verify_license(
-        document, device_hash, trusted_keys
-    )
-
     client_dir = tmp_path / "client"
-    assert (
-        activate(
-            ACTIVATION_CODE,
-            DEVICE_HASH,
-            api,
-            client_dir,
-            verify,
-            client_version="0.8.0",
+    with TestClient(application) as server:
+        transport = TestClientSession(server)
+        api = LicenseApi(settings.public_base_url, session=transport)
+        verify = lambda document, device_hash: verify_license(
+            document, device_hash, trusted_keys
         )
-        == 0
-    )
 
-    license_file = client_dir / "license.json"
-    assert stat.S_IMODE(license_file.stat().st_mode) == 0o600
-    installed = json.loads(license_file.read_text(encoding="utf-8"))
-    verify_license(installed, DEVICE_HASH, trusted_keys)
-    first_bytes = license_file.read_bytes()
-    assert database.code_stats() == {"available": 0, "redeemed": 1, "total": 1}
-
-    assert (
-        activate(
-            ACTIVATION_CODE,
-            DEVICE_HASH,
-            api,
-            client_dir,
-            verify,
-            client_version="0.8.0",
+        assert (
+            activate(
+                USER_ACTIVATION_CODE,
+                DEVICE_HASH,
+                api,
+                client_dir,
+                verify,
+                client_version="0.8.0",
+            )
+            == 0
         )
-        == 0
-    )
-    assert license_file.read_bytes() == first_bytes
-    assert database.row("SELECT COUNT(*) FROM code_licenses")[0] == 1
 
-    with pytest.raises(ActivationServiceError) as exc_info:
-        api.activate_code(OTHER_DEVICE_HASH, "0.8.0", ACTIVATION_CODE)
-    assert exc_info.value.code == "LIC-014"
+        license_file = client_dir / "license.json"
+        assert stat.S_IMODE(license_file.stat().st_mode) == 0o600
+        installed = json.loads(license_file.read_text(encoding="utf-8"))
+        verify_license(installed, DEVICE_HASH, trusted_keys)
+        first_bytes = license_file.read_bytes()
+        assert database.code_stats() == {"available": 0, "redeemed": 1, "total": 1}
 
-    assert transport.calls == [
-        ("POST", "/v1/code-activations"),
-        ("POST", "/v1/code-activations"),
-        ("POST", "/v1/code-activations"),
-    ]
-    assert not (client_dir / "activation.json").exists()
-    assert ACTIVATION_CODE not in caplog.text
+        assert (
+            activate(
+                USER_ACTIVATION_CODE,
+                DEVICE_HASH,
+                api,
+                client_dir,
+                verify,
+                client_version="0.8.0",
+            )
+            == 0
+        )
+        assert license_file.read_bytes() == first_bytes
+        assert database.row("SELECT COUNT(*) FROM code_licenses")[0] == 1
 
-    server.close()
+        with pytest.raises(ActivationServiceError) as exc_info:
+            api.activate_code(
+                OTHER_DEVICE_HASH,
+                "0.8.0",
+                NORMALIZED_ACTIVATION_CODE,
+            )
+        assert exc_info.value.code == "LIC-014"
+
+        assert transport.calls == [
+            ("POST", "/v1/code-activations"),
+            ("POST", "/v1/code-activations"),
+            ("POST", "/v1/code-activations"),
+        ]
+        assert not (client_dir / "activation.json").exists()
+
+    captured = capsys.readouterr()
+    visible_output = captured.out + captured.err + caplog.text
+    for secret in (
+        USER_ACTIVATION_CODE,
+        ACTIVATION_CODE,
+        NORMALIZED_ACTIVATION_CODE,
+        DEVICE_HASH,
+        OTHER_DEVICE_HASH,
+    ):
+        assert secret not in visible_output
+
     with patch("requests.Session.request", side_effect=AssertionError("network called")), patch(
         "publish.licensing.build_device_hash", return_value=DEVICE_HASH
     ):

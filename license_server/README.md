@@ -31,6 +31,9 @@ OPUB_LICENSE_DB_PATH=/opt/opub/license_server/data/license.sqlite3
 将项目部署到 `/opt/opub` 后，在服务器上安装服务：
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y python3-venv sqlite3
+sqlite3 --version
 sudo useradd --system --home /opt/opub --shell /usr/sbin/nologin opub-license
 sudo mkdir -p /opt/opub/license_server/data /var/backups/opub-license
 sudo chown -R opub-license:opub-license /opt/opub /var/backups/opub-license
@@ -86,16 +89,20 @@ Caddy 只把外部 `/license/v1/code-activations` 改写为内部
 部署配置和备份后生成：
 
 ```bash
-set -a
-. /etc/opub-license.env
-set +a
-
-.venv/bin/python -m license_server.codes generate \
+cd /opt/opub
+sudo -u opub-license env \
+  OPUB_LICENSE_DB_PATH=/opt/opub/license_server/data/license.sqlite3 \
+  .venv/bin/python -m license_server.codes generate \
   --count 100 \
   --output /opt/opub/license_server/data/afdian-codes.txt
 
-.venv/bin/python -m license_server.codes stats
+sudo -u opub-license env \
+  OPUB_LICENSE_DB_PATH=/opt/opub/license_server/data/license.sqlite3 \
+  .venv/bin/python -m license_server.codes stats
 ```
+
+库存工具只需要 `OPUB_LICENSE_DB_PATH`。不要读取或批量导出服务环境文件，避免把
+签名私钥传给不需要它的子进程。
 
 `generate` 会以 `0600` 权限创建新文件，文件已存在时拒绝覆盖，同时只把激活码哈希
 写入 SQLite。`stats` 只输出 `available`、`redeemed` 和 `total` 数量，不输出激活
@@ -121,7 +128,7 @@ sudo -u opub-license sqlite3 /var/backups/opub-license/license-$(date +%F).sqlit
   'PRAGMA integrity_check;'
 ```
 
-每日执行并保留至少 30 天；备份与私钥分开加密保存。恢复前先在副本上运行
+以上命令依赖系统提供 `sqlite3 CLI`。每日执行并保留至少 30 天；备份与私钥分开加密保存。恢复前先在副本上运行
 `PRAGMA integrity_check`。正式恢复时停止服务，将验证通过的备份安装为
 `/opt/opub/license_server/data/license.sqlite3`（所有者
 `opub-license:opub-license`、权限 `0600`），再启动服务并运行下方空 JSON
@@ -131,15 +138,34 @@ sudo -u opub-license sqlite3 /var/backups/opub-license/license-$(date +%F).sqlit
 sudo systemctl stop opub-license
 sudo sqlite3 /var/backups/opub-license/license-YYYY-MM-DD.sqlite3 \
   'PRAGMA integrity_check;'
-sudo mv /opt/opub/license_server/data/license.sqlite3 \
-  /opt/opub/license_server/data/license.sqlite3.before-restore
-sudo rm -f /opt/opub/license_server/data/license.sqlite3-wal \
-  /opt/opub/license_server/data/license.sqlite3-shm
+
+restore_stamp=$(date +%Y%m%dT%H%M%S)
+rollback_dir=/var/backups/opub-license/pre-restore-$restore_stamp
+restore_tmp=/opt/opub/license_server/data/.license.sqlite3.restore-$restore_stamp
+sudo install -d -o opub-license -g opub-license -m 700 "$rollback_dir"
 sudo install -o opub-license -g opub-license -m 600 \
   /var/backups/opub-license/license-YYYY-MM-DD.sqlite3 \
-  /opt/opub/license_server/data/license.sqlite3
+  "$restore_tmp"
+sudo -u opub-license sqlite3 "$restore_tmp" 'PRAGMA integrity_check;'
+
+sudo mv /opt/opub/license_server/data/license.sqlite3 \
+  "$rollback_dir/license.sqlite3"
+if sudo test -e /opt/opub/license_server/data/license.sqlite3-wal; then
+  sudo mv /opt/opub/license_server/data/license.sqlite3-wal \
+    "$rollback_dir/license.sqlite3-wal"
+fi
+if sudo test -e /opt/opub/license_server/data/license.sqlite3-shm; then
+  sudo mv /opt/opub/license_server/data/license.sqlite3-shm \
+    "$rollback_dir/license.sqlite3-shm"
+fi
+sudo mv "$restore_tmp" /opt/opub/license_server/data/license.sqlite3
 sudo systemctl start opub-license
 ```
+
+`restore_tmp` 与正式数据库位于同一文件系统，最后一次 `mv` 是原子替换。若安装或
+启动失败，保持服务停止，把当前数据库移入该唯一时间戳目录，再将其中保存的
+`license.sqlite3` 及存在的 `-wal`、`-shm` 文件逐个移回数据目录，随后重新启动服务。
+不要删除该回滚目录，直到恢复后的数据库完成完整性检查和冒烟测试。
 
 ## 6. 无敏感数据冒烟测试
 

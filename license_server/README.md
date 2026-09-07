@@ -135,7 +135,6 @@ sudo -u opub-license sqlite3 /var/backups/opub-license/license-$(date +%F).sqlit
 冒烟测试。不要用生产激活码做恢复验证。
 
 ```bash
-sudo systemctl stop opub-license
 backup_path=/var/backups/opub-license/license-YYYY-MM-DD.sqlite3
 backup_check=$(sudo -u opub-license sqlite3 "$backup_path" 'PRAGMA integrity_check;')
 test "$backup_check" = "ok" || { echo 'backup integrity check failed'; exit 1; }
@@ -150,6 +149,7 @@ sudo install -o opub-license -g opub-license -m 600 \
 restore_check=$(sudo -u opub-license sqlite3 "$restore_tmp" 'PRAGMA integrity_check;')
 test "$restore_check" = "ok" || { echo 'restore integrity check failed'; exit 1; }
 
+sudo systemctl stop opub-license
 sudo mv /opt/opub/license_server/data/license.sqlite3 \
   "$rollback_dir/license.sqlite3"
 if sudo test -e /opt/opub/license_server/data/license.sqlite3-wal; then

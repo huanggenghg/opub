@@ -65,6 +65,9 @@ def test_deployment_runbook_limits_inventory_env_and_preserves_restore_rollback(
     assert "license.sqlite3.before-restore" not in readme
     assert 'test "$backup_check" = "ok"' in readme
     assert 'test "$restore_check" = "ok"' in readme
+    assert readme.index('test "$restore_check" = "ok"') < readme.index(
+        "sudo systemctl stop opub-license"
+    )
     assert "failed-restored.sqlite3" in readme
     assert "sqlite3 CLI" in readme
 

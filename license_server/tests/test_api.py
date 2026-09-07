@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
+import json
 import logging
+import os
 from pathlib import Path
+import subprocess
+import sys
+import textwrap
 
 import pytest
 from fastapi.testclient import TestClient
@@ -201,6 +207,31 @@ def test_sqlite_failure_returns_opaque_503(
     assert DEVICE_HASH not in response.text
 
 
+def test_corrupt_stored_license_returns_opaque_503(
+    client: TestClient,
+    database: Database,
+    seeded_code: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    first = client.post("/v1/code-activations", json=ACTIVATION_BODY)
+    corrupt = deepcopy(first.json()["license"])
+    secret = "secret-injected-database-field"
+    corrupt["payload"]["injected"] = secret
+    database.row(
+        "UPDATE code_licenses SET signed_payload = ?",
+        (json.dumps(corrupt),),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="opub.license"):
+        response = client.post("/v1/code-activations", json=ACTIVATION_BODY)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "service unavailable"
+    assert response.json()["request_id"]
+    assert secret not in response.text
+    assert secret not in caplog.text
+
+
 def test_documentation_routes_are_disabled(client: TestClient) -> None:
     assert client.get("/docs").status_code == 404
     assert client.get("/redoc").status_code == 404
@@ -234,3 +265,52 @@ def test_app_from_env_starts_with_only_four_required_variables(
     client = TestClient(application)
     assert client.get("/docs").status_code == 404
     assert Path(tmp_path / "env.sqlite3").exists()
+
+
+def test_server_import_and_start_do_not_require_qrcode(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env.update(
+        {
+            "OPUB_PUBLIC_BASE_URL": "https://license.opub.test",
+            "OPUB_LICENSE_PRIVATE_KEY": base64.b64encode(bytes(range(32))).decode(
+                "ascii"
+            ),
+            "OPUB_LICENSE_KEY_ID": "test-key",
+            "OPUB_LICENSE_DB_PATH": str(tmp_path / "isolated.sqlite3"),
+        }
+    )
+    project_root = str(Path(__file__).resolve().parents[2])
+    env["PYTHONPATH"] = os.pathsep.join(
+        value for value in (project_root, env.get("PYTHONPATH", "")) if value
+    )
+    script = textwrap.dedent(
+        """
+        import importlib.abc
+        import sys
+
+        class BlockQrcode(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path, target=None):
+                if fullname == "qrcode" or fullname.startswith("qrcode."):
+                    raise ModuleNotFoundError("qrcode intentionally unavailable")
+                return None
+
+        sys.meta_path.insert(0, BlockQrcode())
+        from license_server.app import app_from_env
+        from publish.licensing import run_activation
+
+        application = app_from_env()
+        assert any(route.path == "/v1/code-activations" for route in application.routes)
+        assert run_activation("wechat") == 13
+        """
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=project_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr

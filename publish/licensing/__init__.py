@@ -2,12 +2,12 @@
 """许可证状态、离线校验与激活命令。"""
 
 from importlib.metadata import PackageNotFoundError, version
+from importlib import import_module
 from pathlib import Path
-from typing import Mapping, Optional, Tuple
+import sys
+from typing import Any, Mapping, Optional, Tuple
 
 from publish.errors import EXIT_LICENSE_ERROR, EXIT_OK, print_error
-from publish.licensing.activation import ActivationError, activate
-from publish.licensing.api import ActivationServiceError, LicenseApi
 from publish.licensing.fingerprint import DeviceFingerprintError, build_device_hash
 from publish.licensing.storage import data_dir, license_path, read_json
 from publish.licensing.verifier import LicenseValidationError, verify_license
@@ -68,6 +68,16 @@ def show_license_status() -> int:
 
 def run_activation(payway: str) -> int:
     try:
+        current_module = sys.modules[__name__]
+        activation_error_type = getattr(current_module, "ActivationError")
+        service_error_type = getattr(current_module, "ActivationServiceError")
+        activate_license = getattr(current_module, "activate")
+        api_type = getattr(current_module, "LicenseApi")
+    except (ImportError, AttributeError, OSError, TypeError, ValueError):
+        print_license_error("LIC-011")
+        return EXIT_LICENSE_ERROR
+
+    try:
         from publish.licensing.deployment import (
             LICENSE_API_BASE_URL,
             TRUSTED_PUBLIC_KEYS,
@@ -81,10 +91,10 @@ def run_activation(payway: str) -> int:
         verify = lambda document, current_device: verify_license(
             document, current_device, TRUSTED_PUBLIC_KEYS
         )
-        return activate(
+        return activate_license(
             payway,
             device_hash,
-            LicenseApi(LICENSE_API_BASE_URL),
+            api_type(LICENSE_API_BASE_URL),
             data_dir(),
             verify,
             client_version=client_version,
@@ -93,9 +103,16 @@ def run_activation(payway: str) -> int:
         code = "LIC-004"
     except LicenseValidationError as exc:
         code = exc.code if exc.code in LICENSE_ERRORS else "LIC-002"
-    except ActivationError as exc:
+    except activation_error_type as exc:
         code = exc.code if exc.code in LICENSE_ERRORS else "LIC-011"
-    except (ActivationServiceError, ImportError, AttributeError, OSError, TypeError, ValueError):
+    except (
+        service_error_type,
+        ImportError,
+        AttributeError,
+        OSError,
+        TypeError,
+        ValueError,
+    ):
         code = "LIC-011"
     except Exception:
         code = "LIC-011"
@@ -113,3 +130,27 @@ __all__ = [
     "run_activation",
     "show_license_status",
 ]
+
+
+_LAZY_IMPORTS = {
+    "ActivationError": ("publish.licensing.activation", "ActivationError"),
+    "activate": ("publish.licensing.activation", "activate"),
+    "ActivationServiceError": ("publish.licensing.api", "ActivationServiceError"),
+    "LicenseApi": ("publish.licensing.api", "LicenseApi"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name, attribute_name = _LAZY_IMPORTS[name]
+    except KeyError:
+        raise AttributeError(
+            "module {!r} has no attribute {!r}".format(__name__, name)
+        ) from None
+    value = getattr(import_module(module_name), attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__) | set(_LAZY_IMPORTS))

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -131,6 +133,16 @@ def test_redeem_same_code_on_same_device_returns_identical_license(tmp_path: Pat
     second = service.redeem(CODE.lower(), DEVICE_HASH, "0.8.0.dev0")
 
     assert second == first
+    assert set(second) == {"status", "license"}
+    assert set(second["license"]) == {"payload", "signature"}
+    assert set(second["license"]["payload"]) == {
+        "schema_version",
+        "key_id",
+        "license_id",
+        "product",
+        "device_hash",
+        "issued_at",
+    }
     assert database.row("SELECT COUNT(*) FROM code_licenses")[0] == 1
 
 
@@ -196,6 +208,63 @@ def test_malformed_stored_license_is_an_opaque_runtime_error(tmp_path: Path) -> 
     assert malformed not in str(exc_info.value)
     assert CODE not in str(exc_info.value)
     assert DEVICE_HASH not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "corrupt_document",
+    [
+        {},
+        {"payload": {}, "signature": ""},
+        {"payload": "not-an-object", "signature": "secret-signature"},
+    ],
+)
+def test_valid_json_with_invalid_license_shape_is_an_opaque_runtime_error(
+    corrupt_document: dict[str, object], tmp_path: Path
+) -> None:
+    service, database = build_service(tmp_path)
+    import_code(database, CODE)
+    service.redeem(CODE, DEVICE_HASH, "0.8.0")
+    stored = json.dumps(corrupt_document)
+    database.row("UPDATE code_licenses SET signed_payload = ?", (stored,))
+
+    with pytest.raises(RuntimeError) as exc_info:
+        service.redeem(CODE, DEVICE_HASH, "0.8.0")
+
+    assert str(exc_info.value) == "stored license is invalid"
+    assert stored not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("location", "field", "value"),
+    [
+        ("document", "injected", "secret-outer-field"),
+        ("payload", "injected", "secret-payload-field"),
+        ("payload", "product", "wrong-product"),
+        ("payload", "device_hash", OTHER_DEVICE_HASH),
+        ("payload", "key_id", "wrong-key"),
+        ("payload", "license_id", "wrong-license"),
+        ("document", "signature", "secret-invalid-signature"),
+    ],
+)
+def test_tampered_stored_license_is_never_returned(
+    location: str, field: str, value: str, tmp_path: Path
+) -> None:
+    service, database = build_service(tmp_path)
+    import_code(database, CODE)
+    original = service.redeem(CODE, DEVICE_HASH, "0.8.0")["license"]
+    corrupt = deepcopy(original)
+    target = corrupt if location == "document" else corrupt["payload"]
+    target[field] = value
+    database.row(
+        "UPDATE code_licenses SET signed_payload = ?",
+        (json.dumps(corrupt),),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        service.redeem(CODE, DEVICE_HASH, "0.8.0")
+
+    assert str(exc_info.value) == "stored license is invalid"
+    assert value not in str(exc_info.value)
 
 
 def test_concurrent_devices_cannot_both_redeem_one_code(tmp_path: Path) -> None:

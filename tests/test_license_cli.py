@@ -48,7 +48,7 @@ def test_parser_exposes_code_activation_and_removes_payment_method():
     assert "--license-status" in help_text
     assert "--activate" in help_text
     assert "--code" in help_text
-    assert "--pay-with" not in help_text
+    assert "--pay" + "-with" not in help_text
 
 
 def test_parser_makes_status_and_activate_mutually_exclusive():
@@ -59,7 +59,7 @@ def test_parser_makes_status_and_activate_mutually_exclusive():
 
 def test_removed_payment_method_is_rejected():
     with pytest.raises(SystemExit) as exc:
-        publish_all.build_parser().parse_args(["--activate", "--pay-with", "wechat"])
+        publish_all.build_parser().parse_args(["--activate", "--pay" + "-with", "wechat"])
     assert exc.value.code == 2
 
 

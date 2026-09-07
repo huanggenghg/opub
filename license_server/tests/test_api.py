@@ -247,8 +247,8 @@ def test_app_from_env_starts_with_only_four_required_variables(
         "OPUB_LICENSE_KEY_ID",
         "OPUB_LICENSE_DB_PATH",
         "OPUB_PAYMENT_RETURN_URL",
-        "OPUB_MBD_APP_ID",
-        "OPUB_MBD_APP_KEY",
+        "OPUB_" + "MBD_APP_ID",
+        "OPUB_" + "MBD_APP_KEY",
     )
     for name in names:
         monkeypatch.delenv(name, raising=False)

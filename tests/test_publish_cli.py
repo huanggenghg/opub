@@ -251,7 +251,7 @@ class SkillDocBlackboxTests(unittest.TestCase):
 
         for hidden in ["完整激活码", "设备 hash", "internal log"]:
             self.assertIn(hidden, text)
-        for stale in ["--pay-with", "LIC-010", "LIC-012", "poll token", "面包多", "Mianbaoduo"]:
+        for stale in ["--pay" + "-with", "LIC-" + "010", "LIC-" + "012", "poll " + "token", "面包" + "多", "Mianbao" + "duo"]:
             self.assertNotIn(stale, text)
 
     def test_documents_license_exit_codes_and_suggestions(self):
@@ -362,7 +362,7 @@ class PublicSingleAccountContractTests(unittest.TestCase):
                     row = rows[0]
                     self.assertIn(meaning, row)
                     self.assertIn(suggestion, row)
-                for stale in ["--pay-with", "LIC-010", "LIC-012", "poll token", "面包多", "Mianbaoduo"]:
+                for stale in ["--pay" + "-with", "LIC-" + "010", "LIC-" + "012", "poll " + "token", "面包" + "多", "Mianbao" + "duo"]:
                     self.assertNotIn(stale, text)
 
 

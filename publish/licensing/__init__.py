@@ -21,6 +21,9 @@ LICENSE_ERRORS = {
     "LIC-010": ("订单尚未支付或等待超时", "完成支付后重新运行同一激活命令"),
     "LIC-011": ("激活服务不可用", "检查网络后稍后重试"),
     "LIC-012": ("支付订单验证失败", "不要重复付款，联系发布者核查订单"),
+    "LIC-013": ("激活码无效", "检查激活码后重新运行激活命令"),
+    "LIC-014": ("激活码已绑定其他设备", "当前电脑需要重新购买激活码"),
+    "LIC-015": ("当前客户端版本不适用于该激活码", "升级或切换到 opub 0.x 后重试"),
 }
 
 
@@ -66,7 +69,7 @@ def show_license_status() -> int:
     return EXIT_LICENSE_ERROR
 
 
-def run_activation(payway: str) -> int:
+def run_activation(code: str) -> int:
     try:
         current_module = sys.modules[__name__]
         activation_error_type = getattr(current_module, "ActivationError")
@@ -87,12 +90,12 @@ def run_activation(payway: str) -> int:
         try:
             client_version = version("opub")
         except PackageNotFoundError:
-            client_version = "0.7.0.dev0"
+            client_version = "0.8.0.dev0"
         verify = lambda document, current_device: verify_license(
             document, current_device, TRUSTED_PUBLIC_KEYS
         )
         return activate_license(
-            payway,
+            code,
             device_hash,
             api_type(LICENSE_API_BASE_URL),
             data_dir(),
@@ -105,8 +108,9 @@ def run_activation(payway: str) -> int:
         code = exc.code if exc.code in LICENSE_ERRORS else "LIC-002"
     except activation_error_type as exc:
         code = exc.code if exc.code in LICENSE_ERRORS else "LIC-011"
+    except service_error_type as exc:
+        code = exc.code if exc.code in {"LIC-013", "LIC-014", "LIC-015"} else "LIC-011"
     except (
-        service_error_type,
         ImportError,
         AttributeError,
         OSError,

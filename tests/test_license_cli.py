@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import sys
+from importlib.metadata import PackageNotFoundError
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -29,7 +30,7 @@ def _signed_document(device_hash="a" * 64):
         "schema_version": 1,
         "key_id": "test",
         "license_id": "lic-1",
-        "product": "opub-lifetime-v1",
+        "product": "opub-major-0",
         "device_hash": device_hash,
         "issued_at": "2026-09-05T00:00:00Z",
     }
@@ -269,12 +270,51 @@ def test_run_activation_lazily_loads_deployment_and_passes_client_version():
          patch("publish.licensing.LicenseApi", return_value=api) as api_cls, \
          patch("publish.licensing.data_dir", return_value="/safe/data"), \
          patch("publish.licensing.activate", return_value=0) as activate:
-        assert run_activation("wechat") == 0
+        assert run_activation("OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWX") == 0
     api_cls.assert_called_once_with("https://license.example.test")
     args, kwargs = activate.call_args
-    assert args[:4] == ("wechat", "d" * 64, api, "/safe/data")
+    assert args[:4] == (
+        "OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWX",
+        "d" * 64,
+        api,
+        "/safe/data",
+    )
     assert kwargs == {"client_version": "1.2.3"}
     args[4](document, "d" * 64)
+
+
+def test_run_activation_uses_major_zero_fallback_version_when_uninstalled():
+    deployment = SimpleNamespace(
+        LICENSE_API_BASE_URL="https://license.example.test",
+        TRUSTED_PUBLIC_KEYS={"prod": "public"},
+    )
+    with patch.dict(sys.modules, {"publish.licensing.deployment": deployment}), \
+         patch("publish.licensing.build_device_hash", return_value="d" * 64), \
+         patch("publish.licensing.version", side_effect=PackageNotFoundError), \
+         patch("publish.licensing.LicenseApi", return_value=object()), \
+         patch("publish.licensing.data_dir", return_value="/safe/data"), \
+         patch("publish.licensing.activate", return_value=0) as activate:
+        assert run_activation("OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWX") == 0
+
+    assert activate.call_args.kwargs == {"client_version": "0.8.0.dev0"}
+
+
+@pytest.mark.parametrize("service_code", ["LIC-013", "LIC-014", "LIC-015"])
+def test_run_activation_preserves_public_activation_service_codes(service_code):
+    deployment = SimpleNamespace(
+        LICENSE_API_BASE_URL="https://license.example.test",
+        TRUSTED_PUBLIC_KEYS={"prod": "public"},
+    )
+    stderr = io.StringIO()
+    with patch.dict(sys.modules, {"publish.licensing.deployment": deployment}), \
+         patch("publish.licensing.build_device_hash", return_value="d" * 64), \
+         patch("publish.licensing.LicenseApi", return_value=object()), \
+         patch("publish.licensing.activate", side_effect=ActivationServiceError(service_code)), \
+         contextlib.redirect_stderr(stderr):
+        result = run_activation("OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWX")
+
+    assert result == EXIT_LICENSE_ERROR
+    assert service_code in stderr.getvalue()
 
 
 @pytest.mark.parametrize(
@@ -296,7 +336,7 @@ def test_run_activation_maps_failures_without_leaking_internal_values(failure, c
     with patch.dict(sys.modules, {"publish.licensing.deployment": deployment}), \
          patch("publish.licensing.build_device_hash", side_effect=failure), \
          contextlib.redirect_stderr(stderr):
-        result = run_activation("wechat")
+        result = run_activation("OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWX")
     assert result == EXIT_LICENSE_ERROR
     assert code in stderr.getvalue()
     assert str(failure) not in stderr.getvalue()
@@ -315,7 +355,7 @@ def test_run_activation_maps_unexpected_checkout_failure_without_leaking_details
          patch("publish.licensing.data_dir", return_value=tmp_path), \
          patch("publish.licensing.activate", side_effect=failure), \
          contextlib.redirect_stderr(stderr):
-        result = run_activation("wechat")
+        result = run_activation("OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWX")
     assert result == EXIT_LICENSE_ERROR
     assert "LIC-011" in stderr.getvalue()
     assert str(failure) not in stderr.getvalue()

@@ -58,10 +58,14 @@ def test_deployment_runbook_limits_inventory_env_and_preserves_restore_rollback(
     ).read_text(encoding="utf-8")
 
     assert "set -a" not in readme
-    assert "sudo -u opub-license env \\\n  OPUB_LICENSE_DB_PATH=" in readme
-    assert "restore_stamp=" in readme
-    assert ".license.sqlite3.restore-" in readme
+    assert "sudo -u opub-license env -i \\\n  OPUB_LICENSE_DB_PATH=" in readme
+    assert "mktemp -d /var/backups/opub-license/pre-restore." in readme
+    assert "mktemp /opt/opub/license_server/data/.license.sqlite3.restore." in readme
+    assert "restore_stamp=" not in readme
     assert "license.sqlite3.before-restore" not in readme
+    assert 'test "$backup_check" = "ok"' in readme
+    assert 'test "$restore_check" = "ok"' in readme
+    assert "failed-restored.sqlite3" in readme
     assert "sqlite3 CLI" in readme
 
 

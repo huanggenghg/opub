@@ -90,13 +90,13 @@ Caddy 只把外部 `/license/v1/code-activations` 改写为内部
 
 ```bash
 cd /opt/opub
-sudo -u opub-license env \
+sudo -u opub-license env -i \
   OPUB_LICENSE_DB_PATH=/opt/opub/license_server/data/license.sqlite3 \
   .venv/bin/python -m license_server.codes generate \
   --count 100 \
   --output /opt/opub/license_server/data/afdian-codes.txt
 
-sudo -u opub-license env \
+sudo -u opub-license env -i \
   OPUB_LICENSE_DB_PATH=/opt/opub/license_server/data/license.sqlite3 \
   .venv/bin/python -m license_server.codes stats
 ```
@@ -136,17 +136,19 @@ sudo -u opub-license sqlite3 /var/backups/opub-license/license-$(date +%F).sqlit
 
 ```bash
 sudo systemctl stop opub-license
-sudo sqlite3 /var/backups/opub-license/license-YYYY-MM-DD.sqlite3 \
-  'PRAGMA integrity_check;'
+backup_path=/var/backups/opub-license/license-YYYY-MM-DD.sqlite3
+backup_check=$(sudo -u opub-license sqlite3 "$backup_path" 'PRAGMA integrity_check;')
+test "$backup_check" = "ok" || { echo 'backup integrity check failed'; exit 1; }
 
-restore_stamp=$(date +%Y%m%dT%H%M%S)
-rollback_dir=/var/backups/opub-license/pre-restore-$restore_stamp
-restore_tmp=/opt/opub/license_server/data/.license.sqlite3.restore-$restore_stamp
-sudo install -d -o opub-license -g opub-license -m 700 "$rollback_dir"
+rollback_dir=$(sudo -u opub-license \
+  mktemp -d /var/backups/opub-license/pre-restore.XXXXXXXX)
+restore_tmp=$(sudo -u opub-license \
+  mktemp /opt/opub/license_server/data/.license.sqlite3.restore.XXXXXXXX)
 sudo install -o opub-license -g opub-license -m 600 \
-  /var/backups/opub-license/license-YYYY-MM-DD.sqlite3 \
+  "$backup_path" \
   "$restore_tmp"
-sudo -u opub-license sqlite3 "$restore_tmp" 'PRAGMA integrity_check;'
+restore_check=$(sudo -u opub-license sqlite3 "$restore_tmp" 'PRAGMA integrity_check;')
+test "$restore_check" = "ok" || { echo 'restore integrity check failed'; exit 1; }
 
 sudo mv /opt/opub/license_server/data/license.sqlite3 \
   "$rollback_dir/license.sqlite3"
@@ -162,9 +164,36 @@ sudo mv "$restore_tmp" /opt/opub/license_server/data/license.sqlite3
 sudo systemctl start opub-license
 ```
 
-`restore_tmp` 与正式数据库位于同一文件系统，最后一次 `mv` 是原子替换。若安装或
-启动失败，保持服务停止，把当前数据库移入该唯一时间戳目录，再将其中保存的
-`license.sqlite3` 及存在的 `-wal`、`-shm` 文件逐个移回数据目录，随后重新启动服务。
+`restore_tmp` 与正式数据库位于同一文件系统，最后一次 `mv` 是原子替换。两个
+`integrity_check` 的输出必须精确等于 `ok`，否则命令会在移动正式数据库前中止。
+若安装或启动失败，保持服务停止并执行下面的回滚；失败的新库使用不同文件名，不能
+覆盖目录中保存的原库：
+
+```bash
+sudo systemctl stop opub-license
+sudo mv /opt/opub/license_server/data/license.sqlite3 \
+  "$rollback_dir/failed-restored.sqlite3"
+if sudo test -e /opt/opub/license_server/data/license.sqlite3-wal; then
+  sudo mv /opt/opub/license_server/data/license.sqlite3-wal \
+    "$rollback_dir/failed-restored.sqlite3-wal"
+fi
+if sudo test -e /opt/opub/license_server/data/license.sqlite3-shm; then
+  sudo mv /opt/opub/license_server/data/license.sqlite3-shm \
+    "$rollback_dir/failed-restored.sqlite3-shm"
+fi
+sudo mv "$rollback_dir/license.sqlite3" \
+  /opt/opub/license_server/data/license.sqlite3
+if sudo test -e "$rollback_dir/license.sqlite3-wal"; then
+  sudo mv "$rollback_dir/license.sqlite3-wal" \
+    /opt/opub/license_server/data/license.sqlite3-wal
+fi
+if sudo test -e "$rollback_dir/license.sqlite3-shm"; then
+  sudo mv "$rollback_dir/license.sqlite3-shm" \
+    /opt/opub/license_server/data/license.sqlite3-shm
+fi
+sudo systemctl start opub-license
+```
+
 不要删除该回滚目录，直到恢复后的数据库完成完整性检查和冒烟测试。
 
 ## 6. 无敏感数据冒烟测试

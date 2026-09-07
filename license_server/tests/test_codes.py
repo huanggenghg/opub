@@ -108,7 +108,7 @@ def test_generate_inventory_fsyncs_parent_directory_on_success_and_failure(
     assert calls == [output]
 
     calls.clear()
-    _choice_stream(monkeypatch, ALPHABET[:30] * 2)
+    _choice_stream(monkeypatch, ALPHABET[1:31] * 2)
     with pytest.raises(sqlite3.IntegrityError):
         generate_inventory(database, 2, tmp_path / "inventory-2.txt")
     assert calls == [tmp_path / "inventory-2.txt", tmp_path / "inventory-2.txt"]
@@ -152,7 +152,46 @@ def test_generate_inventory_cleans_up_output_when_write_is_interrupted(
     assert database.code_stats() == {"available": 0, "redeemed": 0, "total": 0}
 
 
-def test_generate_inventory_cleans_up_output_when_import_is_interrupted(
+def test_generate_inventory_fails_before_import_when_close_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from license_server.codes import generate_inventory
+
+    database = _database(tmp_path)
+    output = tmp_path / "inventory.txt"
+    called = {"import": False}
+
+    class ClosingHandle:
+        def write(self, data: str) -> int:
+            return len(data)
+
+        def flush(self) -> None:
+            pass
+
+        def fileno(self) -> int:
+            return 123
+
+        def close(self) -> None:
+            raise OSError("close failed")
+
+    monkeypatch.setattr("license_server.codes.os.fdopen", lambda fd, *args, **kwargs: ClosingHandle())
+    monkeypatch.setattr("license_server.codes.os.fsync", lambda fd: None)
+    monkeypatch.setattr(
+        database,
+        "import_activation_codes",
+        lambda *args, **kwargs: called.__setitem__("import", True),
+    )
+    _choice_stream(monkeypatch, ALPHABET[:30])
+
+    with pytest.raises(OSError, match="close failed"):
+        generate_inventory(database, 1, output)
+
+    assert not output.exists()
+    assert database.code_stats() == {"available": 0, "redeemed": 0, "total": 0}
+    assert called == {"import": False}
+
+
+def test_generate_inventory_retains_output_when_import_commits_then_interrupts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from license_server.codes import generate_inventory
@@ -160,17 +199,78 @@ def test_generate_inventory_cleans_up_output_when_import_is_interrupted(
     database = _database(tmp_path)
     output = tmp_path / "inventory.txt"
     _choice_stream(monkeypatch, ALPHABET[:30])
+    real_import = database.import_activation_codes
 
-    def interrupting_import(*args: object, **kwargs: object) -> None:
+    def commit_then_interrupt(activation_codes: object) -> None:
+        real_import(activation_codes)
         raise KeyboardInterrupt()
 
-    monkeypatch.setattr(database, "import_activation_codes", interrupting_import)
+    monkeypatch.setattr(database, "import_activation_codes", commit_then_interrupt)
 
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(KeyboardInterrupt) as excinfo:
         generate_inventory(database, 1, output)
 
-    assert not output.exists()
-    assert database.code_stats() == {"available": 0, "redeemed": 0, "total": 0}
+    assert output.exists()
+    assert database.code_stats() == {"available": 1, "redeemed": 0, "total": 1}
+    assert getattr(excinfo.value, "_inventory_reconciliation") == "all"
+    assert getattr(excinfo.value, "_inventory_output_retained") is True
+
+
+def test_generate_inventory_marks_partial_reconciliation_when_only_some_rows_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from license_server.codes import generate_inventory
+
+    database = _database(tmp_path)
+    output = tmp_path / "inventory.txt"
+    _choice_stream(monkeypatch, ALPHABET[:30] + ALPHABET[1:31])
+    real_import = database.import_activation_codes
+
+    def commit_one_then_interrupt(activation_codes: object) -> None:
+        rows = list(activation_codes)
+        real_import((rows[0],))
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(database, "import_activation_codes", commit_one_then_interrupt)
+
+    with pytest.raises(KeyboardInterrupt) as excinfo:
+        generate_inventory(database, 2, output)
+
+    assert output.exists()
+    assert database.code_stats() == {"available": 1, "redeemed": 0, "total": 1}
+    assert getattr(excinfo.value, "_inventory_reconciliation") == "partial"
+    assert getattr(excinfo.value, "_inventory_output_retained") is True
+
+
+def test_generate_inventory_marks_unknown_reconciliation_when_query_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from license_server.codes import generate_inventory
+
+    database = _database(tmp_path)
+    output = tmp_path / "inventory.txt"
+    _choice_stream(monkeypatch, ALPHABET[:30])
+    real_import = database.import_activation_codes
+    real_row = database.row
+
+    def commit_then_interrupt(activation_codes: object) -> None:
+        real_import(activation_codes)
+        raise KeyboardInterrupt()
+
+    def row_or_fail(query: str, values: object = ()) -> object:
+        if query.startswith("SELECT 1 FROM activation_codes"):
+            raise sqlite3.OperationalError("reconcile failed")
+        return real_row(query, values)
+
+    monkeypatch.setattr(database, "import_activation_codes", commit_then_interrupt)
+    monkeypatch.setattr(database, "row", row_or_fail)
+
+    with pytest.raises(KeyboardInterrupt) as excinfo:
+        generate_inventory(database, 1, output)
+
+    assert output.exists()
+    assert getattr(excinfo.value, "_inventory_reconciliation") == "unknown"
+    assert getattr(excinfo.value, "_inventory_output_retained") is True
 
 
 def test_generate_inventory_does_not_delete_replacement_file_on_cleanup(
@@ -359,6 +459,31 @@ def test_main_reports_missing_env_without_traceback(
     assert "OPUB0" not in captured.err
 
 
+def test_main_warns_when_import_commits_then_interrupts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from license_server.codes import main
+    from license_server import codes
+
+    monkeypatch.setenv("OPUB_LICENSE_DB_PATH", str(tmp_path / "licenses.sqlite3"))
+    real_import = codes.Database.import_activation_codes
+
+    def commit_then_interrupt(self: Database, activation_codes: object) -> None:
+        real_import(self, activation_codes)
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(codes.Database, "import_activation_codes", commit_then_interrupt)
+    _choice_stream(monkeypatch, ALPHABET[:30])
+
+    assert main(["generate", "--count", "1", "--output", str(tmp_path / "inventory.txt")]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "check stats before upload" in captured.err
+    assert "Traceback" not in captured.err
+    assert "OPUB0" not in captured.err
+    assert codes.Database(tmp_path / "licenses.sqlite3").code_stats() == {"available": 1, "redeemed": 0, "total": 1}
+
+
 def test_main_reports_existing_output_via_subprocess_without_traceback(
     tmp_path: Path
 ) -> None:
@@ -389,6 +514,7 @@ def test_main_reports_existing_output_via_subprocess_without_traceback(
     assert result.stdout == ""
     assert "Traceback" not in result.stderr
     assert "OPUB0" not in result.stderr
+    assert "inventory output already exists" in result.stderr
 
 
 def test_main_reports_database_error_without_traceback(

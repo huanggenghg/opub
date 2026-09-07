@@ -15,6 +15,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 
+PURCHASE_URL = "https://afdian.com/item/test-item"
+
+
 def _load_module(module_path: Path, module_name: str):
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     assert spec is not None
@@ -91,6 +94,7 @@ def test_keygen_creates_private_seed_and_public_client_module(tmp_path: Path) ->
         private_file=private_file,
         client_file=client_file,
         base_url="https://example.com/license/",
+        purchase_url=PURCHASE_URL,
         key_id="kid-1",
     ) == 0
 
@@ -103,6 +107,8 @@ def test_keygen_creates_private_seed_and_public_client_module(tmp_path: Path) ->
     client_module_text = client_file.read_text(encoding="utf-8")
     assert client_module_text == (
         "LICENSE_API_BASE_URL='https://example.com/license'\n"
+        "LICENSE_PURCHASE_URL='https://afdian.com/item/test-item'\n"
+        "LICENSE_PRODUCT_ID='opub-major-0'\n"
         "TRUSTED_PUBLIC_KEYS={'kid-1': '"
         + base64.b64encode(
             Ed25519PrivateKey.from_private_bytes(private_seed)
@@ -151,6 +157,7 @@ def test_keygen_refuses_existing_private_before_touching_client(tmp_path: Path) 
             private_file=private_file,
             client_file=client_file,
             base_url="https://example.com/license",
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
 
@@ -177,6 +184,7 @@ def test_keygen_rejects_casefold_alias_paths_without_touching_outputs(
             private_file=private_file,
             client_file=client_file,
             base_url="https://example.com/license",
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
 
@@ -202,6 +210,7 @@ def test_keygen_does_not_use_fchmod(tmp_path: Path, monkeypatch: pytest.MonkeyPa
             private_file=tmp_path / "license.private",
             client_file=tmp_path / "license_client.py",
             base_url="https://example.com/license",
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
         == 0
@@ -279,6 +288,7 @@ def _assert_retryable_atomic_failure(
             private_file=private_file,
             client_file=client_file,
             base_url="https://example.com:8443/license/",
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
 
@@ -292,6 +302,7 @@ def _assert_retryable_atomic_failure(
             private_file=private_file,
             client_file=client_file,
             base_url="https://example.com:8443/license/",
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
         == 0
@@ -333,6 +344,7 @@ def test_keygen_recovers_after_private_temp_unlink_failure(
             private_file=private_file,
             client_file=client_file,
             base_url="https://example.com:8443/license/",
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
 
@@ -347,6 +359,7 @@ def test_keygen_recovers_after_private_temp_unlink_failure(
             private_file=private_file,
             client_file=client_file,
             base_url="https://example.com:8443/license/",
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
         == 0
@@ -396,6 +409,7 @@ def test_keygen_recovers_after_client_write_or_replace_failure(
             private_file=private_file,
             client_file=client_file,
             base_url="https://example.com:8443/license/",
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
 
@@ -408,6 +422,7 @@ def test_keygen_recovers_after_client_write_or_replace_failure(
             private_file=private_file,
             client_file=client_file,
             base_url="https://example.com:8443/license/",
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
         == 0
@@ -425,6 +440,8 @@ def test_keygen_recovers_after_client_write_or_replace_failure(
         "https://user:pass@example.com/license",
         "https://example.com/license?x=1",
         "https://example.com/license#x",
+        "\nhttps://example.com/license",
+        "https://example.com/license\t",
     ],
 )
 def test_keygen_rejects_invalid_base_url(base_url: str, tmp_path: Path) -> None:
@@ -435,6 +452,7 @@ def test_keygen_rejects_invalid_base_url(base_url: str, tmp_path: Path) -> None:
             private_file=tmp_path / "license.private",
             client_file=tmp_path / "license_client.py",
             base_url=base_url,
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
 
@@ -455,6 +473,7 @@ def test_keygen_accepts_valid_explicit_ports_and_paths(base_url: str, tmp_path: 
             private_file=tmp_path / "license.private",
             client_file=tmp_path / "license_client.py",
             base_url=base_url,
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
         == 0
@@ -479,8 +498,43 @@ def test_keygen_rejects_malformed_host_and_ports(base_url: str, tmp_path: Path) 
             private_file=tmp_path / "license.private",
             client_file=tmp_path / "license_client.py",
             base_url=base_url,
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
+
+
+@pytest.mark.parametrize(
+    "purchase_url",
+    [
+        "http://afdian.com/item/test-item",
+        "https://",
+        "https://user:pass@afdian.com/item/test-item",
+        "https://afdian.com/item/test-item?secret=1",
+        "https://afdian.com/item/test-item#fragment",
+        "https://afdian.com:bad/item/test-item",
+        "https://afdian.com:99999/item/test-item",
+        "https://afdian.com/item/test\nitem",
+        "\nhttps://afdian.com/item/test-item",
+        "https://afdian.com/item/test-item\t",
+        "https://爱发电.example/item/test-item",
+    ],
+)
+def test_keygen_rejects_insecure_purchase_url(
+    purchase_url: str, tmp_path: Path
+) -> None:
+    from license_server import keygen
+
+    with pytest.raises(ValueError):
+        keygen.generate(
+            private_file=tmp_path / "license.private",
+            client_file=tmp_path / "license_client.py",
+            base_url="https://example.com/license",
+            purchase_url=purchase_url,
+            key_id="kid-1",
+        )
+
+    assert not (tmp_path / "license.private").exists()
+    assert not (tmp_path / "license_client.py").exists()
 
 
 @pytest.mark.parametrize("key_id", ["", "   "])
@@ -492,6 +546,7 @@ def test_keygen_rejects_empty_key_id(key_id: str, tmp_path: Path) -> None:
             private_file=tmp_path / "license.private",
             client_file=tmp_path / "license_client.py",
             base_url="https://example.com/license",
+            purchase_url=PURCHASE_URL,
             key_id=key_id,
         )
 
@@ -510,6 +565,7 @@ def test_keygen_rejects_same_private_and_client_path_without_touching_file(
             private_file=target,
             client_file=target,
             base_url="https://example.com/license",
+            purchase_url=PURCHASE_URL,
             key_id="kid-1",
         )
 
@@ -530,8 +586,30 @@ def test_keygen_main_returns_zero(tmp_path: Path) -> None:
         str(client_file),
         "--base-url",
         "https://example.com/license/",
+        "--purchase-url",
+        PURCHASE_URL,
         "--key-id",
         "kid-1",
     ]
 
     assert keygen.main(argv[1:]) == 0
+
+
+def test_keygen_main_requires_purchase_url(tmp_path: Path) -> None:
+    from license_server import keygen
+
+    with pytest.raises(SystemExit) as exc_info:
+        keygen.main(
+            [
+                "--private-file",
+                str(tmp_path / "license.private"),
+                "--client-file",
+                str(tmp_path / "license_client.py"),
+                "--base-url",
+                "https://example.com/license",
+                "--key-id",
+                "kid-1",
+            ]
+        )
+
+    assert exc_info.value.code == 2

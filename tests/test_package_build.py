@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -15,12 +16,13 @@ CLIENT_LICENSE_FILES = {
     "publish/licensing/__init__.py",
     "publish/licensing/activation.py",
     "publish/licensing/api.py",
+    "publish/licensing/codes.py",
     "publish/licensing/deployment.py",
     "publish/licensing/fingerprint.py",
     "publish/licensing/storage.py",
     "publish/licensing/verifier.py",
 }
-PRIVATE_KEY_ENV_NAMES = ("OPUB_LICENSE_PRIVATE_KEY", "OPUB_MBD_APP_KEY")
+PRIVATE_KEY_ENV_NAMES = ("OPUB_LICENSE_PRIVATE_KEY",)
 
 
 def _normalized_name(name: str) -> str:
@@ -85,6 +87,36 @@ def _assert_no_private_bytes(
         secret = os.environ.get(env_name)
         if secret and any(secret.encode("utf-8") in payload for payload in payloads.values()):
             test_case.fail(f"{artifact_name} contains the value of {env_name}")
+
+
+def _assert_no_activation_inventories(
+    test_case: unittest.TestCase,
+    artifact_name: str,
+    payloads: dict[str, bytes],
+) -> None:
+    inventory_names = [
+        _normalized_name(name)
+        for name in payloads
+        if Path(_normalized_name(name)).name.lower().endswith(".txt")
+        and "codes" in Path(_normalized_name(name)).name.lower()
+    ]
+    test_case.assertEqual(
+        [],
+        inventory_names,
+        f"{artifact_name} contains activation-code inventory files",
+    )
+
+    code_pattern = re.compile(r"OPUB0(?:-[0-9A-HJKMNP-TV-Z]{5}){6}")
+    for name, payload in payloads.items():
+        lines = [
+            line.strip()
+            for line in payload.decode("utf-8", errors="ignore").splitlines()
+            if line.strip()
+        ]
+        if lines and all(code_pattern.fullmatch(line) for line in lines):
+            test_case.fail(
+                f"{artifact_name} contains plaintext activation-code inventory payload in {name}"
+            )
 
 
 def _build_wheel(repo_root: Path, outdir: Path) -> set[str]:
@@ -186,11 +218,24 @@ class PackageBuildTest(unittest.TestCase):
                     artifact_name,
                     _archive_payloads(artifact_path),
                 )
+                _assert_no_activation_inventories(
+                    self,
+                    artifact_name,
+                    _archive_payloads(artifact_path),
+                )
 
     def test_release_version_is_consistent(self):
         repo_root = Path(__file__).resolve().parents[1]
         pyproject_text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
         skill_text = (repo_root / "skills/opub-cli/SKILL.md").read_text(encoding="utf-8")
+        lock_text = (repo_root / "uv.lock").read_text(encoding="utf-8")
 
-        self.assertIn('version = "0.7.0"', pyproject_text)
-        self.assertIn('version: "0.7.0"', skill_text)
+        self.assertIn('version = "0.8.0"', pyproject_text)
+        self.assertIn('version: "0.8.0"', skill_text)
+        self.assertIn('name = "opub"\nversion = "0.8.0"', lock_text)
+        self.assertNotIn('{ name = "qrcode"', lock_text)
+
+    def test_manifest_explicitly_excludes_activation_code_inventories(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        manifest_text = (repo_root / "MANIFEST.in").read_text(encoding="utf-8")
+        self.assertIn("global-exclude *codes*.txt", manifest_text.splitlines())

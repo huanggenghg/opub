@@ -13,41 +13,52 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 
-def _normalize_base_url(base_url: str) -> str:
-    trimmed = base_url.strip()
-    if any(ord(char) < 33 or ord(char) == 127 for char in trimmed):
-        raise ValueError("base_url must be a valid https URL")
+def _normalize_https_url(value: str, field_name: str) -> str:
+    trimmed = value.strip()
+    if value != trimmed or any(ord(char) < 33 or ord(char) == 127 for char in value):
+        raise ValueError(f"{field_name} must be a valid https URL")
 
-    parts = urlsplit(trimmed)
+    try:
+        parts = urlsplit(trimmed)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be a valid https URL") from exc
     if (
         parts.scheme != "https"
         or not parts.hostname
         or parts.query
         or parts.fragment
     ):
-        raise ValueError("base_url must be a valid https URL")
+        raise ValueError(f"{field_name} must be a valid https URL")
 
     try:
         _ = parts.port
     except ValueError as exc:
-        raise ValueError("base_url must be a valid https URL") from exc
+        raise ValueError(f"{field_name} must be a valid https URL") from exc
 
     if "@" in parts.netloc or parts.username is not None or parts.password is not None:
-        raise ValueError("base_url must be a valid https URL")
+        raise ValueError(f"{field_name} must be a valid https URL")
 
-    _validate_hostname(parts.hostname)
+    _validate_hostname(parts.hostname, field_name)
     path = parts.path.rstrip("/")
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
 
 
-def _validate_hostname(hostname: str) -> None:
+def _normalize_base_url(base_url: str) -> str:
+    return _normalize_https_url(base_url, "base_url")
+
+
+def _normalize_purchase_url(purchase_url: str) -> str:
+    return _normalize_https_url(purchase_url, "purchase_url")
+
+
+def _validate_hostname(hostname: str, field_name: str) -> None:
     if any(ord(char) < 33 or ord(char) == 127 for char in hostname):
-        raise ValueError("base_url must be a valid https URL")
+        raise ValueError(f"{field_name} must be a valid https URL")
 
     try:
         hostname.encode("ascii")
     except UnicodeEncodeError as exc:
-        raise ValueError("base_url must be a valid https URL") from exc
+        raise ValueError(f"{field_name} must be a valid https URL") from exc
 
     try:
         ipaddress.ip_address(hostname)
@@ -59,17 +70,17 @@ def _validate_hostname(hostname: str) -> None:
         return
 
     if hostname.endswith("."):
-        raise ValueError("base_url must be a valid https URL")
+        raise ValueError(f"{field_name} must be a valid https URL")
 
     labels = hostname.split(".")
     if not labels or any(not label for label in labels):
-        raise ValueError("base_url must be a valid https URL")
+        raise ValueError(f"{field_name} must be a valid https URL")
 
     for label in labels:
         if len(label) > 63 or label[0] == "-" or label[-1] == "-":
-            raise ValueError("base_url must be a valid https URL")
+            raise ValueError(f"{field_name} must be a valid https URL")
         if not all(char.isalnum() or char == "-" for char in label):
-            raise ValueError("base_url must be a valid https URL")
+            raise ValueError(f"{field_name} must be a valid https URL")
 
 
 def _validate_key_id(key_id: str) -> str:
@@ -124,6 +135,7 @@ def _write_client_module(
     private_file: Path,
     client_file: Path,
     base_url: str,
+    purchase_url: str,
     key_id: str,
     public_key_b64: str,
     temp_paths: list[Path],
@@ -131,6 +143,8 @@ def _write_client_module(
     client_file.parent.mkdir(parents=True, exist_ok=True)
     content = (
         f"LICENSE_API_BASE_URL={base_url!r}\n"
+        f"LICENSE_PURCHASE_URL={purchase_url!r}\n"
+        "LICENSE_PRODUCT_ID='opub-major-0'\n"
         f"TRUSTED_PUBLIC_KEYS={{{key_id!r}: {public_key_b64!r}}}\n"
     )
     fd, temp_path = tempfile.mkstemp(
@@ -200,12 +214,14 @@ def generate(
     private_file: Path,
     client_file: Path,
     base_url: str,
+    purchase_url: str,
     key_id: str,
 ) -> int:
     if _paths_alias(private_file, client_file):
         raise ValueError("private_file and client_file must be different paths")
 
     normalized_base_url = _normalize_base_url(base_url)
+    normalized_purchase_url = _normalize_purchase_url(purchase_url)
     normalized_key_id = _validate_key_id(key_id)
     private_seed = secrets.token_bytes(32)
     public_key = Ed25519PrivateKey.from_private_bytes(private_seed).public_key()
@@ -224,6 +240,7 @@ def generate(
             private_file,
             client_file,
             normalized_base_url,
+            normalized_purchase_url,
             normalized_key_id,
             public_key_b64,
             temp_paths,
@@ -244,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--private-file", type=Path, required=True)
     parser.add_argument("--client-file", type=Path, required=True)
     parser.add_argument("--base-url", required=True)
+    parser.add_argument("--purchase-url", required=True)
     parser.add_argument("--key-id", required=True)
     args = parser.parse_args(argv)
 
@@ -251,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         private_file=args.private_file,
         client_file=args.client_file,
         base_url=args.base_url,
+        purchase_url=args.purchase_url,
         key_id=args.key_id,
     )
 

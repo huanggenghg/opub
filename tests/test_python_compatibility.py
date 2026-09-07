@@ -31,6 +31,12 @@ def _annotations(tree):
 
 
 class SupportedPythonSyntaxTests(unittest.TestCase):
+    def test_release_source_inventory_includes_activation_code_parser(self):
+        self.assertIn(
+            REPO_ROOT / "publish/licensing/codes.py",
+            _public_client_sources(),
+        )
+
     def test_xiaohongshu_module_compiles(self):
         source_path = (
             Path(__file__).parents[1]

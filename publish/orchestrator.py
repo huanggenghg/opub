@@ -393,7 +393,7 @@ def _open_license_purchase_page() -> None:
 def _stdin_is_interactive() -> bool:
     try:
         return bool(sys.stdin.isatty())
-    except (OSError, ValueError):
+    except (EOFError, OSError, ValueError):
         return False
     except KeyboardInterrupt:
         return False

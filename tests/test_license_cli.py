@@ -242,6 +242,27 @@ def test_activation_handles_terminal_detection_failure_without_leaking_details()
     prompt.assert_not_called()
 
 
+def test_activation_handles_terminal_detection_eof_without_traceback_or_leak():
+    failure = EOFError(f"terminal failed with {VALID_CODE}")
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with patch("publish.orchestrator.webbrowser.open", return_value=False), \
+         patch("publish.orchestrator.sys.stdin.isatty", side_effect=failure), \
+         patch("builtins.input") as prompt, \
+         contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        code = publish_all.main(["--activate"])
+    assert code == EXIT_LICENSE_ERROR
+    assert stdout.getvalue() == (
+        f"[opub] 无法自动打开购买页，请手动打开: {LICENSE_PURCHASE_URL}\n"
+    )
+    assert stderr.getvalue() == (
+        "[opub] LIC-001: 尚未提供激活码。建议: "
+        "付款取得激活码后运行 opub --activate --code OPUB0-你的激活码\n"
+    )
+    assert "Traceback" not in stdout.getvalue() + stderr.getvalue()
+    assert VALID_CODE not in stdout.getvalue() + stderr.getvalue()
+    prompt.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "failure",
     [

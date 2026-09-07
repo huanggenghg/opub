@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import os
 import secrets
+import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -17,6 +20,10 @@ _HASH_PREFIX = b"opub-activation-code-v1\n"
 _PRODUCT_ID = "opub-major-0"
 _MIN_COUNT = 1
 _MAX_COUNT = 10_000
+
+
+def code_hash(normalized: str) -> str:
+    return hashlib.sha256(_HASH_PREFIX + normalized.encode("ascii")).hexdigest()
 
 
 def _validate_count(value: int) -> int:
@@ -38,21 +45,61 @@ def _generate_display_code() -> str:
     return "OPUB0-" + "-".join(groups)
 
 
-def _activation_code_hash(display_code: str) -> str:
-    normalized = normalize_activation_code(display_code)
-    return hashlib.sha256(_HASH_PREFIX + normalized.encode("ascii")).hexdigest()
-
-
 def _created_at() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def _path_matches_inode(path: Path, expected: os.stat_result) -> bool:
+    try:
+        current = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    return current.st_dev == expected.st_dev and current.st_ino == expected.st_ino
+
+
+def _fsync_parent_directory(path: Path) -> None:
+    parent = path.parent
+    fd = os.open(parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    except OSError as exc:
+        if exc.errno == errno.EINVAL:
+            return
+        raise
+    finally:
+        os.close(fd)
+
+
+def _remove_created_output(path: Path, expected: os.stat_result) -> None:
+    if not _path_matches_inode(path, expected):
+        return
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        return
+    _fsync_parent_directory(path)
+
+
+def _cleanup_created_output(path: Path, expected: os.stat_result) -> None:
+    try:
+        _remove_created_output(path, expected)
+    except OSError:
+        pass
+
+
 def _open_exclusive(path: Path) -> int:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    created = os.fstat(fd)
     try:
         os.fchmod(fd, 0o600)
     except AttributeError:  # pragma: no cover - non-POSIX fallback
         pass
+    except OSError:
+        try:
+            os.close(fd)
+        finally:
+            _cleanup_created_output(path, created)
+        raise
     return fd
 
 
@@ -66,24 +113,42 @@ def generate_inventory(database: Database, count: int, output: str | Path) -> in
 
     display_codes = [_generate_display_code() for _ in range(count)]
     activation_codes = [
-        (_activation_code_hash(display_code), _PRODUCT_ID, _created_at())
+        (code_hash(normalize_activation_code(display_code)), _PRODUCT_ID, _created_at())
         for display_code in display_codes
     ]
 
     fd = _open_exclusive(output_path)
+    created = os.fstat(fd)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        handle = os.fdopen(fd, "w", encoding="utf-8", newline="\n")
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        _remove_created_output(output_path, created)
+        raise
+
+    try:
+        try:
             for display_code in display_codes:
                 handle.write(display_code)
                 handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
+        finally:
+            try:
+                handle.close()
+            except OSError:
+                pass
+
+        # The inventory file and SQLite catalog cannot commit atomically
+        # together, so the export is made durable first; the runbook verifies
+        # stats before upload in the follow-up task.
+        _fsync_parent_directory(output_path)
         database.import_activation_codes(activation_codes)
-    except Exception:
-        try:
-            output_path.unlink()
-        except FileNotFoundError:
-            pass
+    except BaseException:
+        _cleanup_created_output(output_path, created)
         raise
 
     return count
@@ -115,15 +180,25 @@ def _print_stats(database: Database) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
-    database = _database_from_env()
+    try:
+        args = parser.parse_args(list(argv) if argv is not None else None)
+        database = _database_from_env()
 
-    if args.command == "generate":
-        generate_inventory(database, args.count, args.output)
+        if args.command == "generate":
+            generate_inventory(database, args.count, args.output)
+            return 0
+
+        _print_stats(database)
         return 0
-
-    _print_stats(database)
-    return 0
+    except KeyError:
+        print("OPUB_LICENSE_DB_PATH is required", file=sys.stderr)
+        return 2
+    except FileExistsError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (OSError, sqlite3.Error, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

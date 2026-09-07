@@ -4,6 +4,7 @@ import base64
 import importlib.util
 import tempfile
 import stat
+import traceback
 from pathlib import Path
 
 import pytest
@@ -485,6 +486,8 @@ def test_keygen_accepts_valid_explicit_ports_and_paths(base_url: str, tmp_path: 
     [
         "https://example.com:bad/license",
         "https://example.com:99999/license",
+        "https://example.com:/license",
+        "https://[::1]:/license",
         "https://exa mple.com/license",
         "https://exa\nmple.com/license",
         "https://@example.com/license",
@@ -513,6 +516,8 @@ def test_keygen_rejects_malformed_host_and_ports(base_url: str, tmp_path: Path) 
         "https://afdian.com/item/test-item#fragment",
         "https://afdian.com:bad/item/test-item",
         "https://afdian.com:99999/item/test-item",
+        "https://afdian.com:/item/test-item",
+        "https://[::1]:/item/test-item",
         "https://afdian.com/item/test\nitem",
         "\nhttps://afdian.com/item/test-item",
         "https://afdian.com/item/test-item\t",
@@ -535,6 +540,40 @@ def test_keygen_rejects_insecure_purchase_url(
 
     assert not (tmp_path / "license.private").exists()
     assert not (tmp_path / "license_client.py").exists()
+
+
+@pytest.mark.parametrize(
+    ("field_name", "secret_url"),
+    [
+        ("base_url", "https://example.com:supersecret/license"),
+        ("purchase_url", "https://afdian.com:supersecret/item/test-item"),
+    ],
+)
+def test_keygen_url_validation_does_not_chain_or_echo_invalid_port(
+    field_name: str, secret_url: str, tmp_path: Path
+) -> None:
+    from license_server import keygen
+
+    values = {
+        "private_file": tmp_path / "license.private",
+        "client_file": tmp_path / "license_client.py",
+        "base_url": "https://example.com/license",
+        "purchase_url": PURCHASE_URL,
+        "key_id": "kid-1",
+    }
+    values[field_name] = secret_url
+
+    with pytest.raises(ValueError) as exc_info:
+        keygen.generate(**values)
+
+    rendered = "".join(
+        traceback.format_exception(
+            type(exc_info.value), exc_info.value, exc_info.value.__traceback__
+        )
+    )
+    assert "supersecret" not in str(exc_info.value)
+    assert "supersecret" not in rendered
+    assert exc_info.value.__cause__ is None
 
 
 @pytest.mark.parametrize("key_id", ["", "   "])

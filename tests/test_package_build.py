@@ -98,7 +98,7 @@ def _assert_no_activation_inventories(
         _normalized_name(name)
         for name in payloads
         if Path(_normalized_name(name)).name.lower().endswith(".txt")
-        and "codes" in Path(_normalized_name(name)).name.lower()
+        and "code" in Path(_normalized_name(name)).name.lower()
     ]
     test_case.assertEqual(
         [],
@@ -106,14 +106,19 @@ def _assert_no_activation_inventories(
         f"{artifact_name} contains activation-code inventory files",
     )
 
-    code_pattern = re.compile(r"OPUB0(?:-[0-9A-HJKMNP-TV-Z]{5}){6}")
+    code_pattern = re.compile(
+        r"(?:OPUB0(?:-[0-9A-HJKMNPQRSTVWXYZ]{5}){6}"
+        r"|OPUB0[0-9A-HJKMNPQRSTVWXYZ]{30})"
+    )
     for name, payload in payloads.items():
+        if not Path(_normalized_name(name)).name.lower().endswith(".txt"):
+            continue
         lines = [
             line.strip()
             for line in payload.decode("utf-8", errors="ignore").splitlines()
             if line.strip()
         ]
-        if lines and all(code_pattern.fullmatch(line) for line in lines):
+        if any(code_pattern.fullmatch(line) for line in lines):
             test_case.fail(
                 f"{artifact_name} contains plaintext activation-code inventory payload in {name}"
             )
@@ -168,6 +173,26 @@ def _build_sdist(repo_root: Path, outdir: Path) -> set[str]:
 
 
 class PackageBuildTest(unittest.TestCase):
+    def test_inventory_detector_rejects_headered_and_normalized_code_files(self):
+        samples = (
+            (
+                "private/inventory.txt",
+                b"generated inventory\nOPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWX\n",
+            ),
+            (
+                "private/inventory.txt",
+                b"generated inventory\nOPUB00123456789ABCDEFGHJKMNPQRSTVWX\n",
+            ),
+            ("private/activation-code.txt", b"generated elsewhere\n"),
+        )
+        for name, payload in samples:
+            with self.subTest(name=name, payload=payload), self.assertRaises(AssertionError):
+                _assert_no_activation_inventories(
+                    self,
+                    "synthetic distribution",
+                    {name: payload},
+                )
+
     def test_wheel_contains_opub_entry_modules(self):
         repo_root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -197,6 +222,7 @@ class PackageBuildTest(unittest.TestCase):
 
             for artifact_name, names, artifact_path in distributions:
                 normalized_names = {_normalized_name(name) for name in names}
+                payloads = _archive_payloads(artifact_path)
                 _assert_client_license_files(self, names)
                 self.assertFalse(
                     any("license_server" in Path(name).parts for name in normalized_names)
@@ -216,12 +242,12 @@ class PackageBuildTest(unittest.TestCase):
                     self,
                     repo_root,
                     artifact_name,
-                    _archive_payloads(artifact_path),
+                    payloads,
                 )
                 _assert_no_activation_inventories(
                     self,
                     artifact_name,
-                    _archive_payloads(artifact_path),
+                    payloads,
                 )
 
     def test_release_version_is_consistent(self):

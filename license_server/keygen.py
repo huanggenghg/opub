@@ -20,11 +20,12 @@ def _normalize_https_url(value: str, field_name: str) -> str:
 
     try:
         parts = urlsplit(trimmed)
-    except ValueError as exc:
-        raise ValueError(f"{field_name} must be a valid https URL") from exc
+    except ValueError:
+        raise ValueError(f"{field_name} must be a valid https URL") from None
     if (
         parts.scheme != "https"
         or not parts.hostname
+        or parts.netloc.endswith(":")
         or parts.query
         or parts.fragment
     ):
@@ -32,8 +33,8 @@ def _normalize_https_url(value: str, field_name: str) -> str:
 
     try:
         _ = parts.port
-    except ValueError as exc:
-        raise ValueError(f"{field_name} must be a valid https URL") from exc
+    except ValueError:
+        raise ValueError(f"{field_name} must be a valid https URL") from None
 
     if "@" in parts.netloc or parts.username is not None or parts.password is not None:
         raise ValueError(f"{field_name} must be a valid https URL")
@@ -57,8 +58,8 @@ def _validate_hostname(hostname: str, field_name: str) -> None:
 
     try:
         hostname.encode("ascii")
-    except UnicodeEncodeError as exc:
-        raise ValueError(f"{field_name} must be a valid https URL") from exc
+    except UnicodeEncodeError:
+        raise ValueError(f"{field_name} must be a valid https URL") from None
 
     try:
         ipaddress.ip_address(hostname)

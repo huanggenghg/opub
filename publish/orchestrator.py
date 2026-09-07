@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import os
 import sys
+import webbrowser
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from typing import Any, Dict, Optional, Sequence
@@ -36,6 +37,7 @@ from publish.licensing import (
     run_activation,
     show_license_status,
 )
+from publish.licensing.deployment import LICENSE_PURCHASE_URL
 from publish.reporter import print_header, print_results, print_summary
 from publish.runtime import runtime_preflight
 
@@ -323,11 +325,7 @@ def build_parser() -> argparse.ArgumentParser:
     license_group = parser.add_mutually_exclusive_group()
     license_group.add_argument("--license-status", action="store_true", help="检查本机许可证状态")
     license_group.add_argument("--activate", action="store_true", help="购买或恢复本机永久许可证")
-    parser.add_argument(
-        "--pay-with",
-        choices=("wechat", "alipay"),
-        help="激活支付渠道，仅与 --activate 一起使用",
-    )
+    parser.add_argument("--code", default=None, help="爱发电发放的激活码，仅与 --activate 一起使用")
     parser.add_argument("--platforms", default=None, help="启用的平台，逗号分隔（必填）")
     parser.add_argument("--video", default=None, help="视频文件或目录路径")
     parser.add_argument("--note", action="store_true", help="图文模式：以 --images 的图片发布图文")
@@ -363,26 +361,33 @@ def _build_overrides(args: argparse.Namespace) -> PublishOverrides:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
-    if args.pay_with and not args.activate:
-        parser.error("--pay-with 只能与 --activate 一起使用")
+    if args.code is not None and not args.activate:
+        parser.error("--code 只能与 --activate 一起使用")
     if args.license_status:
         return show_license_status()
     if args.activate:
-        payway = args.pay_with
-        if payway is None and sys.stdin.isatty():
+        if args.code is not None:
+            return run_activation(args.code)
+
+        try:
+            webbrowser.open(LICENSE_PURCHASE_URL)
+        except Exception:
+            pass
+
+        activation_code = ""
+        if sys.stdin.isatty():
             try:
-                selection = input("选择支付方式 [1=微信, 2=支付宝]: ").strip()
+                activation_code = input("请输入爱发电发放的激活码: ").strip()
             except EOFError:
-                selection = ""
-            payway = {"1": "wechat", "2": "alipay"}.get(selection)
-        if payway not in ("wechat", "alipay"):
+                pass
+        if not activation_code:
             print_error(
                 "LIC-001",
-                "非交互激活必须指定支付方式",
-                "使用 --activate --pay-with wechat 或 alipay",
+                "尚未提供激活码",
+                "付款取得激活码后运行 opub --activate --code OPUB0-你的激活码",
             )
             return EXIT_LICENSE_ERROR
-        return run_activation(payway)
+        return run_activation(activation_code)
 
     valid, code = require_valid_license()
     if not valid:

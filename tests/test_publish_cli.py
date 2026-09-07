@@ -224,8 +224,13 @@ class SkillDocBlackboxTests(unittest.TestCase):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
         for fragment in [
             "¥9.90",
+            "爱发电",
+            "https://afdian.com/item/69bf71f0a9f511f1bc065254001e7c00",
             "一个设备",
-            "首次激活后永久离线",
+            "0.x",
+            "永久离线",
+            "未来大版本",
+            "单独购买",
             "不需账号",
             "不迁移",
             "解绑",
@@ -235,15 +240,19 @@ class SkillDocBlackboxTests(unittest.TestCase):
             "非强 DRM",
             "opub --license-status",
             "exit 13",
-            "--activate --pay-with wechat",
-            "--activate --pay-with alipay",
-            "付款窗口打开",
+            "opub --activate",
+            "opub --activate --code OPUB0-ABCDE-FGHJK-MNPQR-STVWX-YZ234-56789",
+            "支付方式由用户在爱发电页面选择",
+            "保留已经确认的发布输入",
+            "自动继续",
             "不重复问参数",
         ]:
             self.assertIn(fragment, text)
 
-        for hidden in ["设备 hash", "poll token", "form", "internal log"]:
+        for hidden in ["完整激活码", "设备 hash", "internal log"]:
             self.assertIn(hidden, text)
+        for stale in ["--pay-with", "LIC-010", "LIC-012", "poll token", "面包多", "Mianbaoduo"]:
+            self.assertNotIn(stale, text)
 
     def test_documents_license_exit_codes_and_suggestions(self):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
@@ -252,9 +261,10 @@ class SkillDocBlackboxTests(unittest.TestCase):
             "LIC-002": ("损坏签名", "联系支持"),
             "LIC-003": ("其他设备", "重新购买"),
             "LIC-004": ("稳定设备标识", "联系支持"),
-            "LIC-010": ("未支付/超时", "完成付款"),
             "LIC-011": ("服务不可用", "稍后重试"),
-            "LIC-012": ("订单核验失败", "完成付款"),
+            "LIC-013": ("激活码无效", "检查激活码"),
+            "LIC-014": ("绑定其他设备", "重新购买"),
+            "LIC-015": ("客户端版本", "opub 0.x"),
         }
         for code, (meaning, suggestion) in expected.items():
             rows = [line for line in text.splitlines() if f"`{code}`" in line]
@@ -262,15 +272,15 @@ class SkillDocBlackboxTests(unittest.TestCase):
             row = rows[0]
             self.assertIn(meaning, row)
             self.assertIn(suggestion, row)
-        for undashed in ["LIC001", "LIC002", "LIC003", "LIC004", "LIC010", "LIC011", "LIC012"]:
+        for undashed in ["LIC001", "LIC002", "LIC003", "LIC004", "LIC011", "LIC013", "LIC014", "LIC015"]:
             self.assertNotIn(f"`{undashed}`", text)
 
     def test_documents_license_commands(self):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
         for command in [
             "opub --license-status",
-            "opub --activate --pay-with wechat",
-            "opub --activate --pay-with alipay",
+            "opub --activate",
+            "opub --activate --code OPUB0-ABCDE-FGHJK-MNPQR-STVWX-YZ234-56789",
         ]:
             self.assertIn(command, text)
 
@@ -317,14 +327,29 @@ class PublicSingleAccountContractTests(unittest.TestCase):
             "LIC-002": ("损坏签名", "联系支持"),
             "LIC-003": ("其他设备", "重新购买"),
             "LIC-004": ("稳定设备标识", "联系支持"),
-            "LIC-010": ("未支付/超时", "完成付款"),
             "LIC-011": ("服务不可用", "稍后重试"),
-            "LIC-012": ("订单核验失败", "完成付款"),
+            "LIC-013": ("激活码无效", "检查激活码"),
+            "LIC-014": ("绑定其他设备", "重新购买"),
+            "LIC-015": ("客户端版本", "opub 0.x"),
         }
         for path in self.DOC_PATHS:
             with self.subTest(path=path):
                 text = path.read_text(encoding="utf-8")
-                for fragment in ["¥9.90", "一个设备", "不需账号", "新电脑重新购买"]:
+                for fragment in [
+                    "¥9.90",
+                    "https://afdian.com/item/69bf71f0a9f511f1bc065254001e7c00",
+                    "一个设备",
+                    "0.x",
+                    "永久离线",
+                    "未来大版本",
+                    "单独购买",
+                    "支付方式由用户在爱发电页面选择",
+                    "不需账号",
+                    "新电脑重新购买",
+                    "opub --license-status",
+                    "opub --activate",
+                    "opub --activate --code OPUB0-ABCDE-FGHJK-MNPQR-STVWX-YZ234-56789",
+                ]:
                     self.assertIn(fragment, text)
                 for code, (meaning, suggestion) in expected.items():
                     rows = [line for line in text.splitlines() if f"`{code}`" in line]
@@ -332,6 +357,8 @@ class PublicSingleAccountContractTests(unittest.TestCase):
                     row = rows[0]
                     self.assertIn(meaning, row)
                     self.assertIn(suggestion, row)
+                for stale in ["--pay-with", "LIC-010", "LIC-012", "poll token", "面包多", "Mianbaoduo"]:
+                    self.assertNotIn(stale, text)
 
 
 if __name__ == "__main__":

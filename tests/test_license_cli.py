@@ -20,8 +20,12 @@ from publish.licensing import (
 )
 from publish.licensing.activation import ActivationError
 from publish.licensing.api import ActivationServiceError
+from publish.licensing.deployment import LICENSE_PURCHASE_URL
 from publish.licensing.fingerprint import DeviceFingerprintError
 from publish.licensing.verifier import LicenseValidationError, canonical_json
+
+
+VALID_CODE = "OPUB0-ABCDE-FGHJK-MNPQR-STVWX-YZ234-56789"
 
 
 def _signed_document(device_hash="a" * 64):
@@ -39,11 +43,12 @@ def _signed_document(device_hash="a" * 64):
     return {"payload": payload, "signature": signature}, {"test": public}
 
 
-def test_parser_exposes_license_commands():
+def test_parser_exposes_code_activation_and_removes_payment_method():
     help_text = publish_all.build_parser().format_help()
     assert "--license-status" in help_text
     assert "--activate" in help_text
-    assert "--pay-with {wechat,alipay}" in help_text
+    assert "--code" in help_text
+    assert "--pay-with" not in help_text
 
 
 def test_parser_makes_status_and_activate_mutually_exclusive():
@@ -52,15 +57,15 @@ def test_parser_makes_status_and_activate_mutually_exclusive():
     assert exc.value.code == 2
 
 
-def test_parser_rejects_unknown_payment_method():
+def test_removed_payment_method_is_rejected():
     with pytest.raises(SystemExit) as exc:
-        publish_all.build_parser().parse_args(["--activate", "--pay-with", "card"])
+        publish_all.build_parser().parse_args(["--activate", "--pay-with", "wechat"])
     assert exc.value.code == 2
 
 
-def test_pay_with_is_only_valid_for_activation():
+def test_code_requires_activate():
     with pytest.raises(SystemExit) as exc:
-        publish_all.main(["--pay-with", "wechat"])
+        publish_all.main(["--code", VALID_CODE])
     assert exc.value.code == 2
 
 
@@ -82,50 +87,76 @@ def test_help_and_version_do_not_check_license(args):
     require.assert_not_called()
 
 
-@pytest.mark.parametrize("payway", ["wechat", "alipay"])
-def test_activation_with_explicit_payment_does_not_check_license_or_publish(payway):
+def test_explicit_code_activates_without_prompt_purchase_page_license_check_or_publish():
     with patch("publish.orchestrator.run_activation", return_value=0) as activate, \
+         patch("publish.orchestrator.webbrowser.open") as open_page, \
+         patch("builtins.input") as prompt, \
          patch("publish.orchestrator.require_valid_license") as require, \
          patch("publish.orchestrator.run_publish", new=AsyncMock()) as publish:
-        assert publish_all.main(["--activate", "--pay-with", payway]) == 0
-    activate.assert_called_once_with(payway)
+        assert publish_all.main(["--activate", "--code", VALID_CODE]) == 0
+    activate.assert_called_once_with(VALID_CODE)
+    open_page.assert_not_called()
+    prompt.assert_not_called()
     require.assert_not_called()
     publish.assert_not_awaited()
 
 
-def test_noninteractive_activation_without_payment_has_stable_error():
+def test_noninteractive_activate_opens_purchase_page_and_exits_13():
     stderr = io.StringIO()
     with patch("publish.orchestrator.sys.stdin.isatty", return_value=False), \
+         patch("publish.orchestrator.webbrowser.open", return_value=True) as open_page, \
          patch("publish.orchestrator.run_activation") as activate, \
          contextlib.redirect_stderr(stderr):
         code = publish_all.main(["--activate"])
     assert code == EXIT_LICENSE_ERROR
     assert stderr.getvalue() == (
-        "[opub] LIC-001: 非交互激活必须指定支付方式。建议: "
-        "使用 --activate --pay-with wechat 或 alipay\n"
+        "[opub] LIC-001: 尚未提供激活码。建议: "
+        "付款取得激活码后运行 opub --activate --code OPUB0-你的激活码\n"
     )
+    open_page.assert_called_once_with(LICENSE_PURCHASE_URL)
     activate.assert_not_called()
 
 
-@pytest.mark.parametrize("selection,payway", [("1", "wechat"), ("2", "alipay")])
-def test_interactive_activation_prompts_for_payment(selection, payway):
+def test_interactive_activate_opens_purchase_page_prompts_for_code_and_redeems():
     with patch("publish.orchestrator.sys.stdin.isatty", return_value=True), \
-         patch("builtins.input", return_value=selection) as prompt, \
+         patch("publish.orchestrator.webbrowser.open", return_value=True) as open_page, \
+         patch("builtins.input", return_value=VALID_CODE) as prompt, \
          patch("publish.orchestrator.run_activation", return_value=0) as activate:
         assert publish_all.main(["--activate"]) == 0
-    prompt.assert_called_once_with("选择支付方式 [1=微信, 2=支付宝]: ")
-    activate.assert_called_once_with(payway)
+    open_page.assert_called_once_with(LICENSE_PURCHASE_URL)
+    prompt.assert_called_once_with("请输入爱发电发放的激活码: ")
+    activate.assert_called_once_with(VALID_CODE)
 
 
-def test_interactive_activation_rejects_invalid_selection():
+@pytest.mark.parametrize("entered", ["", "   "])
+def test_interactive_activation_rejects_empty_code_without_echoing_input(entered):
     stderr = io.StringIO()
     with patch("publish.orchestrator.sys.stdin.isatty", return_value=True), \
-         patch("builtins.input", return_value="3"), \
+         patch("publish.orchestrator.webbrowser.open", return_value=True) as open_page, \
+         patch("builtins.input", return_value=entered), \
+         patch("publish.orchestrator.run_activation") as activate, \
+         contextlib.redirect_stderr(stderr):
+        code = publish_all.main(["--activate"])
+    assert code == EXIT_LICENSE_ERROR
+    assert stderr.getvalue() == (
+        "[opub] LIC-001: 尚未提供激活码。建议: "
+        "付款取得激活码后运行 opub --activate --code OPUB0-你的激活码\n"
+    )
+    open_page.assert_called_once_with(LICENSE_PURCHASE_URL)
+    activate.assert_not_called()
+
+
+def test_interactive_activation_handles_eof_without_redeeming():
+    stderr = io.StringIO()
+    with patch("publish.orchestrator.sys.stdin.isatty", return_value=True), \
+         patch("publish.orchestrator.webbrowser.open", return_value=True) as open_page, \
+         patch("builtins.input", side_effect=EOFError), \
          patch("publish.orchestrator.run_activation") as activate, \
          contextlib.redirect_stderr(stderr):
         code = publish_all.main(["--activate"])
     assert code == EXIT_LICENSE_ERROR
     assert "LIC-001" in stderr.getvalue()
+    open_page.assert_called_once_with(LICENSE_PURCHASE_URL)
     activate.assert_not_called()
 
 
@@ -322,7 +353,7 @@ def test_run_activation_preserves_public_activation_service_codes(service_code):
     [
         (DeviceFingerprintError("private uuid"), "LIC-004"),
         (ActivationServiceError("bearer secret"), "LIC-011"),
-        (ActivationError("LIC-010", "private order"), "LIC-010"),
+        (ActivationError("LIC-013", "private activation code"), "LIC-013"),
         (LicenseValidationError("LIC-003", "private device"), "LIC-003"),
         (OSError("/private/path/license.json"), "LIC-011"),
     ],
@@ -342,12 +373,12 @@ def test_run_activation_maps_failures_without_leaking_internal_values(failure, c
     assert str(failure) not in stderr.getvalue()
 
 
-def test_run_activation_maps_unexpected_checkout_failure_without_leaking_details(tmp_path):
+def test_run_activation_maps_unexpected_redeem_failure_without_leaking_details(tmp_path):
     deployment = SimpleNamespace(
         LICENSE_API_BASE_URL="https://license.example.test",
         TRUSTED_PUBLIC_KEYS={"prod": "public"},
     )
-    failure = RuntimeError("secret checkout URL")
+    failure = RuntimeError("secret activation code")
     stderr = io.StringIO()
     with patch.dict(sys.modules, {"publish.licensing.deployment": deployment}), \
          patch("publish.licensing.build_device_hash", return_value="d" * 64), \

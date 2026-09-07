@@ -300,6 +300,22 @@ def run_publish_sync(overrides: Optional[PublishOverrides] = None) -> int:
 
 
 SCHEDULE_FORMAT = "%Y-%m-%d %H:%M"
+_PUBLISH_OPTION_NAMES = frozenset(
+    {
+        "--platforms",
+        "--video",
+        "--note",
+        "--images",
+        "--convert-to-video",
+        "--video-duration",
+        "--title",
+        "--desc",
+        "--tags",
+        "--schedule",
+        "--start-from",
+        "--force",
+    }
+)
 
 
 def _schedule_value(value: str) -> datetime:
@@ -316,6 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="opub",
         description="把视频/图文一键发布到抖音/小红书/快手/微博/B站/视频号/百家号。必填 --platforms，素材提供 --video（视频）或 --note --images（图文）。",
+        allow_abbrev=False,
     )
     try:
         _version = pkg_version("opub")
@@ -358,28 +375,57 @@ def _build_overrides(args: argparse.Namespace) -> PublishOverrides:
     )
 
 
+def _contains_explicit_option(argv: Sequence[str], option_names: frozenset[str]) -> bool:
+    return any(argument.split("=", 1)[0] in option_names for argument in argv)
+
+
+def _open_license_purchase_page() -> None:
+    try:
+        opened = bool(webbrowser.open(LICENSE_PURCHASE_URL))
+    except Exception:
+        opened = False
+    except KeyboardInterrupt:
+        opened = False
+    if not opened:
+        print(f"[opub] 无法自动打开购买页，请手动打开: {LICENSE_PURCHASE_URL}")
+
+
+def _stdin_is_interactive() -> bool:
+    try:
+        return bool(sys.stdin.isatty())
+    except (OSError, ValueError):
+        return False
+    except KeyboardInterrupt:
+        return False
+
+
+def _read_activation_code() -> str:
+    try:
+        return input("请输入爱发电发放的激活码: ").strip()
+    except (EOFError, OSError):
+        return ""
+    except KeyboardInterrupt:
+        return ""
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    arguments = list(argv) if argv is not None else sys.argv[1:]
+    args = parser.parse_args(arguments)
     if args.code is not None and not args.activate:
         parser.error("--code 只能与 --activate 一起使用")
+    if (args.activate or args.license_status) and _contains_explicit_option(
+        arguments, _PUBLISH_OPTION_NAMES
+    ):
+        parser.error("许可命令不能与发布参数一起使用")
     if args.license_status:
         return show_license_status()
     if args.activate:
         if args.code is not None:
             return run_activation(args.code)
 
-        try:
-            webbrowser.open(LICENSE_PURCHASE_URL)
-        except Exception:
-            pass
-
-        activation_code = ""
-        if sys.stdin.isatty():
-            try:
-                activation_code = input("请输入爱发电发放的激活码: ").strip()
-            except EOFError:
-                pass
+        _open_license_purchase_page()
+        activation_code = _read_activation_code() if _stdin_is_interactive() else ""
         if not activation_code:
             print_error(
                 "LIC-001",

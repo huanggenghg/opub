@@ -89,7 +89,7 @@ opub --activate
 opub --activate --code OPUB0-ABCDE-FGHJK-MNPQR-STVWX-YZ234-56789
 ```
 
-许可错误统一输出 `[opub] LICxxx: <描述>。建议: <动作>`。常见错误及建议：
+许可错误统一输出 `[opub] LIC-xxx: <描述>。建议: <动作>`。常见错误及建议：
 
 | 错误码 | 含义 | 建议 |
 | --- | --- | --- |

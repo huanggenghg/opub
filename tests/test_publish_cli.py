@@ -277,6 +277,8 @@ class SkillDocBlackboxTests(unittest.TestCase):
 
     def test_documents_license_commands(self):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("LICxxx", text)
+        self.assertIn("LIC-xxx", text)
         for command in [
             "opub --license-status",
             "opub --activate",
@@ -335,6 +337,9 @@ class PublicSingleAccountContractTests(unittest.TestCase):
         for path in self.DOC_PATHS:
             with self.subTest(path=path):
                 text = path.read_text(encoding="utf-8")
+                if path in {Path("docs/CLI.md"), Path("skills/opub-cli/SKILL.md")}:
+                    self.assertNotIn("LICxxx", text)
+                    self.assertIn("LIC-xxx", text)
                 for fragment in [
                     "¥9.90",
                     "https://afdian.com/item/69bf71f0a9f511f1bc065254001e7c00",

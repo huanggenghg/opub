@@ -69,6 +69,48 @@ def test_code_requires_activate():
     assert exc.value.code == 2
 
 
+@pytest.mark.parametrize(
+    "license_args",
+    [
+        ["--activate"],
+        ["--activate", "--code", VALID_CODE],
+        ["--license-status"],
+    ],
+)
+@pytest.mark.parametrize(
+    "publish_args",
+    [
+        ["--platforms", "weibo"],
+        ["--platforms=weibo"],
+        ["--platf", "weibo"],
+        ["--video", "video.mp4"],
+        ["--note"],
+        ["--images", "image.png"],
+        ["--convert-to-video"],
+        ["--video-duration", "5"],
+        ["--video-duration=5"],
+        ["--title", "title"],
+        ["--desc", "description"],
+        ["--tags", "tag"],
+        ["--schedule", "2026-09-07 12:00"],
+        ["--start-from", "1"],
+        ["--force"],
+    ],
+)
+def test_license_commands_reject_every_explicit_publish_option(
+    license_args, publish_args
+):
+    with patch("publish.orchestrator.webbrowser.open") as open_page, \
+         patch("publish.orchestrator.run_activation") as activate, \
+         patch("publish.orchestrator.show_license_status") as status, \
+         pytest.raises(SystemExit) as exc:
+        publish_all.main([*license_args, *publish_args])
+    assert exc.value.code == 2
+    open_page.assert_not_called()
+    activate.assert_not_called()
+    status.assert_not_called()
+
+
 def test_license_status_does_not_build_publish_arguments_or_run_publish():
     with patch("publish.orchestrator.show_license_status", return_value=0), \
          patch("publish.orchestrator._build_overrides") as build_overrides, \
@@ -117,6 +159,32 @@ def test_noninteractive_activate_opens_purchase_page_and_exits_13():
     activate.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "browser_result",
+    [False, OSError(f"browser failed with {VALID_CODE}")],
+)
+def test_activation_displays_public_purchase_url_when_browser_cannot_open(
+    browser_result,
+):
+    stdout, stderr = io.StringIO(), io.StringIO()
+    open_kwargs = (
+        {"side_effect": browser_result}
+        if isinstance(browser_result, BaseException)
+        else {"return_value": browser_result}
+    )
+    with patch("publish.orchestrator.sys.stdin.isatty", return_value=False), \
+         patch("publish.orchestrator.webbrowser.open", **open_kwargs) as open_page, \
+         contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        code = publish_all.main(["--activate"])
+    assert code == EXIT_LICENSE_ERROR
+    assert stdout.getvalue() == (
+        f"[opub] 无法自动打开购买页，请手动打开: {LICENSE_PURCHASE_URL}\n"
+    )
+    assert "LIC-001" in stderr.getvalue()
+    assert VALID_CODE not in stdout.getvalue() + stderr.getvalue()
+    open_page.assert_called_once_with(LICENSE_PURCHASE_URL)
+
+
 def test_interactive_activate_opens_purchase_page_prompts_for_code_and_redeems():
     with patch("publish.orchestrator.sys.stdin.isatty", return_value=True), \
          patch("publish.orchestrator.webbrowser.open", return_value=True) as open_page, \
@@ -157,6 +225,45 @@ def test_interactive_activation_handles_eof_without_redeeming():
     assert code == EXIT_LICENSE_ERROR
     assert "LIC-001" in stderr.getvalue()
     open_page.assert_called_once_with(LICENSE_PURCHASE_URL)
+    activate.assert_not_called()
+
+
+def test_activation_handles_terminal_detection_failure_without_leaking_details():
+    failure = OSError(f"terminal failed with {VALID_CODE}")
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with patch("publish.orchestrator.webbrowser.open", return_value=True), \
+         patch("publish.orchestrator.sys.stdin.isatty", side_effect=failure), \
+         patch("builtins.input") as prompt, \
+         contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        code = publish_all.main(["--activate"])
+    assert code == EXIT_LICENSE_ERROR
+    assert "LIC-001" in stderr.getvalue()
+    assert VALID_CODE not in stdout.getvalue() + stderr.getvalue()
+    prompt.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        OSError(f"input failed with {VALID_CODE}"),
+        EOFError(f"input failed with {VALID_CODE}"),
+        KeyboardInterrupt(),
+    ],
+)
+def test_interactive_activation_handles_terminal_read_failures_without_traceback_or_leak(
+    failure,
+):
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with patch("publish.orchestrator.sys.stdin.isatty", return_value=True), \
+         patch("publish.orchestrator.webbrowser.open", return_value=True), \
+         patch("builtins.input", side_effect=failure), \
+         patch("publish.orchestrator.run_activation") as activate, \
+         contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        code = publish_all.main(["--activate"])
+    assert code == EXIT_LICENSE_ERROR
+    assert "LIC-001" in stderr.getvalue()
+    assert "Traceback" not in stderr.getvalue()
+    assert VALID_CODE not in stdout.getvalue() + stderr.getvalue()
     activate.assert_not_called()
 
 

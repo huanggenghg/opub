@@ -171,6 +171,7 @@ tk_uploader/*.json
 # 配置文件
 config.json
 .secrets/
+.secrets/*codes*.txt
 
 # 账号文件
 cookies

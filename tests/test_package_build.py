@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -23,6 +24,16 @@ CLIENT_LICENSE_FILES = {
     "publish/licensing/verifier.py",
 }
 PRIVATE_KEY_ENV_NAMES = ("OPUB_LICENSE_PRIVATE_KEY",)
+SOURCE_TREE_EXCLUDES = (
+    ".git",
+    ".worktrees",
+    ".venv",
+    "build",
+    "dist",
+    "output",
+    "*.egg-info",
+    "__pycache__",
+)
 
 
 def _normalized_name(name: str) -> str:
@@ -31,6 +42,36 @@ def _normalized_name(name: str) -> str:
     if len(parts) > 1 and parts[0].startswith("opub-"):
         return Path(*parts[1:]).as_posix()
     return Path(name).as_posix()
+
+
+def _copy_source_tree(repo_root: Path, destination: Path) -> Path:
+    shutil.copytree(
+        repo_root,
+        destination,
+        ignore=shutil.ignore_patterns(*SOURCE_TREE_EXCLUDES),
+    )
+    return destination
+
+
+def _run_build_py(repo_root: Path, build_lib: Path) -> subprocess.CompletedProcess[str]:
+    from build.env import DefaultIsolatedEnv
+
+    with DefaultIsolatedEnv() as env:
+        env.install(["setuptools>=69"])
+        return subprocess.run(
+            [
+                env.python_executable,
+                "setup.py",
+                "build_py",
+                "--build-lib",
+                str(build_lib),
+            ],
+            cwd=repo_root,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
 
 
 def _assert_client_license_files(
@@ -175,28 +216,95 @@ def _build_sdist(repo_root: Path, outdir: Path) -> set[str]:
 class PackageBuildTest(unittest.TestCase):
     def test_distributions_exclude_stale_deleted_modules(self):
         repo_root = Path(__file__).resolve().parents[1]
-        stale_module = repo_root / "build/lib/utils/excel_writer.py"
-        stale_module.parent.mkdir(parents=True, exist_ok=True)
-        stale_module.write_text("# stale generated build artifact\n", encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            source_root = _copy_source_tree(repo_root, workspace / "source")
 
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                outdir = Path(tmpdir)
-                distributions = {
-                    "sdist": _build_sdist(repo_root, outdir / "sdist"),
-                    "wheel": _build_wheel(repo_root, outdir / "wheel"),
-                }
-        finally:
-            stale_module.unlink(missing_ok=True)
+            _build_wheel(source_root, workspace / "prime-wheel")
+            bdist_roots = sorted((source_root / "build").glob("bdist.*"))
+            self.assertEqual(1, len(bdist_roots), "could not identify active wheel staging root")
 
-        for artifact_name, names in distributions.items():
-            normalized_names = {_normalized_name(name) for name in names}
-            with self.subTest(artifact=artifact_name):
-                self.assertNotIn(
-                    "utils/excel_writer.py",
-                    normalized_names,
-                    f"{artifact_name} contains a stale deleted module",
+            stale_modules = (
+                source_root / "build/lib/utils/excel_writer.py",
+                bdist_roots[0] / "wheel/utils/excel_writer.py",
+            )
+            for stale_module in stale_modules:
+                stale_module.parent.mkdir(parents=True, exist_ok=True)
+                stale_module.write_text("# stale generated build artifact\n", encoding="utf-8")
+
+            distributions = {
+                "sdist": _build_sdist(source_root, workspace / "sdist"),
+                "wheel": _build_wheel(source_root, workspace / "wheel"),
+            }
+
+            for artifact_name, names in distributions.items():
+                normalized_names = {_normalized_name(name) for name in names}
+                with self.subTest(artifact=artifact_name):
+                    self.assertNotIn(
+                        "utils/excel_writer.py",
+                        normalized_names,
+                        f"{artifact_name} contains a stale deleted module",
+                    )
+
+    def test_build_py_cleans_the_requested_custom_build_lib(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            source_root = _copy_source_tree(repo_root, workspace / "source")
+            custom_build_lib = (workspace / "custom-build-lib").resolve()
+            custom_stale_module = custom_build_lib / "utils/excel_writer.py"
+            default_sentinel = source_root / "build/lib/default-sentinel.txt"
+            for path in (custom_stale_module, default_sentinel):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("sentinel\n", encoding="utf-8")
+
+            result = _run_build_py(source_root, custom_build_lib)
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertFalse(custom_stale_module.exists())
+            self.assertTrue(
+                default_sentinel.exists(),
+                "build_py cleaned default build/lib instead of the requested custom output",
+            )
+
+    def test_build_py_rejects_redirected_staging_without_modifying_target(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            source_root = _copy_source_tree(repo_root, workspace / "source")
+            external_build_lib = workspace / "external-build-lib"
+            external_stale_module = external_build_lib / "utils/excel_writer.py"
+            external_sentinel = external_build_lib / "sentinel.txt"
+            for path in (external_stale_module, external_sentinel):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("sentinel\n", encoding="utf-8")
+
+            redirected_build_lib = source_root / "redirected-build-lib"
+            if os.name == "nt":
+                junction = subprocess.run(
+                    [
+                        "cmd",
+                        "/c",
+                        "mklink",
+                        "/J",
+                        str(redirected_build_lib),
+                        str(external_build_lib),
+                    ],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
                 )
+                if junction.returncode:
+                    self.skipTest(f"could not create Windows junction: {junction.stderr}")
+            else:
+                redirected_build_lib.symlink_to(external_build_lib, target_is_directory=True)
+
+            result = _run_build_py(source_root, redirected_build_lib)
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertTrue(external_stale_module.exists())
+            self.assertTrue(external_sentinel.exists())
 
     def test_inventory_detector_rejects_headered_and_normalized_code_files(self):
         samples = (

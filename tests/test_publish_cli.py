@@ -231,7 +231,11 @@ class SkillDocBlackboxTests(unittest.TestCase):
             "永久离线",
             "未来大版本",
             "单独购买",
-            "不需账号",
+            "opub 自身不设账号",
+            "无需提前注册爱发电",
+            "你自己的手机号或邮箱",
+            "爱发电会自动生成账号",
+            "请勿向 Agent 提供验证码或账号密码",
             "不迁移",
             "解绑",
             "换机重置",
@@ -248,6 +252,7 @@ class SkillDocBlackboxTests(unittest.TestCase):
             "不重复问参数",
         ]:
             self.assertIn(fragment, text)
+        self.assertNotIn("不需账号", text)
 
         for hidden in ["完整激活码", "设备 hash", "internal log"]:
             self.assertIn(hidden, text)
@@ -349,13 +354,18 @@ class PublicSingleAccountContractTests(unittest.TestCase):
                     "未来大版本",
                     "单独购买",
                     "支付方式由用户在爱发电页面选择",
-                    "不需账号",
+                    "opub 自身不设账号",
+                    "无需提前注册爱发电",
+                    "你自己的手机号或邮箱",
+                    "爱发电会自动生成账号",
+                    "请勿向 Agent 提供验证码或账号密码",
                     "新电脑重新购买",
                     "opub --license-status",
                     "opub --activate",
                     "opub --activate --code OPUB0-ABCDE-FGHJK-MNPQR-STVWX-YZ234-56789",
                 ]:
                     self.assertIn(fragment, text)
+                self.assertNotIn("不需账号", text)
                 for code, (meaning, suggestion) in expected.items():
                     rows = [line for line in text.splitlines() if f"`{code}`" in line]
                     self.assertTrue(rows, f"missing complete mapping for {code}")

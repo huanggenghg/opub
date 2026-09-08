@@ -203,6 +203,11 @@ class PublishCliHelpTextTests(unittest.TestCase):
 class SkillDocBlackboxTests(unittest.TestCase):
     SKILL_PATH = Path("skills/opub-cli/SKILL.md")
 
+    def test_agent_extracts_links_from_summary_without_excel(self):
+        text = self.SKILL_PATH.read_text(encoding="utf-8")
+        self.assertIn("从发布结果汇总中提取结果链接", text)
+        self.assertNotIn("写入 Excel 结果文件", text)
+
     def test_no_repo_references(self):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
         for forbidden in ["-e .", "conf.example.py", "pyproject.toml", "requirements.txt", "publish_all", "uv pip"]:

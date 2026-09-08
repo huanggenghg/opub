@@ -207,9 +207,10 @@ class SkillDocBlackboxTests(unittest.TestCase):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
         summary_section = text.split("### 结果汇总格式", 1)[1].split("## ", 1)[0]
         self.assertIn("抖音: ✅ 成功 https://www.douyin.com/video/123", summary_section)
-        self.assertIn("B站: ✅ 成功", summary_section)
+        self.assertIn("\nB站: ✅ 成功\n", summary_section)
         self.assertIn("从发布结果汇总中提取结果链接", summary_section)
-        self.assertIn("反馈给用户", summary_section)
+        self.assertIn("仅在汇总行存在 URL 时反馈链接", summary_section)
+        self.assertIn("不得视为发布失败", summary_section)
         self.assertIn("不创建或依赖 Excel 结果文件", summary_section)
         self.assertNotIn("写入Excel", summary_section)
         self.assertNotIn("写入 Excel", summary_section)

@@ -14,10 +14,6 @@ def license_path(base: Optional[Path] = None) -> Path:
     return (base or data_dir()) / "license.json"
 
 
-def activation_path(base: Optional[Path] = None) -> Path:
-    return (base or data_dir()) / "activation.json"
-
-
 def atomic_write_json(path: Path, value: Any) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

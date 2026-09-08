@@ -4,13 +4,17 @@ import stat
 
 import pytest
 
-from publish.licensing.storage import activation_path, atomic_write_json, data_dir, license_path, read_json
+from publish.licensing.storage import (
+    atomic_write_json,
+    data_dir,
+    license_path,
+    read_json,
+)
 
 
 def test_paths_prefer_sau_home(tmp_path):
     assert data_dir(tmp_path / "home", {"SAU_HOME": str(tmp_path / "sau")}) == tmp_path / "sau"
     assert license_path(tmp_path) == tmp_path / "license.json"
-    assert activation_path(tmp_path) == tmp_path / "activation.json"
 
 
 def test_atomic_json_write_is_mode_0600_and_readable(tmp_path):

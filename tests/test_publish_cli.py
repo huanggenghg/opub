@@ -205,8 +205,14 @@ class SkillDocBlackboxTests(unittest.TestCase):
 
     def test_agent_extracts_links_from_summary_without_excel(self):
         text = self.SKILL_PATH.read_text(encoding="utf-8")
-        self.assertIn("从发布结果汇总中提取结果链接", text)
-        self.assertNotIn("写入 Excel 结果文件", text)
+        summary_section = text.split("### 结果汇总格式", 1)[1].split("## ", 1)[0]
+        self.assertIn("抖音: ✅ 成功 https://www.douyin.com/video/123", summary_section)
+        self.assertIn("B站: ✅ 成功", summary_section)
+        self.assertIn("从发布结果汇总中提取结果链接", summary_section)
+        self.assertIn("反馈给用户", summary_section)
+        self.assertIn("不创建或依赖 Excel 结果文件", summary_section)
+        self.assertNotIn("写入Excel", summary_section)
+        self.assertNotIn("写入 Excel", summary_section)
 
     def test_no_repo_references(self):
         text = self.SKILL_PATH.read_text(encoding="utf-8")

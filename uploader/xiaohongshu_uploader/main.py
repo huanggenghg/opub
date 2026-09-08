@@ -27,7 +27,6 @@ from utils.login_qrcode import print_terminal_qrcode
 from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
 from utils.log import xiaohongshu_logger
-from utils.excel_writer import write_video_link
 
 XHS_LOGIN_URL = "https://xiaohongshu.com/login"
 XHS_UPLOAD_WAIT_TIMEOUT = 1800
@@ -788,16 +787,6 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                     xiaohongshu_logger.info(_msg("🔗", f"分享链接: {share_link}"))
                     result["result_url"] = share_link
 
-                    # 写入Excel
-                    try:
-                        excel_result = write_video_link(video_link=share_link)
-                        if excel_result["success"]:
-                            xiaohongshu_logger.success(_msg("📝", f"已写入Excel: {excel_result['filepath']}"))
-                        else:
-                            xiaohongshu_logger.warning(_msg("⚠️", f"写入Excel失败: {excel_result['message']}"))
-                    except Exception as excel_err:
-                        xiaohongshu_logger.warning(_msg("⚠️", f"写入Excel异常: {excel_err}"))
-
                 if note_id:
                     result["result_id"] = note_id
 
@@ -953,16 +942,6 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                 if share_link:
                     xiaohongshu_logger.info(_msg("🔗", f"分享链接: {share_link}"))
                     result["result_url"] = share_link
-
-                    # 写入Excel
-                    try:
-                        excel_result = write_video_link(video_link=share_link)
-                        if excel_result["success"]:
-                            xiaohongshu_logger.success(_msg("📝", f"已写入Excel: {excel_result['filepath']}"))
-                        else:
-                            xiaohongshu_logger.warning(_msg("⚠️", f"写入Excel失败: {excel_result['message']}"))
-                    except Exception as excel_err:
-                        xiaohongshu_logger.warning(_msg("⚠️", f"写入Excel异常: {excel_err}"))
 
                 if note_id:
                     result["result_id"] = note_id

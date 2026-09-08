@@ -159,7 +159,6 @@ async def publish_to_kuaishou(params: dict) -> dict:
 async def publish_to_tencent(params: dict) -> dict:
     """发布到微信视频号"""
     from uploader.tencent_uploader.main import TencentVideo
-    from utils.excel_writer import write_video_link
 
     account_file = resolve_path(params["account_file"])
     title = truncate_title(params["title"], "tencent")
@@ -180,15 +179,6 @@ async def publish_to_tencent(params: dict) -> dict:
             desc=params["desc"], publish_strategy=params["publish_strategy"],
         )
         result = await uploader.upload()
-        if result["success"] and result.get("result_url"):
-            try:
-                write_result = write_video_link(result["result_url"])
-                if write_result["success"]:
-                    print(f"  📝 视频链接已写入 Excel: {result['result_url']}")
-                else:
-                    print(f"  ⚠️ 写入 Excel 失败: {write_result['message']}")
-            except Exception as e:
-                print(f"  ⚠️ 写入 Excel 异常: {e}")
         return result
     except Exception as e:
         return {"success": False, "message": str(e)}
@@ -197,7 +187,6 @@ async def publish_to_tencent(params: dict) -> dict:
 async def publish_to_baijiahao(params: dict) -> dict:
     """发布到百家号"""
     from uploader.baijiahao_uploader.main import BaiJiaHaoVideo
-    from utils.excel_writer import write_video_link
 
     account_file = resolve_path(params["account_file"])
     title = truncate_title(params["title"], "baijiahao")
@@ -218,15 +207,6 @@ async def publish_to_baijiahao(params: dict) -> dict:
             publish_strategy=params["publish_strategy"],
         )
         result = await uploader.upload()
-        if result["success"] and result.get("result_url"):
-            try:
-                write_result = write_video_link(result["result_url"])
-                if write_result["success"]:
-                    print(f"  📝 视频链接已写入 Excel: {result['result_url']}")
-                else:
-                    print(f"  ⚠️ 写入 Excel 失败: {write_result['message']}")
-            except Exception as e:
-                print(f"  ⚠️ 写入 Excel 异常: {e}")
         return result
     except Exception as e:
         return {"success": False, "message": str(e)}
@@ -235,7 +215,6 @@ async def publish_to_baijiahao(params: dict) -> dict:
 async def publish_to_bilibili(params: dict) -> dict:
     """发布到 B站 (via biliup CLI)"""
     from uploader.bilibili_uploader.main import BilibiliUploader
-    from utils.excel_writer import write_video_link
 
     account_file = resolve_path(params["account_file"])
     title = truncate_title(params["title"], "bilibili")
@@ -256,15 +235,6 @@ async def publish_to_bilibili(params: dict) -> dict:
             publish_strategy=params["publish_strategy"],
         )
         result = await uploader.upload()
-        if result["success"] and result.get("result_url"):
-            try:
-                write_result = write_video_link(result["result_url"])
-                if write_result["success"]:
-                    print(f"  📝 视频链接已写入 Excel: {result['result_url']}")
-                else:
-                    print(f"  ⚠️ 写入 Excel 失败: {write_result['message']}")
-            except Exception as e:
-                print(f"  ⚠️ 写入 Excel 异常: {e}")
         return result
     except Exception as e:
         return {"success": False, "message": str(e)}
@@ -273,7 +243,6 @@ async def publish_to_bilibili(params: dict) -> dict:
 async def publish_to_weibo(params: dict) -> dict:
     """发布到微博"""
     from uploader.weibo_uploader.main import WeiboVideo, WeiboNote
-    from utils.excel_writer import write_video_link
 
     account_file = resolve_path(params["account_file"])
     title = truncate_title(params["title"], "weibo")
@@ -301,15 +270,6 @@ async def publish_to_weibo(params: dict) -> dict:
                 title=title, publish_strategy=params["publish_strategy"],
             )
         result = await uploader.upload()
-        if result["success"] and result.get("result_url"):
-            try:
-                write_result = write_video_link(result["result_url"])
-                if write_result["success"]:
-                    print(f"  📝 视频链接已写入 Excel: {result['result_url']}")
-                else:
-                    print(f"  ⚠️ 写入 Excel 失败: {write_result['message']}")
-            except Exception as e:
-                print(f"  ⚠️ 写入 Excel 异常: {e}")
         return result
     except Exception as e:
         return {"success": False, "message": str(e)}

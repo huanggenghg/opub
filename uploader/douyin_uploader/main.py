@@ -25,7 +25,6 @@ from uploader.base_video import (
 )
 from utils.base_social_media import set_init_script
 from utils.log import douyin_logger
-from utils.excel_writer import write_video_link
 
 DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 DOUYIN_PAGE_WAIT_TIMEOUT = 120
@@ -677,15 +676,10 @@ class DouYinVideo(DouYinBaseUploader):
                 )
                 douyin_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
 
-                # 发布成功后获取视频链接并写入Excel
+                # 发布成功后获取视频链接
                 video_link = await self._get_video_link(page)
                 if video_link:
                     douyin_logger.info(_msg("🔗", f"视频链接: {video_link}"))
-                    excel_result = write_video_link(video_link=video_link)
-                    if excel_result["success"]:
-                        douyin_logger.success(_msg("📝", f"已写入Excel: {excel_result['filepath']}"))
-                    else:
-                        douyin_logger.warning(_msg("⚠️", f"写入Excel失败: {excel_result['message']}"))
                 else:
                     douyin_logger.warning(_msg("⚠️", "未能获取视频链接"))
 

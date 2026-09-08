@@ -76,5 +76,31 @@ class PrintResultsErrorCodeTests(unittest.TestCase):
         self.assertIn("[AUTH-001]", out.getvalue())
 
 
+class PrintResultsSuccessUrlTests(unittest.TestCase):
+    def test_success_line_contains_result_url(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            print_results(
+                {
+                    "douyin": {
+                        "success": True,
+                        "message": "发布成功",
+                        "result_url": "https://www.douyin.com/video/123",
+                    }
+                }
+            )
+        self.assertIn("抖音: ✅ 成功 https://www.douyin.com/video/123", out.getvalue())
+
+    def test_success_line_without_result_url_has_no_placeholder(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            print_results(
+                {"douyin": {"success": True, "message": "发布成功"}}
+            )
+        output = out.getvalue()
+        self.assertIn("抖音: ✅ 成功", output)
+        self.assertNotIn("None", output)
+
+
 if __name__ == "__main__":
     unittest.main()

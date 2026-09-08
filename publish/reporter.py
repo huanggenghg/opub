@@ -24,6 +24,8 @@ def print_results(results: dict):
         platform_name = PLATFORM_NAMES.get(platform, platform)
         if result["success"]:
             status = "✅ 成功"
+            if result.get("result_url"):
+                status += f" {result['result_url']}"
         else:
             error_code = result.get("error_code") or f"PUB-{platform.split('_')[0]}"
             status = f"❌ 失败 [{error_code}]: {result['message']}"

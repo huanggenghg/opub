@@ -19,7 +19,7 @@ def activate(
     api: Any,
     data_path: Path,
     verify: Callable[..., Any],
-    client_version: str = "0.8.0.dev0",
+    client_version: str = "0.8.1.dev0",
 ) -> int:
     try:
         normalized_code = normalize_activation_code(code)

@@ -256,9 +256,9 @@ class PackageBuildTest(unittest.TestCase):
         skill_text = (repo_root / "skills/opub-cli/SKILL.md").read_text(encoding="utf-8")
         lock_text = (repo_root / "uv.lock").read_text(encoding="utf-8")
 
-        self.assertIn('version = "0.8.0"', pyproject_text)
-        self.assertIn('version: "0.8.0"', skill_text)
-        self.assertIn('name = "opub"\nversion = "0.8.0"', lock_text)
+        self.assertIn('version = "0.8.1"', pyproject_text)
+        self.assertIn('version: "0.8.1"', skill_text)
+        self.assertIn('name = "opub"\nversion = "0.8.1"', lock_text)
         self.assertNotIn('{ name = "qrcode"', lock_text)
 
     def test_manifest_explicitly_excludes_activation_code_inventories(self):

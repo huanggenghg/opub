@@ -88,7 +88,7 @@ def run_activation(code: str) -> int:
         try:
             client_version = version("opub")
         except PackageNotFoundError:
-            client_version = "0.8.0.dev0"
+            client_version = "0.8.1.dev0"
         verify = lambda document, current_device: verify_license(
             document, current_device, TRUSTED_PUBLIC_KEYS
         )

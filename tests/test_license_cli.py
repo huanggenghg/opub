@@ -477,7 +477,7 @@ def test_run_activation_uses_major_zero_fallback_version_when_uninstalled():
          patch("publish.licensing.activate", return_value=0) as activate:
         assert run_activation("OPUB0-01234-56789-ABCDE-FGHJK-MNPQR-STVWX") == 0
 
-    assert activate.call_args.kwargs == {"client_version": "0.8.0.dev0"}
+    assert activate.call_args.kwargs == {"client_version": "0.8.1.dev0"}
 
 
 @pytest.mark.parametrize("service_code", ["LIC-013", "LIC-014", "LIC-015"])

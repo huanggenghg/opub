@@ -217,7 +217,7 @@ async def weibo_cookie_gen(
     qrcode_callback=None,
     poll_interval: int = 3,
     max_checks: int = 100,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    headless: bool = False,
 ):
     """生成微博登录 cookie - 委托 WeiboBaseUploader.cookie_gen"""
     account_file = _resolve_account_file(account_file)
@@ -229,7 +229,7 @@ async def weibo_setup(
     handle=False,
     return_detail=False,
     qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    headless: bool = False,
 ):
     """微博登录设置 - 委托 WeiboBaseUploader.setup"""
     account_file = _resolve_account_file(account_file)
@@ -272,7 +272,7 @@ class WeiboBaseUploader(BaseBrowserUploader):
             return False
 
         async with async_playwright() as playwright:
-            browser = await cls._launch_browser(playwright, headless=LOCAL_CHROME_HEADLESS)
+            browser = await cls._launch_browser(playwright, headless=True)
             try:
                 context = await cls._init_context(browser, account_file)
                 page = await context.new_page()

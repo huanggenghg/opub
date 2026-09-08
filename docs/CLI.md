@@ -40,6 +40,16 @@ opub --platforms xiaohongshu --note --images img1.jpg,img2.jpg --title "标题"
 opub --platforms weibo --video videos/ --title "标题" --schedule "2027-01-01 12:00" --start-from 2 --force
 ```
 
+## 无头模式
+
+发布过程默认无头（不弹出浏览器窗口），包括发布前的登录状态检查；扫码登录始终显示浏览器窗口。排查平台风控或页面元素定位问题时，可用 `--no-headless` 临时回到有头模式：
+
+```bash
+opub --platforms douyin --video videos/demo.mp4 --title "标题" --no-headless
+```
+
+`config.json` 中的 `chrome_headless` 键已废弃：发布无头与否由默认行为和 `--no-headless` 决定，登录始终有头，该键不再有任何效果。
+
 素材路径、标题、描述、标签和目标平台应由用户明确提供；一个规范账号文件对应一个平台账号。发布成功后命令会输出各平台结果及链接。
 
 ## 发布前检查与任务恢复

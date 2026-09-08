@@ -3,7 +3,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from publish.config import _discover_account_files
+from publish.config import PublishOverrides, _discover_account_files, default_params_from_overrides
+
+
+class HeadlessParamTests(unittest.TestCase):
+    def test_default_overrides_publish_headless(self):
+        params = default_params_from_overrides(PublishOverrides())
+        self.assertIs(params["headless"], True)
+
+    def test_no_headless_override_disables_headless(self):
+        params = default_params_from_overrides(PublishOverrides(headless=False))
+        self.assertIs(params["headless"], False)
 
 
 class AccountDiscoveryTests(unittest.TestCase):

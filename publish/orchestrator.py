@@ -385,6 +385,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force", action="store_true", help="强制重新生成视频配置")
     parser.add_argument("--output", choices=("text", "json"), default="text", help="结果输出格式（默认 text；json 模式过程日志写入 stderr）")
     parser.add_argument("--dry-run", action="store_true", help="只检查输入和环境，输出计划，不登录、不发布或生成素材")
+    parser.add_argument("--no-headless", action="store_true", help="发布过程显示浏览器窗口（默认无头；扫码登录始终显示窗口）")
     return parser
 
 
@@ -403,6 +404,7 @@ def _build_overrides(args: argparse.Namespace) -> PublishOverrides:
         convert_to_video=args.convert_to_video,
         video_duration=args.video_duration,
         dry_run=args.dry_run,
+        headless=not args.no_headless,
     )
 
 

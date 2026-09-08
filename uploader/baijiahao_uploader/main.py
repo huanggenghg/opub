@@ -136,7 +136,7 @@ async def baijiahao_setup(
     handle=False,
     return_detail=False,
     qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    headless: bool = False,
 ):
     """百家号登录设置 - 委托 BaiJiaHaoVideo.setup"""
     return await BaiJiaHaoVideo.setup(account_file, handle, return_detail, qrcode_callback, headless)
@@ -209,7 +209,7 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
         if not os.path.exists(account_file):
             return False
         async with async_playwright() as playwright:
-            browser = await cls._launch_browser(playwright, headless=LOCAL_CHROME_HEADLESS)
+            browser = await cls._launch_browser(playwright, headless=True)
             try:
                 context = await cls._init_context(browser, account_file)
                 page = await context.new_page()

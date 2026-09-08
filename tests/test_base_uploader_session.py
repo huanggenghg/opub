@@ -159,10 +159,9 @@ class BrowserSessionTests(unittest.TestCase):
             asyncio.run(run())
         self.assertTrue(fake_context.closed)
 
-    def test_cookie_auth_uses_local_chrome_headless(self):
-        """Base class cookie_auth passes LOCAL_CHROME_HEADLESS to _launch_browser,
-        not hardcoded True."""
-        from conf import LOCAL_CHROME_HEADLESS
+    def test_cookie_auth_launches_headless_regardless_of_config(self):
+        """cookie_auth 是发布路径的登录检查,必须固定无头(不弹窗),
+        不再跟随 config.json 的 chrome_headless(该键已废弃)。"""
         uploader = FakeUploader.__new__(FakeUploader)
         captured_headless = []
 
@@ -176,8 +175,9 @@ class BrowserSessionTests(unittest.TestCase):
             mock_ap.return_value = FakePlaywright(FakeContext())
             with patch.object(FakeUploader, "_launch_browser", side_effect=fake_launch_browser):
                 self.assertTrue(asyncio.run(FakeUploader.cookie_auth("/fake.json")))
-        # Authentication retains the configured headless setting.
-        self.assertEqual(captured_headless, [LOCAL_CHROME_HEADLESS])
+        # The fixture completes a successful auth; the launch itself must have
+        # been headless (publish-path check, no popup).
+        self.assertEqual(captured_headless, [True])
 
     def test_storage_state_saved_before_code_after_async_with(self):
         """storage_state (saved in finally) must complete before code after

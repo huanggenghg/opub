@@ -307,7 +307,7 @@ async def tencent_cookie_gen(
     qrcode_callback=None,
     poll_interval: int = 3,
     max_checks: int = 100,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    headless: bool = False,
 ):
     account_file = _resolve_account_file(account_file)
     Path(account_file).parent.mkdir(parents=True, exist_ok=True)
@@ -375,7 +375,7 @@ async def tencent_setup(
     handle=False,
     return_detail=False,
     qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    headless: bool = False,
 ):
     """微信视频号登录设置。
 
@@ -400,7 +400,7 @@ async def tencent_setup(
     return result if return_detail else result["success"]
 
 
-async def get_tencent_cookie(account_file, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):
+async def get_tencent_cookie(account_file, qrcode_callback=None, headless: bool = False):
     return await tencent_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
 
 
@@ -409,7 +409,7 @@ async def weixin_setup(
     handle=False,
     return_detail=False,
     qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    headless: bool = False,
 ):
     return await tencent_setup(
         account_file,

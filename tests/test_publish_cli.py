@@ -43,6 +43,7 @@ class PublishCliParserTests(unittest.TestCase):
         self.assertIsNone(args.images)
         self.assertFalse(args.note)
         self.assertFalse(args.convert_to_video)
+        self.assertFalse(args.no_headless)
         self.assertEqual(args.video_duration, 5)
 
     def test_parser_accepts_overrides(self):
@@ -68,6 +69,27 @@ class PublishCliParserTests(unittest.TestCase):
         self.assertEqual(args.schedule.strftime("%Y-%m-%d %H:%M"), "2026-05-30 21:30")
         self.assertEqual(args.start_from, 3)
         self.assertTrue(args.force)
+
+    def test_parser_accepts_no_headless(self):
+        parser = publish_all.build_parser()
+        args = parser.parse_args(["--no-headless"])
+        self.assertTrue(args.no_headless)
+
+    def test_main_defaults_to_headless_publish(self):
+        with patch("publish.orchestrator.require_valid_license", return_value=(True, None)), \
+             patch("publish.orchestrator.run_publish", new=AsyncMock(return_value=0)) as run_publish:
+            publish_all.main(["--platforms", "weibo", "--title", "标题"])
+
+        overrides = run_publish.await_args.args[0]
+        self.assertIs(overrides.headless, True)
+
+    def test_main_maps_no_headless_flag_to_headed_publish(self):
+        with patch("publish.orchestrator.require_valid_license", return_value=(True, None)), \
+             patch("publish.orchestrator.run_publish", new=AsyncMock(return_value=0)) as run_publish:
+            publish_all.main(["--platforms", "weibo", "--title", "标题", "--no-headless"])
+
+        overrides = run_publish.await_args.args[0]
+        self.assertIs(overrides.headless, False)
 
     def test_parser_rejects_unknown_subcommand(self):
         parser = publish_all.build_parser()

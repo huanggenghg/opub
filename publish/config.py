@@ -23,6 +23,7 @@ class PublishOverrides:
     convert_to_video: bool = False
     video_duration: float = 5.0
     dry_run: bool = False
+    headless: bool = True
 
 
 def _split_csv(value: Optional[str]) -> list:
@@ -104,6 +105,7 @@ def default_params_from_overrides(overrides: Optional[PublishOverrides] = None) 
         "platforms": _discover_account_files(),
         "convert_to_video": overrides.convert_to_video,
         "video_duration": overrides.video_duration,
+        "headless": overrides.headless,
         "start_from": overrides.start_from if overrides.start_from is not None else 1,
     }
     if overrides.force:

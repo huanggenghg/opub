@@ -162,7 +162,7 @@ async def cookie_auth(account_file):
     return await KSBaseUploader.cookie_auth(account_file)
 
 
-async def ks_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):
+async def ks_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = False):
     """快手登录设置 - 校验 cookie，失效时触发扫码登录"""
     account_file = get_absolute_path(account_file, "ks_uploader")
     if not os.path.exists(account_file) or not await cookie_auth(account_file):
@@ -180,7 +180,7 @@ async def ks_setup(account_file, handle=False, return_detail=False, qrcode_callb
 async def get_ks_cookie(
     account_file,
     qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    headless: bool = False,
     poll_interval: int = 3,
     max_checks: int = 100,
 ):

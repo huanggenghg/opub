@@ -61,6 +61,9 @@ opub --platforms tencent --note --images img1.jpg --convert-to-video --video-dur
 # 定时 / 从目录第 2 个视频开始 / 强制重新生成
 opub --platforms weibo --video videos/ --title "标题" --schedule "2027-01-01 12:00" --start-from 2 --force
 
+# 有头模式排查(发布默认无头不弹窗;扫码登录始终显示窗口)
+opub --platforms douyin --video videos/demo.mp4 --title "标题" --no-headless
+
 opub --version                        # 查看已安装版本
 opub --help                           # 全部参数说明
 ```

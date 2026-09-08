@@ -139,7 +139,7 @@ async def _is_douyin_auth_page_valid(page: Page) -> bool:
     return any([await _is_douyin_locator_visible(marker) for marker in publish_markers])
 
 
-async def douyin_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):
+async def douyin_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = False):
     if not os.path.exists(account_file) or not await cookie_auth(account_file):
         if not handle:
             result = _build_login_result(False, "cookie_invalid", "cookie文件不存在或已失效", account_file)
@@ -247,7 +247,7 @@ async def douyin_cookie_gen(
     qrcode_callback=None,
     poll_interval: int = 3,
     max_checks: int = 100,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    headless: bool = False,
 ):
     qrcode_utils = _get_qrcode_utils()
     async with async_playwright() as playwright:
@@ -336,7 +336,7 @@ class DouYinBaseUploader(BaseBrowserUploader):
         if not os.path.exists(account_file):
             return False
         async with async_playwright() as playwright:
-            browser = await cls._launch_browser(playwright, headless=LOCAL_CHROME_HEADLESS)
+            browser = await cls._launch_browser(playwright, headless=True)
             try:
                 context = await cls._init_context(browser, account_file)
                 page = await context.new_page()

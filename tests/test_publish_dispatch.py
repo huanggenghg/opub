@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from publish.dispatch import (
     _PLATFORM_LOGIN,
@@ -127,6 +127,84 @@ class PublishDispatchRegistryTests(unittest.TestCase):
             )
         self.assertFalse(result["success"])
         self.assertIn("未知平台", result["message"])
+
+
+class HeadlessPassThroughTests(unittest.TestCase):
+    """publish_to_* 构造上传器时必须显式传 headless(来自 params["headless"])。"""
+
+    PLATFORM_CASES = [
+        ("douyin", "publish_to_douyin", "uploader.douyin_uploader.main", "DouYinVideo"),
+        ("xiaohongshu", "publish_to_xiaohongshu", "uploader.xiaohongshu_uploader.main", "XiaoHongShuVideo"),
+        ("kuaishou", "publish_to_kuaishou", "uploader.ks_uploader.main", "KSVideo"),
+        ("tencent", "publish_to_tencent", "uploader.tencent_uploader.main", "TencentVideo"),
+        ("baijiahao", "publish_to_baijiahao", "uploader.baijiahao_uploader.main", "BaiJiaHaoVideo"),
+        ("weibo", "publish_to_weibo", "uploader.weibo_uploader.main", "WeiboVideo"),
+        ("tk", "publish_to_tk", "uploader.tk_uploader.main", "TiktokVideo"),
+    ]
+
+    def _run(self, dispatch_name, module_path, class_name, extra_params):
+        import asyncio
+
+        handler = getattr(__import__("publish.dispatch", fromlist=[dispatch_name]), dispatch_name)
+        with patch(f"{module_path}.{class_name}") as mock_cls:
+            mock_cls.validate_base_args = MagicMock(return_value=None)
+            mock_cls.return_value.upload = AsyncMock(return_value={"success": True, "message": "ok"})
+            params = {
+                "content_type": "video",
+                "title": "标题",
+                "desc": "",
+                "tags": [],
+                "video_file": "videos/demo.mp4",
+                "account_file": "cookies/x_uploader/account.json",
+                "publish_time": 0,
+                "publish_strategy": "immediate",
+                **extra_params,
+            }
+            asyncio.run(handler(params))
+        return mock_cls
+
+    def test_publish_passes_headless_false_to_uploader(self):
+        for platform, dispatch_name, module_path, class_name in self.PLATFORM_CASES:
+            with self.subTest(platform=platform):
+                mock_cls = self._run(dispatch_name, module_path, class_name, {"headless": False})
+                mock_cls.assert_called_once()
+                self.assertIs(mock_cls.call_args.kwargs.get("headless"), False)
+
+    def test_publish_passes_headless_true_to_uploader(self):
+        for platform, dispatch_name, module_path, class_name in self.PLATFORM_CASES:
+            with self.subTest(platform=platform):
+                mock_cls = self._run(dispatch_name, module_path, class_name, {"headless": True})
+                mock_cls.assert_called_once()
+                self.assertIs(mock_cls.call_args.kwargs.get("headless"), True)
+
+    def test_publish_defaults_to_headless_when_param_missing(self):
+        mock_cls = self._run("publish_to_douyin", "uploader.douyin_uploader.main", "DouYinVideo", {})
+        mock_cls.assert_called_once()
+        self.assertIs(mock_cls.call_args.kwargs.get("headless"), True)
+
+    def test_publish_passes_headless_to_note_uploader(self):
+        import asyncio
+
+        from publish.dispatch import publish_to_weibo
+
+        with patch("uploader.weibo_uploader.main.WeiboNote") as mock_cls, \
+             patch("uploader.base_video.os.path.exists", return_value=True):
+            mock_cls.validate_base_args = MagicMock(return_value=None)
+            mock_cls.return_value.upload = AsyncMock(return_value={"success": True, "message": "ok"})
+            params = {
+                "content_type": "note",
+                "title": "标题",
+                "desc": "描述",
+                "tags": [],
+                "images": ["images/a.jpg"],
+                "account_file": "cookies/weibo_uploader/account.json",
+                "publish_time": 0,
+                "publish_strategy": "immediate",
+                "headless": False,
+            }
+            asyncio.run(publish_to_weibo(params))
+        mock_cls.assert_called_once()
+        self.assertIs(mock_cls.call_args.kwargs.get("headless"), False)
 
 
 if __name__ == "__main__":

@@ -73,12 +73,14 @@ async def publish_to_douyin(params: dict) -> dict:
                 title=title, file_path=params["video_file"], tags=params["tags"],
                 publish_date=params["publish_time"] or 0, account_file=account_file,
                 desc=params["desc"], publish_strategy=params["publish_strategy"],
+                headless=params.get("headless", True),
             )
         else:
             uploader = DouYinNote(
                 image_paths=params["images"], note=params["desc"], tags=params["tags"],
                 publish_date=params["publish_time"] or 0, account_file=account_file,
                 title=title, publish_strategy=params["publish_strategy"],
+                headless=params.get("headless", True),
             )
         return await uploader.upload()
     except (LoginCheckError, LoginTimeoutError):
@@ -109,12 +111,14 @@ async def publish_to_xiaohongshu(params: dict) -> dict:
                 title=title, file_path=params["video_file"], tags=params["tags"],
                 publish_date=params["publish_time"] or 0, account_file=account_file,
                 desc=params["desc"], publish_strategy=params["publish_strategy"],
+                headless=params.get("headless", True),
             )
         else:
             uploader = XiaoHongShuNote(
                 image_paths=params["images"], note=params["desc"], tags=params["tags"],
                 publish_date=params["publish_time"] or 0, account_file=account_file,
                 title=title, desc=params["desc"], publish_strategy=params["publish_strategy"],
+                headless=params.get("headless", True),
             )
         return await uploader.upload()
     except (LoginCheckError, LoginTimeoutError):
@@ -145,12 +149,14 @@ async def publish_to_kuaishou(params: dict) -> dict:
                 title=title, file_path=params["video_file"], tags=params["tags"],
                 publish_date=params["publish_time"] or 0, account_file=account_file,
                 desc=params["desc"], publish_strategy=params["publish_strategy"],
+                headless=params.get("headless", True),
             )
         else:
             uploader = KSNote(
                 image_paths=params["images"], note=params["desc"], tags=params["tags"],
                 publish_date=params["publish_time"] or 0, account_file=account_file,
                 title=title, publish_strategy=params["publish_strategy"],
+                headless=params.get("headless", True),
             )
         return await uploader.upload()
     except (LoginCheckError, LoginTimeoutError):
@@ -180,6 +186,7 @@ async def publish_to_tencent(params: dict) -> dict:
             title=title, file_path=params["video_file"], tags=params["tags"],
             publish_date=params["publish_time"] or 0, account_file=account_file,
             desc=params["desc"], publish_strategy=params["publish_strategy"],
+            headless=params.get("headless", True),
         )
         result = await uploader.upload()
         return result
@@ -210,6 +217,7 @@ async def publish_to_baijiahao(params: dict) -> dict:
             title=title, file_path=params["video_file"], tags=params["tags"],
             publish_date=params["publish_time"] or 0, account_file=account_file,
             publish_strategy=params["publish_strategy"],
+            headless=params.get("headless", True),
         )
         result = await uploader.upload()
         return result
@@ -271,12 +279,14 @@ async def publish_to_weibo(params: dict) -> dict:
                 title=title, file_path=params["video_file"], tags=params["tags"],
                 publish_date=params["publish_time"] or 0, account_file=account_file,
                 desc=params["desc"], publish_strategy=params["publish_strategy"],
+                headless=params.get("headless", True),
             )
         else:
             uploader = WeiboNote(
                 image_paths=params["images"], note=params["desc"], tags=params["tags"],
                 publish_date=params["publish_time"] or 0, account_file=account_file,
                 title=title, publish_strategy=params["publish_strategy"],
+                headless=params.get("headless", True),
             )
         result = await uploader.upload()
         return result
@@ -307,6 +317,7 @@ async def publish_to_tk(params: dict) -> dict:
             title=title, file_path=params["video_file"], tags=params["tags"],
             publish_date=params["publish_time"] or 0, account_file=account_file,
             desc=params.get("desc", ""), publish_strategy=params["publish_strategy"],
+            headless=params.get("headless", True),
         )
         return await uploader.upload()
     except (LoginCheckError, LoginTimeoutError):

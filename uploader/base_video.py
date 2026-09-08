@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 from patchright.async_api import Page, Playwright, async_playwright
 
-from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import LOCAL_CHROME_PATH
 from publish.auth import (
     LoginCheckError, LoginTimeoutError, classify_login_exception, login_check,
     warn_qr_login_pending,
@@ -236,7 +236,8 @@ class BaseBrowserUploader(BasePlatformUploader):
         if not os.path.exists(account_file):
             return False
         async with async_playwright() as playwright:
-            browser = await cls._launch_browser(playwright, headless=LOCAL_CHROME_HEADLESS)
+            # 发布路径的登录检查不弹窗;扫码登录(cookie_gen)才需要可见窗口
+            browser = await cls._launch_browser(playwright, headless=True)
             try:
                 context = await cls._init_context(browser, account_file)
                 page = await context.new_page()
@@ -263,7 +264,7 @@ class BaseBrowserUploader(BasePlatformUploader):
         handle: bool = False,
         return_detail: bool = False,
         qrcode_callback=None,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool = False,
     ):
         """Resolve path -> cookie_auth -> if invalid and handle: cookie_gen."""
         if not os.path.exists(account_file) or not await cls.cookie_auth(account_file):
@@ -289,7 +290,7 @@ class BaseBrowserUploader(BasePlatformUploader):
         cls,
         account_file: str,
         qrcode_callback=None,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool = False,
         return_detail: bool = False,
     ):
         """QR login: goto login URL -> extract QR -> poll until complete -> save state.
@@ -462,7 +463,7 @@ class BaseCliUploader(BasePlatformUploader):
         raise NotImplementedError
 
     @classmethod
-    async def setup(cls, account_file, handle=False, return_detail=False, qrcode_callback=None, headless=LOCAL_CHROME_HEADLESS):
+    async def setup(cls, account_file, handle=False, return_detail=False, qrcode_callback=None, headless=False):
         raise NotImplementedError
 
     async def upload(self) -> PlatformResultExtras:

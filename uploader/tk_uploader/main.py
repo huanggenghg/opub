@@ -62,7 +62,7 @@ class TiktokVideo(BaseBrowserUploader):
         cls,
         account_file: str,
         qrcode_callback=None,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool = False,
         return_detail: bool = False,
     ):
         """tk 用 page.pause 手动登录,qrcode_callback 被忽略。"""
@@ -322,5 +322,5 @@ async def cookie_auth(account_file):
     return await TiktokVideo.cookie_auth(account_file)
 
 
-async def tiktok_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless=LOCAL_CHROME_HEADLESS):
+async def tiktok_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless=False):
     return await TiktokVideo.setup(account_file, handle, return_detail, qrcode_callback, headless)

@@ -4,6 +4,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from publish.auth import LoginCheckError
 from uploader.base_video import BaseBrowserUploader, _build_login_result
 
 
@@ -198,6 +199,60 @@ class CookieGenTests(unittest.TestCase):
         url, kwargs = goto_calls[0]
         self.assertEqual(url, "https://example.com/login")
         self.assertEqual(kwargs.get("wait_until"), "domcontentloaded")
+
+
+class CookieAuthHeadlessTests(unittest.TestCase):
+    """cookie_auth 是发布路径的登录检查,必须默认无头(不弹窗)。"""
+
+    def _capture_launch_headless(self, uploader_cls, patch_extra=None):
+        """Run uploader_cls.cookie_auth with _launch_browser/_init_context mocked,
+        return the headless kwarg _launch_browser received. Page-flow validation
+        beyond launch may fail on these fakes; the headless kwarg is captured
+        at launch time so LoginCheckError is tolerated."""
+        fake_context = FakeContext("https://example.com/upload", "https://example.com/upload")
+        launch_mock = AsyncMock(return_value=FakeBrowser(fake_context))
+        with patch.object(uploader_cls, "_launch_browser", launch_mock), \
+             patch.object(uploader_cls, "_init_context", AsyncMock(return_value=fake_context)), \
+             patch("uploader.base_video.os.path.exists", return_value=True):
+            try:
+                if patch_extra:
+                    with patch_extra():
+                        asyncio.run(uploader_cls.cookie_auth("/fake/exists.json"))
+                else:
+                    asyncio.run(uploader_cls.cookie_auth("/fake/exists.json"))
+            except LoginCheckError:
+                pass
+        return launch_mock.await_args.kwargs.get("headless")
+
+    def test_base_cookie_auth_launches_headless(self):
+        self.assertIs(self._capture_launch_headless(FakeUploader), True)
+
+    def test_douyin_cookie_auth_launches_headless(self):
+        from uploader.douyin_uploader.main import DouYinBaseUploader
+
+        headless = self._capture_launch_headless(
+            DouYinBaseUploader,
+            lambda: patch("uploader.douyin_uploader.main._wait_for_douyin_publish_marker", AsyncMock()),
+        )
+        self.assertIs(headless, True)
+
+    def test_baijiahao_cookie_auth_launches_headless(self):
+        from uploader.baijiahao_uploader.main import BaiJiaHaoVideo
+
+        headless = self._capture_launch_headless(
+            BaiJiaHaoVideo,
+            lambda: patch("uploader.baijiahao_uploader.main._is_baijiahao_auth_page_valid", AsyncMock(return_value=True)),
+        )
+        self.assertIs(headless, True)
+
+    def test_weibo_cookie_auth_launches_headless(self):
+        from uploader.weibo_uploader.main import WeiboBaseUploader
+
+        headless = self._capture_launch_headless(
+            WeiboBaseUploader,
+            lambda: patch("uploader.weibo_uploader.main._wait_for_weibo_upload_button", AsyncMock()),
+        )
+        self.assertIs(headless, True)
 
 
 if __name__ == "__main__":

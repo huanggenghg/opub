@@ -1,9 +1,9 @@
-import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from uploader.bilibili_uploader.runtime import (
+    _CREATE_NEW_CONSOLE,
     build_biliup_runtime_path,
     ensure_biliup_binary,
     run_biliup_command,
@@ -72,7 +72,7 @@ class BiliupRuntimeTests(unittest.TestCase):
              patch("sys.stdout.isatty", return_value=False):
             run_biliup_command(["-u", "account.json", "login"], interactive=True)
         _, kwargs = run.call_args
-        self.assertEqual(kwargs["creationflags"], subprocess.CREATE_NEW_CONSOLE)
+        self.assertEqual(kwargs["creationflags"], _CREATE_NEW_CONSOLE)
         self.assertNotIn("capture_output", kwargs)
 
     @patch("uploader.bilibili_uploader.runtime.subprocess.run")

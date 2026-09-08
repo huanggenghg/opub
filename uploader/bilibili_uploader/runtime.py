@@ -14,6 +14,7 @@ import requests
 
 
 GITHUB_RELEASE_API = "https://api.github.com/repos/biliup/biliup/releases/latest"
+_CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
 
 
 def get_biliup_runtime_root() -> Path:
@@ -193,7 +194,7 @@ def run_biliup_command(arguments: list[str], interactive: bool = False) -> subpr
         return subprocess.run(
             command,
             check=False,
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            creationflags=_CREATE_NEW_CONSOLE,
         )
     if interactive:
         return subprocess.run(command, check=False)

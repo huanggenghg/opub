@@ -159,6 +159,20 @@ def test_noninteractive_activate_opens_purchase_page_and_exits_13():
     activate.assert_not_called()
 
 
+def test_activate_explains_self_service_registration_and_private_credentials():
+    stdout = io.StringIO()
+    with patch("publish.orchestrator.sys.stdin.isatty", return_value=False), \
+         patch("publish.orchestrator.webbrowser.open", return_value=True), \
+         contextlib.redirect_stdout(stdout):
+        assert publish_all.main(["--activate"]) == EXIT_LICENSE_ERROR
+
+    output = stdout.getvalue()
+    assert "无需提前注册爱发电" in output
+    assert "你自己的手机号或邮箱" in output
+    assert "爱发电会自动生成账号" in output
+    assert "请勿向 Agent 提供验证码或账号密码" in output
+
+
 @pytest.mark.parametrize(
     "browser_result",
     [False, OSError(f"browser failed with {VALID_CODE}")],
@@ -179,6 +193,10 @@ def test_activation_displays_public_purchase_url_when_browser_cannot_open(
     assert code == EXIT_LICENSE_ERROR
     assert stdout.getvalue() == (
         f"[opub] 无法自动打开购买页，请手动打开: {LICENSE_PURCHASE_URL}\n"
+        "[opub] 无需提前注册爱发电：请使用你自己的手机号或邮箱完成验证，"
+        "首次购买时爱发电会自动生成账号。\n"
+        "[opub] 付款后复制爱发电发放的激活码；"
+        "请勿向 Agent 提供验证码或账号密码。\n"
     )
     assert "LIC-001" in stderr.getvalue()
     assert VALID_CODE not in stdout.getvalue() + stderr.getvalue()
@@ -253,6 +271,10 @@ def test_activation_handles_terminal_detection_eof_without_traceback_or_leak():
     assert code == EXIT_LICENSE_ERROR
     assert stdout.getvalue() == (
         f"[opub] 无法自动打开购买页，请手动打开: {LICENSE_PURCHASE_URL}\n"
+        "[opub] 无需提前注册爱发电：请使用你自己的手机号或邮箱完成验证，"
+        "首次购买时爱发电会自动生成账号。\n"
+        "[opub] 付款后复制爱发电发放的激活码；"
+        "请勿向 Agent 提供验证码或账号密码。\n"
     )
     assert stderr.getvalue() == (
         "[opub] LIC-001: 尚未提供激活码。建议: "

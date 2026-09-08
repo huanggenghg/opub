@@ -379,6 +379,17 @@ def _contains_explicit_option(argv: Sequence[str], option_names: frozenset[str])
     return any(argument.split("=", 1)[0] in option_names for argument in argv)
 
 
+def _print_license_purchase_guidance() -> None:
+    print(
+        "[opub] 无需提前注册爱发电：请使用你自己的手机号或邮箱完成验证，"
+        "首次购买时爱发电会自动生成账号。"
+    )
+    print(
+        "[opub] 付款后复制爱发电发放的激活码；"
+        "请勿向 Agent 提供验证码或账号密码。"
+    )
+
+
 def _open_license_purchase_page() -> None:
     try:
         opened = bool(webbrowser.open(LICENSE_PURCHASE_URL))
@@ -388,6 +399,7 @@ def _open_license_purchase_page() -> None:
         opened = False
     if not opened:
         print(f"[opub] 无法自动打开购买页，请手动打开: {LICENSE_PURCHASE_URL}")
+    _print_license_purchase_guidance()
 
 
 def _stdin_is_interactive() -> bool:

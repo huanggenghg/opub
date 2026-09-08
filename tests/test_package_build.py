@@ -173,6 +173,31 @@ def _build_sdist(repo_root: Path, outdir: Path) -> set[str]:
 
 
 class PackageBuildTest(unittest.TestCase):
+    def test_distributions_exclude_stale_deleted_modules(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        stale_module = repo_root / "build/lib/utils/excel_writer.py"
+        stale_module.parent.mkdir(parents=True, exist_ok=True)
+        stale_module.write_text("# stale generated build artifact\n", encoding="utf-8")
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                outdir = Path(tmpdir)
+                distributions = {
+                    "sdist": _build_sdist(repo_root, outdir / "sdist"),
+                    "wheel": _build_wheel(repo_root, outdir / "wheel"),
+                }
+        finally:
+            stale_module.unlink(missing_ok=True)
+
+        for artifact_name, names in distributions.items():
+            normalized_names = {_normalized_name(name) for name in names}
+            with self.subTest(artifact=artifact_name):
+                self.assertNotIn(
+                    "utils/excel_writer.py",
+                    normalized_names,
+                    f"{artifact_name} contains a stale deleted module",
+                )
+
     def test_inventory_detector_rejects_headered_and_normalized_code_files(self):
         samples = (
             (

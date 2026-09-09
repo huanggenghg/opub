@@ -329,7 +329,9 @@ class PackageBuildTest(unittest.TestCase):
     def test_wheel_contains_opub_entry_modules(self):
         repo_root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
-            names = _build_wheel(repo_root, Path(tmpdir))
+            workspace = Path(tmpdir)
+            source_root = _copy_source_tree(repo_root, workspace / "source")
+            names = _build_wheel(source_root, workspace / "wheel")
 
         self.assertIn("conf.py", names)
         self.assertNotIn("opub_cli.py", names)
@@ -345,8 +347,9 @@ class PackageBuildTest(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmpdir:
             outdir = Path(tmpdir)
-            wheel_names = _build_wheel(repo_root, outdir / "wheel")
-            sdist_names = _build_sdist(repo_root, outdir / "sdist")
+            source_root = _copy_source_tree(repo_root, outdir / "source")
+            wheel_names = _build_wheel(source_root, outdir / "wheel")
+            sdist_names = _build_sdist(source_root, outdir / "sdist")
 
             distributions = (
                 ("wheel", wheel_names, next((outdir / "wheel").glob("opub-*.whl"))),

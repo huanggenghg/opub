@@ -34,6 +34,8 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 
 发布预检只检查环境，不安装或更新依赖。需要修复时运行 `opub --repair-env`；图文转视频使用 `opub --repair-env --with-video` 安装可选依赖，也可安装 `pip install "opub[video]"`。修复命令使用 opub 当前解释器，不需要许可，也不会发布内容；不能和发布参数或激活命令混用。修复可能包含多个安装步骤，每步最多 600 秒，调用时应允许总计至少 1800 秒。
 
+发布到 B站需要本地 biliup 程序：发布与 `--dry-run` 只做只读检查，缺失返回 `ENV-007`；用 `opub --repair-env --with-bilibili` 显式安装，普通修复不安装。B站子进程限时：查询 60 秒、扫码登录 360 秒、上传 3600 秒；上传超时结果未确认且不可自动重试，应引导用户到平台人工核对。
+
 ## 已验证平台（7个）
 
 | 平台标识 | 名称 | 视频 | 图文 | 说明 |
@@ -41,7 +43,7 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 | `douyin` | 抖音 | ✅ | ✅ | |
 | `xiaohongshu` | 小红书 | ✅ | ✅ | 浏览器自动化 |
 | `kuaishou` | 快手 | ✅ | ✅ | 浏览器自动化 |
-| `bilibili` | B站 | ✅ | ❌ | 自动准备 biliup，自动抓取BV号 |
+| `bilibili` | B站 | ✅ | ❌ | 需先 `opub --repair-env --with-bilibili` 安装 biliup，自动抓取BV号 |
 | `tencent` | 视频号 | ✅ | ❌ | |
 | `baijiahao` | 百家号 | ✅ | ❌ | 浏览器自动化 |
 | `weibo` | 微博 | ✅ | ❌ | 单账号自动发现 |
@@ -161,6 +163,8 @@ Agent 发布时优先添加 `--output json`，将 stdout 保存为结果 JSON，
 错误码体系：`CFG-xxx` 配置、`ENV-xxx` 环境、`AUTH-xxx` 登录、`PUB-<platform>` 平台发布失败（出现在"发布结果"汇总行中）、`RUN-xxx` 运行时异常（意外错误，退出码 2）。
 
 登录检查遇到 `NET-001`（网络失败或超时）、`PAGE-001`（页面无法识别）、`ENV-006`（本机环境或账号文件不可用）时，不得当作账号失效引导扫码或自动重试发布，按 `action` 处理。仅缺少账号或有明确登录失效证据才进入扫码流程。全部平台因这些检查失败时退出码为 2，部分成功时为 1。
+
+`ENV-007` 表示启用 B站但本地 biliup 程序缺失或不可执行：按 `action` 运行 `opub --repair-env --with-bilibili` 安装后重试。
 
 ### 结果汇总格式
 

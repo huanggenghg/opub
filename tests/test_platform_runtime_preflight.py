@@ -46,7 +46,7 @@ class PlatformRuntimePreflightTests(unittest.TestCase):
         stderr = io.StringIO()
         with patch(
             "uploader.bilibili_uploader.runtime.require_biliup_binary",
-            side_effect=FileNotFoundError("未找到 biliup"),
+            side_effect=FileNotFoundError("未找到 biliup，请运行 opub --repair-env --with-bilibili 安装"),
         ), contextlib.redirect_stderr(stderr):
             ok = runtime.platform_runtime_preflight(["bilibili"])
         self.assertFalse(ok)

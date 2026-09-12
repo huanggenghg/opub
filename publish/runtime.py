@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterable
 from importlib import import_module, metadata
 from pathlib import Path
 
@@ -149,7 +150,7 @@ def repair_environment(with_video: bool = False, with_bilibili: bool = False) ->
     return True
 
 
-def platform_runtime_preflight(platforms) -> bool:
+def platform_runtime_preflight(platforms: Iterable[str]) -> bool:
     """只读检查启用平台依赖的本地程序(当前仅 B站 biliup)；绝不下载安装。"""
     if "bilibili" in set(platforms):
         from uploader.bilibili_uploader.runtime import require_biliup_binary
@@ -157,7 +158,8 @@ def platform_runtime_preflight(platforms) -> bool:
         try:
             require_biliup_binary()
         except FileNotFoundError as exc:
-            print_error("ENV-007", "B站 biliup 程序缺失或不可执行", f"{exc}；或运行 opub --repair-env --with-bilibili 安装后重试")
+            # 异常文本已含 opub --repair-env --with-bilibili 修复建议,不重复拼接
+            print_error("ENV-007", "B站 biliup 程序缺失或不可执行", str(exc))
             return False
     return True
 

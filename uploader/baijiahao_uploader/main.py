@@ -565,24 +565,23 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
         raise TimeoutError(f"等待视频上传完成超时({BAIJIAHAO_UPLOAD_WAIT_TIMEOUT}秒)")
 
     async def set_schedule_publish(self, page, publish_date):
-        while True:
-            schedule_element = page.locator("div.op-btn-outter-content", has_text="定时发布").locator("button")
+        # 定时确认只执行一次:成功即完成,异常清理弹窗后上抛,不重试
+        schedule_element = page.locator("div.op-btn-outter-content", has_text="定时发布").locator("button")
+        try:
+            await schedule_element.click()
+            await page.wait_for_selector('div.select-wrap:visible', timeout=3000)
+            await page.wait_for_timeout(timeout=2000)
+            baijiahao_logger.info("开始点击发布定时...")
+            await self.set_schedule_time(page, publish_date)
+        except Exception as e:
+            baijiahao_logger.error(f"定时发布失败: {e}")
+            # 关闭可能残留的定时弹窗,便于人工接手排查
             try:
-                await schedule_element.click()
-                await page.wait_for_selector('div.select-wrap:visible', timeout=3000)
-                await page.wait_for_timeout(timeout=2000)
-                baijiahao_logger.info("开始点击发布定时...")
-                await self.set_schedule_time(page, publish_date)
-                break
-            except Exception as e:
-                baijiahao_logger.error(f"定时发布失败: {e}")
-                # 关闭可能残留的定时弹窗,避免遮挡按钮导致 retry 点击失败
-                try:
-                    await page.keyboard.press('Escape')
-                    await page.wait_for_timeout(500)
-                except Exception:
-                    pass
-                raise  # 定时确认遵循与立即发布相同规则:异常不重试
+                await page.keyboard.press('Escape')
+                await page.wait_for_timeout(500)
+            except Exception:
+                pass
+            raise
 
     async def publish_video(self, page: Page, publish_date):
         # 不再整体重试:最终提交只允许一次,点击后的异常一律视为结果未确认,由 upload() 标记不可自动重试

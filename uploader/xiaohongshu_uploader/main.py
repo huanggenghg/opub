@@ -429,8 +429,9 @@ class XiaoHongShuBaseUploader(BaseBrowserUploader):
     PLATFORM_NAME = "xiaohongshu"
     UPLOAD_URL = XHS_PUBLISH_VIDEO_URL
     LOGIN_URL = XHS_LOGIN_URL
-    LOGIN_MARKERS = ["手机号登录", "扫码登录"]
+    LOGIN_MARKERS = ["/login", "passport"]
     PUBLISH_MARKERS = []
+    LOGIN_SELECTORS = ('.login-container', 'text="手机号登录"', 'text="扫码登录"')
 
     def __init__(
         self,

@@ -1,7 +1,7 @@
 ---
 name: opub-cli
 description: Use when 用户要用 opub 发布/上传视频或图文、配置多平台发布、发布到抖音/小红书/快手/微博/B站/视频号/百家号，或排查 opub、账号登录校验、浏览器驱动环境问题
-version: "0.8.2"
+version: "0.8.3"
 ---
 
 # opub CLI 使用指南
@@ -14,6 +14,7 @@ version: "0.8.2"
 
 ```bash
 pip install opub
+opub --repair-env
 ```
 
 升级：`pip install -U opub`，升级后用 `opub --version` 确认版本。
@@ -21,7 +22,7 @@ pip install opub
 系统依赖：
 
 ```bash
-# 浏览器驱动（首次发布时会自动检查并尝试自动安装，失败时按 ENV-004 提示手动执行）
+# 浏览器驱动（--repair-env 会安装，也可单独执行以下命令）
 PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium
 
 # ffmpeg（仅"图文转视频"功能需要）
@@ -30,6 +31,8 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 ```
 
 首次运行会自动在 `~/.opub/` 创建数据目录（cookies 等），无需手动初始化。可用环境变量 `SAU_HOME` 指定其他数据目录。
+
+发布预检只检查环境，不安装或更新依赖。需要修复时运行 `opub --repair-env`；图文转视频使用 `opub --repair-env --with-video` 安装可选依赖，也可安装 `pip install "opub[video]"`。修复命令使用 opub 当前解释器，不需要许可，也不会发布内容；不能和发布参数或激活命令混用。修复可能包含多个安装步骤，每步最多 600 秒，调用时应允许总计至少 1800 秒。
 
 ## 已验证平台（7个）
 
@@ -54,7 +57,7 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 
 ## 调用
 
-`opub` 是无状态命令,每次发布的全部信息通过命令行参数传入:
+`opub` 的新任务通过命令行参数接收全部发布信息；恢复已有任务使用 `--resume RUN_ID`：
 
 ```bash
 # 视频发布(必填:--platforms + --video)
@@ -66,14 +69,22 @@ opub --platforms xiaohongshu --note --images img1.jpg,img2.jpg --title "标题"
 # 图文转视频(视频号/百家号等不支持图文的平台)
 opub --platforms tencent --note --images img1.jpg --convert-to-video --video-duration 5
 
-# 定时 / 断点续传 / 强制重新生成
-opub --platforms weibo --video videos/demo.mp4 --schedule "2026-08-21 12:00" --start-from 2 --force
+# 定时 / 从目录第 2 个视频开始 / 强制重新生成
+opub --platforms weibo --video videos/ --title "标题" --schedule "2027-01-01 12:00" --start-from 2 --force
 
 opub --version                        # 查看已安装版本
 opub --help                           # 全部参数说明
 ```
 
 参数说明:**素材路径(`--video`/`--images`)、标题、描述、话题标签(`--tags`)、目标平台是每次发布的输入,执行前必须逐项向用户确认,不要自行检索文件系统挑素材,也不要替用户编写标题/描述/话题**。仅当用户明确表示留空自动生成时,`--title`/`--desc` 才可留空走自动生成(需视频同名 JSON 或 ZHIPU_API_KEY),生成失败报 CFG-001,此时向用户报告错误并请用户提供 `--title` 重试,不要自行编一个标题;`--schedule` 指定后本次为定时发布。每个平台只自动发现一个规范账号文件；未发现账号时，发布流程会引导扫码并写入对应上传器目录的 `account.json`。**启用平台若无账号文件,发布时会自动弹出浏览器扫码登录**,登录完成后继续发布,不需要提前单独登录。
+
+### 预检与恢复
+
+对已确认的发布输入添加 `--dry-run --output json` 可先验证输入与环境，无需许可；不会登录、发布、自动生成文案或转换图片。成功时从 `planned` 读取计划，不能将其描述为发布成功。实际发布前会先解析全部素材的标题；定时至少提前两小时，当前 B站不支持定时。
+
+实际发布后保存 `run_id`。用户要求继续失败或中断的任务时，使用 `opub --resume RUN_ID --output json`，不要重跑原始普通发布命令，也不要附加标题、平台、素材等新参数。恢复沿用已解析参数与账号文件路径；`reused: true` 是已有成功结果，不是本次新提交。尚未执行或明确未提交的项可继续；`RUN-004` 表示结果未确认，先核对平台作品，不自动重发。`RUN-003` 表示素材改变/缺失或记录无效，`RUN-005` 表示记录读写失败。只有用户确定需要新发布或变更参数时才创建新任务。保持原账号文件中的账号身份。
+
+`--start-from` 仅选择新任务的目录起始序号，不是平台级恢复；不要用它跳过部分平台的成功记录。发布记录在数据目录的 `publish-history.sqlite3`，不要删除或覆盖记录来绕过重复提交保护。
 
 ## 付费许可
 
@@ -120,11 +131,19 @@ opub --activate --code OPUB0-ABCDE-FGHJK-MNPQR-STVWX-YZ234-56789
 
 ## 读取结果
 
+### 首选 JSON 格式
+
+Agent 发布时优先添加 `--output json`，将 stdout 保存为结果 JSON，将 stderr 单独保存为内部诊断日志。stdout 只有一份文档，字段为 `schema_version`（当前 1）、`mode`、`run_id`、`planned`、`exit_code`、`summary`、`results`、`errors`。文本输出仍可使用，下文格式保持兼容；`--help` 与 `--version` 始终为文本。
+
+`results` 每项含 `material`（视频路径或图文图片路径数组）、`content_type`、`platform`、`success`、`message`、`error_code`、`result_url`、`result_id`、`safe_to_retry`、`reused`、`action`。成功但 URL 为 null 仍是成功。仅当 `safe_to_retry` 明确为 true 才可自动重试，缺省 false。`errors` 每项含 `error_code`、`message`、`action`，用于配置、环境、许可及运行异常。
+
+`summary` 的 `success`/`failed` 只统计已记录的平台结果；判断整次任务必须同时查看 `exit_code` 和 `errors`。中途失败仍保留此前结果，中断返回 130 和 `RUN-002`，重试前先核实平台作品状态。
+
 ### 退出码
 
 | 退出码 | 含义 | Agent 下一步 |
 | --- | --- | --- |
-| 0 | 全部平台发布成功 | 从汇总中提取结果链接汇报给用户 |
+| 0 | 执行成功 | 先看 mode：dry_run 仅汇报预检通过；publish/resume 从结果提取链接，并区分 reused |
 | 1 | 部分平台成功、部分失败 | 读"发布结果"汇总，向用户汇报成败明细 |
 | 2 | 全部平台发布失败 | 读各平台 [PUB-xxx] 错误码，按建议动作处理 |
 | 10 | 配置错误 | 按 stderr 的 CFG-xxx 建议修正命令行参数（CFG-001 标题为空时补 `--title`） |
@@ -140,6 +159,8 @@ opub --activate --code OPUB0-ABCDE-FGHJK-MNPQR-STVWX-YZ234-56789
 ```
 
 错误码体系：`CFG-xxx` 配置、`ENV-xxx` 环境、`AUTH-xxx` 登录、`PUB-<platform>` 平台发布失败（出现在"发布结果"汇总行中）、`RUN-xxx` 运行时异常（意外错误，退出码 2）。
+
+登录检查遇到 `NET-001`（网络失败或超时）、`PAGE-001`（页面无法识别）、`ENV-006`（本机环境或账号文件不可用）时，不得当作账号失效引导扫码或自动重试发布，按 `action` 处理。仅缺少账号或有明确登录失效证据才进入扫码流程。全部平台因这些检查失败时退出码为 2，部分成功时为 1。
 
 ### 结果汇总格式
 

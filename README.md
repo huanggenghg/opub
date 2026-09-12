@@ -12,10 +12,10 @@
 | `douyin` | 抖音 | ✅ | ✅ | ✅ | |
 | `xiaohongshu` | 小红书 | ✅ | ✅ | ✅ | 浏览器自动化 |
 | `kuaishou` | 快手 | ✅ | ✅ | ✅ | 浏览器自动化 |
-| `bilibili` | B站 | ✅ | ❌ | ✅ | 运行时自动准备 `biliup`，自动抓取BV号 |
+| `bilibili` | B站 | ✅ | ❌ | ❌ | 当前接口仅立即发布，自动抓取BV号 |
 | `tencent` | 视频号 | ✅ | ❌ | ✅ | 分享短链通过 API 自动抓取 |
 | `baijiahao` | 百家号 | ✅ | ❌ | ✅ | 浏览器自动化 |
-| `weibo` | 微博 | ✅ | ❌ | ✅ | 单账号自动发现 |
+| `weibo` | 微博 | ✅ | ✅ | ✅ | 单账号自动发现 |
 
 所有平台通过统一入口 `opub` 调用，自动完成运行环境预检、账号登录校验、发布和结果汇总。
 
@@ -23,12 +23,13 @@
 
 ```bash
 pip install opub
+opub --repair-env
 ```
 
 系统依赖：
 
 ```bash
-# 浏览器驱动（首次发布时会自动检查并尝试自动安装，失败时按提示手动执行）
+# 浏览器驱动（--repair-env 会安装；也可以单独执行以下命令）
 PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium
 
 # ffmpeg（仅"图文转视频"功能需要）
@@ -38,9 +39,11 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 
 首次运行会自动在 `~/.opub/` 创建数据目录（cookies 等）。可用环境变量 `SAU_HOME` 指定其他数据目录。
 
+发布时只检查环境，不再自动安装或更新依赖。需要图文转视频时，运行 `opub --repair-env --with-video`，或安装 `pip install "opub[video]"`。修复命令使用 opub 当前解释器，不需要付费激活，也不会发布内容。
+
 ## 快速开始
 
-`opub` 是无状态命令,全部配置通过命令行参数传入。每个平台只自动发现一个规范账号文件；未发现账号时，发布流程会引导扫码并写入对应上传器目录的 `account.json`。
+`opub` 的新任务通过命令行参数接收全部配置，发布结果会保存到本地供恢复使用。每个平台只自动发现一个规范账号文件；未发现账号时，发布流程会引导扫码并写入对应上传器目录的 `account.json`。
 
 ```bash
 # 视频发布(必填:--platforms + --video)
@@ -52,12 +55,18 @@ opub --platforms xiaohongshu --note --images img1.jpg,img2.jpg --title "标题"
 # 图文转视频(视频号/百家号等不支持图文的平台)
 opub --platforms tencent --note --images img1.jpg --convert-to-video --video-duration 5
 
-# 定时 / 断点续传 / 强制重新生成
-opub --platforms weibo --video videos/demo.mp4 --schedule "2026-08-21 12:00" --start-from 2 --force
+# 定时 / 从目录第 2 个视频开始 / 强制重新生成
+opub --platforms weibo --video videos/ --title "标题" --schedule "2027-01-01 12:00" --start-from 2 --force
 
 opub --version                        # 查看已安装版本
 opub --help                           # 全部参数说明
 ```
+
+Agent 可在发布命令后加 `--output json`：stdout 只返回一份 JSON 结果，过程日志写入 stderr。结果包含各平台成败、素材、错误码、链接及是否允许重试，详见 [CLI 说明](docs/CLI.md)。
+
+发布前可添加 `--dry-run` 检查素材、标题、平台能力、时间和环境，不需要激活，不登录、不发布或生成素材。批量任务会先检查全部素材和标题，再开始发布。
+
+每次实际发布输出任务编号；失败或中断后使用 `opub --resume RUN_ID` 恢复，已成功的平台保留原链接。结果不明的提交会被阻止重发，需先核对平台作品。`--start-from` 仅选择新任务的目录起始序号，不保护已成功的平台。
 
 ## AI Agent 技能
 
@@ -114,3 +123,13 @@ uv pip install -e .
 ## 许可证
 
 [MIT License](LICENSE)
+
+## 自动检查
+
+GitHub Actions 在 Python 3.9 / 3.12 上检查依赖锁文件，运行客户端与许可服务测试，构建 wheel/sdist，并在独立环境安装验证 CLI。测试不需要真实账号或发布内容。
+
+```bash
+uv sync --locked
+uv pip install "pytest>=8,<9" pip build "setuptools>=69" wheel -r license_server/requirements.txt
+.venv/bin/python -m pytest tests license_server/tests -q
+```

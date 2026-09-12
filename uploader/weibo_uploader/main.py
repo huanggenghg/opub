@@ -9,6 +9,7 @@ from pathlib import Path
 from patchright.async_api import Page, TimeoutError as PlaywrightTimeoutError, async_playwright
 
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS
+from publish.auth import LoginCheckError, login_check
 from uploader.base_video import (
     BaseBrowserUploader,
     LoginExpiredError,
@@ -264,6 +265,7 @@ class WeiboBaseUploader(BaseBrowserUploader):
         return await _is_weibo_login_completed(page)
 
     @classmethod
+    @login_check
     async def cookie_auth(cls, account_file: str) -> bool:
         """Validate persisted state against Weibo's actual video upload entry."""
         if not os.path.exists(account_file):
@@ -653,6 +655,8 @@ class WeiboVideo(WeiboBaseUploader):
                 else:
                     result["message"] = "发布成功，但未获取到视频链接"
             weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except LoginCheckError as exc:
+            result.update(exc.to_result())
         except _WeiboPreMediaLoginExpired as e:
             result.update(build_login_expired_result(str(e) or "cookie 已失效，请重新扫码登录"))
             weibo_logger.error(_msg("❌", f"上传失败: {e}"))
@@ -773,6 +777,8 @@ class WeiboNote(WeiboBaseUploader):
                 result["success"] = True
                 result["message"] = "发布成功"
             weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except LoginCheckError as exc:
+            result.update(exc.to_result())
         except _WeiboPreMediaLoginExpired as e:
             result.update(build_login_expired_result(str(e) or "cookie 已失效，请重新扫码登录"))
             weibo_logger.error(_msg("❌", f"上传失败: {e}"))

@@ -2,9 +2,6 @@ import base64
 import json
 from typing import Any, Mapping
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
 from publish.licensing.deployment import LICENSE_PRODUCT_ID
 
 
@@ -19,6 +16,10 @@ def canonical_json(payload: Mapping[str, Any]) -> bytes:
 
 
 def verify_license(document: Mapping[str, Any], device_hash: str, trusted_keys: Mapping[str, str]) -> None:
+    # Keep CLI help and environment repair available when crypto needs repair.
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
     try:
         if not isinstance(document, Mapping) or set(document) != {"payload", "signature"}:
             raise LicenseValidationError("LIC-002", "license is damaged or signature is invalid")

@@ -14,6 +14,7 @@ from patchright.async_api import Page
 from patchright.async_api import async_playwright
 
 from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS
+from publish.auth import LoginCheckError, login_check
 from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
@@ -316,9 +317,12 @@ class DouYinBaseUploader(BaseBrowserUploader):
         self.date_format = "%Y年%m月%d日 %H:%M"
         self.headless = headless
 
+    LOGIN_SELECTORS = ('text="手机号登录"', 'text="扫码登录"', 'img[alt="二维码"]')
+
     @classmethod
+    @login_check
     async def cookie_auth(cls, account_file: str) -> bool:
-        """Override: douyin cookie 校验需要等待 publish marker + DOM marker 检查。"""
+        """Require positive upload evidence or explicit login evidence."""
         if not os.path.exists(account_file):
             return False
         async with async_playwright() as playwright:
@@ -326,15 +330,15 @@ class DouYinBaseUploader(BaseBrowserUploader):
             try:
                 context = await cls._init_context(browser, account_file)
                 page = await context.new_page()
-                await page.goto(cls.UPLOAD_URL)
-                try:
-                    await page.wait_for_url(cls.UPLOAD_URL, timeout=5000)
-                except Exception:
+                await page.goto(cls.UPLOAD_URL, timeout=60000, wait_until="domcontentloaded")
+                if await cls.is_login_required(page):
                     return False
                 await _wait_for_douyin_publish_marker(page)
-                return await _is_douyin_auth_page_valid(page)
-            except Exception:
-                return False
+                if await cls.is_login_required(page):
+                    return False
+                if await _is_douyin_auth_page_valid(page):
+                    return True
+                raise LoginCheckError('page')
             finally:
                 await browser.close()
 

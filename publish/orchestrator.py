@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import os
+import shutil
 import sys
 import webbrowser
 from datetime import datetime
@@ -15,7 +16,8 @@ from publish.config import (
     default_params_from_overrides,
 )
 from publish.constants import PLATFORM_NAMES
-from publish.content import fill_empty_content, get_video_content, get_video_files
+from publish.auth import classify_login_exception
+from publish.content import fill_empty_content, get_video_content, get_video_files, resolve_path
 from publish.dispatch import (
     ensure_account_login,
     platform_requires_account_login,
@@ -39,6 +41,9 @@ from publish.licensing import (
 )
 from publish.licensing.deployment import LICENSE_PURCHASE_URL
 from publish.reporter import print_header, print_results, print_summary
+from publish.output import record_result, record_plan, record_run, run_with_json
+from publish.validation import ValidationError, validate_inputs, validate_schedule
+from publish.history import HistoryError, HistoryStore
 from publish.runtime import runtime_preflight
 
 
@@ -86,13 +91,30 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
 
     results = {}
     total = len(enabled_platforms)
+    history = video_params.get("_history")
+
+    def save_result(platform, result, retryable=False, persist=True):
+        results[platform] = result
+        record_result(video_params, platform, result)
+        if history and persist:
+            store, run_id, index = history
+            store.finish(run_id, index, platform, result, retryable=retryable)
 
     for i, platform in enumerate(enabled_platforms, 1):
         platform_name = PLATFORM_NAMES.get(platform, platform)
+        if history:
+            store, run_id, index = history
+            runnable = video_params.get('_runnable_platforms')
+            decision = store.claim(run_id, index, platform, allow_submit=runnable is None or platform in runnable)
+            if decision['state'] != 'claimed':
+                cached = {**decision['result'], 'reused': decision['state'] == 'success'}
+                save_result(platform, cached, persist=False)
+                print(f"[{i}/{total}] {platform_name}: {'沿用已成功结果' if cached['success'] else cached['message']}")
+                continue
 
         if platform not in PLATFORM_NAMES:
             result = {"success": False, "message": f"未知平台: {platform}"}
-            results[platform] = result
+            save_result(platform, result, retryable=True)
             print(f"[{i}/{total}] 发布到 {platform_name}...")
             print(f"  ❌ 失败: {result['message']}")
             continue
@@ -105,12 +127,13 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
         if not account_file:
             default_file = default_account_file(platform)
             if default_file is None:
-                results[platform] = {
+                result = {
                     "success": False,
                     "message": f"未配置 {platform} 账号",
                     "account_issue": True,
                     "error_code": "AUTH-002",
                 }
+                save_result(platform, result, retryable=True)
                 print("  ❌ 失败: 未配置账号")
                 continue
             print(f"  ℹ️ 未发现 {platform_name} 账号文件，将触发扫码登录: {default_file}")
@@ -128,14 +151,15 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
                 login_ok = await ensure_account_login(platform, account_file)
             except Exception as exc:
                 login_ok = False
-                login_error = str(exc) or exc.__class__.__name__
+                login_error = classify_login_exception(exc).to_result()
             if not login_ok:
-                result = _auth_failure(platform_name, login_error)
-                results[platform] = result
-                print_error("AUTH-001", result["message"], f"引导用户在弹出的浏览器中完成 {platform_name} 扫码登录后重试")
+                result = login_error or _auth_failure(platform_name)
+                save_result(platform, result, retryable=True)
+                print_error(result["error_code"], result["message"], result.get("action") or f"引导用户在弹出的浏览器中完成 {platform_name} 扫码登录后重试")
                 continue
 
         result = await publish_to_platform(platform, platform_params)
+        retryable = result.get('safe_to_retry') is True
         auth_failure_reported = False
         if _is_safe_login_expiry(result):
             login_error = None
@@ -143,15 +167,16 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
                 login_ok = await ensure_account_login(platform, account_file, force=True)
             except Exception as exc:
                 login_ok = False
-                login_error = str(exc) or exc.__class__.__name__
+                login_error = classify_login_exception(exc).to_result()
             if login_ok:
                 result = await publish_to_platform(platform, platform_params)
+                retryable = result.get('safe_to_retry') is True
             else:
-                result = _auth_failure(platform_name, login_error)
-                print_error("AUTH-001", result["message"], f"引导用户在弹出的浏览器中完成 {platform_name} 扫码登录后重试")
+                result = login_error or _auth_failure(platform_name)
+                print_error(result["error_code"], result["message"], result.get("action") or f"引导用户在弹出的浏览器中完成 {platform_name} 扫码登录后重试")
                 auth_failure_reported = True
 
-        results[platform] = result
+        save_result(platform, result, retryable=retryable)
         if auth_failure_reported:
             continue
         if result.get("success"):
@@ -164,118 +189,106 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def run_publish_with_params(params: Dict[str, Any]) -> int:
-    if not params["enabled_platforms"]:
-        print_error("CFG-002", "未配置启用平台", "提供 --platforms，逗号分隔平台标识")
+    params = {**params, "enabled_platforms": list(dict.fromkeys(params["enabled_platforms"]))}
+    video_files = get_video_files(params.get("video_file", "")) if params["content_type"] == "video" else []
+    try:
+        validate_inputs(params, video_files)
+    except ValidationError as exc:
+        print_error(exc.code, str(exc), exc.action)
         return EXIT_CONFIG_ERROR
 
-    # 注意：标题为空时，会在视频处理流程中尝试自动生成；
-    # 解析后仍为空则 CFG-001 报错（除 bilibili 外各平台都强制要求标题）
-
-    # 处理图文转视频
-    if params["content_type"] == "note" and params["convert_to_video"]:
-        if not params["images"]:
-            print_error("CFG-004", "图文转视频需要提供图片", "提供 --images 设置图片路径（英文逗号分隔）")
-            return EXIT_CONFIG_ERROR
-
-        print("正在将图片转换为视频...")
-        try:
-            from utils.image_to_video import convert_images_to_video_for_publish
-
-            video_path = convert_images_to_video_for_publish(
-                image_paths=params["images"],
-                title=params["title"],
-                duration=params["video_duration"],
-            )
-            # 更新参数，切换为视频模式
-            params["content_type"] = "video"
-            params["video_file"] = video_path
-            print(f"[OK] 视频已生成: {video_path}\n")
-        except Exception as e:
-            print_error("ENV-005", f"图片转视频失败: {e}", "安装 ffmpeg 后重试（macOS: brew install ffmpeg; Ubuntu: sudo apt-get install ffmpeg）")
-            return EXIT_ENV_ERROR
-
-    # 图文模式(不转视频):不依赖 video_file,直接以 images 发布
+    params["images"] = [resolve_path(path) for path in params.get("images", [])]
+    dry_run = params.get("dry_run", False)
+    prepared = []
     if params["content_type"] == "note":
-        if not params["images"]:
-            print_error("CFG-004", "图文模式需要提供图片", "提供 --images 设置图片路径（英文逗号分隔）")
-            return EXIT_CONFIG_ERROR
-
-        if not await runtime_preflight():
-            return EXIT_ENV_ERROR
-
         title, desc = fill_empty_content(params["title"], params["desc"])
         if not (title and str(title).strip()):
-            print_error("CFG-001", "图文发布缺少标题", "提供 --title（自动填充未生效时标题为必填）")
+            print_error("CFG-001", "图文发布缺少标题", "提供 --title")
             return EXIT_CONFIG_ERROR
-        note_params = {**params, "title": title, "desc": desc}
-        print(f"\n========== 图文发布 ==========")
-        print(f"标题: {title}")
-        if params["tags"]:
-            print(f"标签: {params['tags']}")
-        print(f"图片数: {len(params['images'])}")
-        print(f"启用平台: {', '.join(params['enabled_platforms'])}\n")
-
-        all_results = {"note": await publish_one_item(note_params)}
-        print_summary(all_results)
-        return exit_code_from_results(all_results)
-
-    # 获取视频文件列表
-    video_files = get_video_files(params["video_file"])
-    if not video_files:
-        print_error("CFG-003", f"未找到视频文件: {params['video_file']}", "检查 --video 路径是否正确")
-        return EXIT_CONFIG_ERROR
+        prepared.append({**params, "title": title, "desc": desc})
+    else:
+        selected = video_files[params.get("start_from", 1) - 1:]
+        for video_file in selected:
+            options = {"force": params.get("force", False)}
+            if dry_run:
+                options.update(auto_generate=False, force=False)
+            title, desc = get_video_content(video_file, params["title"], params["desc"], **options)
+            if not (title and str(title).strip()):
+                print_error("CFG-001", f"视频 {os.path.basename(video_file)} 标题解析后为空", "提供 --title，或补充视频同名 JSON；--dry-run 不自动生成文案")
+                return EXIT_CONFIG_ERROR
+            prepared.append({**params, "video_file": video_file, "title": title, "desc": desc})
 
     if not await runtime_preflight():
         return EXIT_ENV_ERROR
 
-    print(f"找到 {len(video_files)} 个视频文件:")
-    for vf in video_files:
-        print(f"  - {os.path.basename(vf)}")
-    print()
+    if params.get("convert_to_video"):
+        from utils.image_to_video import check_moviepy_installed, convert_images_to_video_for_publish
+        if not check_moviepy_installed() or not shutil.which("ffmpeg"):
+            print_error("ENV-005", "图文转视频依赖不完整", "运行 opub --repair-env --with-video，并安装 ffmpeg 后重试")
+            return EXIT_ENV_ERROR
+        if not dry_run:
+            try:
+                item = prepared[0]
+                video_path = convert_images_to_video_for_publish(
+                    image_paths=item["images"], title=item["title"], duration=item["video_duration"],
+                )
+                prepared[0] = {**item, "content_type": "video", "video_file": video_path, "images": [], "convert_to_video": False}
+            except Exception as exc:
+                print_error("ENV-005", f"图片转视频失败: {exc}", "检查图片、ffmpeg 和磁盘空间后重试")
+                return EXIT_ENV_ERROR
 
-    # 遍历每个视频文件进行发布
+    if dry_run:
+        record_plan(prepared)
+        print(f"[opub] 检查通过：{len(prepared)} 份素材，未执行登录或发布")
+        for item in prepared:
+            print(f"  {item['title']} → {', '.join(item['enabled_platforms'])}")
+        return EXIT_OK
+
+    return await execute_prepared(prepared)
+
+
+async def execute_prepared(items, store=None, run_id=None, runnable=None):
+    store = store or HistoryStore()
+    if run_id is None:
+        for item in items:
+            accounts = dict(item.get('platforms', {}))
+            for platform in item['enabled_platforms']:
+                key = f'{platform}_account'
+                value = str(accounts.get(key, '') or '')
+                accounts[key] = resolve_path(value) if value and ',' not in value else default_account_file(platform)
+            item['platforms'] = accounts
+        run_id = store.create(items)
+        mode = 'publish'
+    else:
+        mode = 'resume'
+    record_run(run_id, mode)
+    print(f"[opub] 任务编号: {run_id}；恢复命令: opub --resume {run_id}")
     all_results = {}
-    start_from = params.get("start_from", 1)
-    if start_from > 1:
-        print(f"\n[SKIP] 从第 {start_from} 个视频开始发布（跳过前 {start_from - 1} 个）\n")
-
-    for video_idx, video_file in enumerate(video_files, 1):
-        # 跳过已发布的视频
-        if video_idx < start_from:
-            continue
-
-        print(f"\n========== 视频 [{video_idx}/{len(video_files)}] ==========")
-        print(f"文件: {os.path.basename(video_file)}")
-
-        # 使用视频配置文件或默认配置/模板填充
-        title, desc = get_video_content(
-            video_file,
-            params["title"],
-            params["desc"],
-            force=params.get("force", False),
-        )
-
-        if not (title and str(title).strip()):
-            print_error(
-                "CFG-001",
-                f"视频 {os.path.basename(video_file)} 标题解析后为空",
-                "提供 --title，或配置视频同名 JSON / ZHIPU_API_KEY 供自动生成",
-            )
-            return EXIT_CONFIG_ERROR
-
-        # 更新参数
-        video_params = {
-            **params,
-            "video_file": video_file,
-            "title": title,
-            "desc": desc,
-        }
-
-        all_results[video_file] = await publish_one_item(video_params)
-
-    # 打印总体汇总
+    for index, item in enumerate(items):
+        eligible = None if runnable is None else {p for i, p in runnable if i == index}
+        all_results[str(index)] = await publish_one_item({
+            **item, '_history': (store, run_id, index), '_runnable_platforms': eligible,
+        })
     print_summary(all_results)
     return exit_code_from_results(all_results)
+
+
+async def resume_publish(run_id):
+    record_run(run_id, 'resume')
+    store = HistoryStore()
+    items = store.load(run_id)
+    runnable = store.runnable_entries(run_id)
+    try:
+        for index, item in enumerate(items):
+            platforms = [p for p in item['enabled_platforms'] if (index, p) in runnable]
+            if platforms:
+                validate_schedule({**item, 'enabled_platforms': platforms})
+    except ValidationError as exc:
+        print_error(exc.code, str(exc), exc.action)
+        return EXIT_CONFIG_ERROR
+    if runnable and not await runtime_preflight():
+        return EXIT_ENV_ERROR
+    return await execute_prepared(items, store, run_id, runnable)
 
 
 async def run_publish(overrides: Optional[PublishOverrides] = None) -> int:
@@ -314,6 +327,7 @@ _PUBLISH_OPTION_NAMES = frozenset(
         "--schedule",
         "--start-from",
         "--force",
+        "--dry-run",
     }
 )
 
@@ -342,6 +356,9 @@ def build_parser() -> argparse.ArgumentParser:
     license_group = parser.add_mutually_exclusive_group()
     license_group.add_argument("--license-status", action="store_true", help="检查本机许可证状态")
     license_group.add_argument("--activate", action="store_true", help="购买或恢复本机永久许可证")
+    license_group.add_argument("--repair-env", action="store_true", help="修复当前解释器中的依赖并安装 Chromium（不执行发布）")
+    license_group.add_argument("--resume", metavar="RUN_ID", help="恢复已有任务：跳过成功项，保护结果未确认的项")
+    parser.add_argument("--with-video", action="store_true", help="与 --repair-env 一起使用，同时安装图文转视频依赖")
     parser.add_argument("--code", default=None, help="爱发电发放的激活码，仅与 --activate 一起使用")
     parser.add_argument("--platforms", default=None, help="启用的平台，逗号分隔（必填）")
     parser.add_argument("--video", default=None, help="视频文件或目录路径")
@@ -353,8 +370,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--desc", default=None, help="描述（由用户提供；仅用户明确同意自动生成时可留空）")
     parser.add_argument("--tags", default=None, help="话题标签，逗号分隔")
     parser.add_argument("--schedule", type=_schedule_value, default=None, help=f"定时发布时间，格式 {schedule_help}")
-    parser.add_argument("--start-from", type=int, default=None, help="断点续传起始序号，1 起")
+    parser.add_argument("--start-from", type=int, default=None, help="新任务的目录起始序号，1 起；恢复已有任务请用 --resume")
     parser.add_argument("--force", action="store_true", help="强制重新生成视频配置")
+    parser.add_argument("--output", choices=("text", "json"), default="text", help="结果输出格式（默认 text；json 模式过程日志写入 stderr）")
+    parser.add_argument("--dry-run", action="store_true", help="只检查输入和环境，输出计划，不登录、不发布或生成素材")
     return parser
 
 
@@ -372,6 +391,7 @@ def _build_overrides(args: argparse.Namespace) -> PublishOverrides:
         images=args.images,
         convert_to_video=args.convert_to_video,
         video_duration=args.video_duration,
+        dry_run=args.dry_run,
     )
 
 
@@ -420,10 +440,25 @@ def _read_activation_code() -> str:
         return ""
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def _main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     arguments = list(argv) if argv is not None else sys.argv[1:]
     args = parser.parse_args(arguments)
+    if args.dry_run:
+        record_plan([])
+    if args.resume and _contains_explicit_option(arguments, _PUBLISH_OPTION_NAMES):
+        parser.error("恢复任务不能混入新的发布参数；要更换素材或文案请创建新任务")
+    if args.with_video and not args.repair_env:
+        parser.error("--with-video 只能与 --repair-env 一起使用")
+    if args.repair_env:
+        if args.code is not None or _contains_explicit_option(arguments, _PUBLISH_OPTION_NAMES):
+            parser.error("环境修复不能与发布参数或激活码一起使用")
+        from publish.runtime import repair_environment
+
+        if repair_environment(with_video=args.with_video):
+            print("[opub] 环境修复完成")
+            return EXIT_OK
+        return EXIT_ENV_ERROR
     if args.code is not None and not args.activate:
         parser.error("--code 只能与 --activate 一起使用")
     if (args.activate or args.license_status) and _contains_explicit_option(
@@ -447,13 +482,35 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return EXIT_LICENSE_ERROR
         return run_activation(activation_code)
 
-    valid, code = require_valid_license()
-    if not valid:
-        print_license_error(code or "LIC-002")
-        return EXIT_LICENSE_ERROR
+    if not args.dry_run:
+        valid, code = require_valid_license()
+        if not valid:
+            print_license_error(code or "LIC-002")
+            return EXIT_LICENSE_ERROR
 
     try:
+        if args.resume:
+            return asyncio.run(resume_publish(args.resume))
         return asyncio.run(run_publish(_build_overrides(args)))
+    except HistoryError as exc:
+        print_error(exc.code, str(exc), exc.action)
+        return EXIT_ALL_FAIL
     except Exception as exc:
         print_error("RUN-001", f"运行时异常: {exc}", "将以上错误信息反馈给用户；重试前请先检查配置与环境")
         return EXIT_ALL_FAIL
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    arguments = list(argv) if argv is not None else sys.argv[1:]
+    # A small preliminary parser selects output even when the full parser fails.
+    output_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False, exit_on_error=False)
+    output_parser.add_argument("--output", default="text")
+    output_args = argparse.Namespace(output="text")
+    try:
+        output_args, _ = output_parser.parse_known_args(arguments, namespace=output_args)
+    except argparse.ArgumentError:
+        # Preserve an earlier valid mode; the full parser emits the actual error.
+        pass
+    if output_args.output == "json" and not any(a in {"--help", "-h", "--version"} for a in arguments):
+        return run_with_json(lambda: _main(arguments))
+    return _main(arguments)

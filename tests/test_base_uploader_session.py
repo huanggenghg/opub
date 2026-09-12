@@ -4,6 +4,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from publish.auth import LoginCheckError
 from uploader.base_video import BaseBrowserUploader
 
 
@@ -167,12 +168,9 @@ class BrowserSessionTests(unittest.TestCase):
              patch("uploader.base_video.os.path.exists", return_value=True):
             mock_ap.return_value = FakePlaywright(FakeContext())
             with patch.object(FakeUploader, "_launch_browser", side_effect=fake_launch_browser):
-                asyncio.run(FakeUploader.cookie_auth("/fake.json"))
-        # FakePage lacks goto(), so cookie_auth's page.goto() raises
-        # AttributeError which is swallowed by cookie_auth's broad
-        # except Exception: return False (base_video.py:216-217).
-        # captured_headless is populated before that error, which is
-        # what this test asserts on.
+                with self.assertRaises(LoginCheckError):
+                    asyncio.run(FakeUploader.cookie_auth("/fake.json"))
+        # The incomplete page fixture raises a classified page error after launch.
         self.assertEqual(captured_headless, [LOCAL_CHROME_HEADLESS])
 
     def test_storage_state_saved_before_code_after_async_with(self):

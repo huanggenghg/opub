@@ -49,6 +49,10 @@ class BaiJiaHaoLoginCompletionTests(unittest.TestCase):
         class FakePage:
             url = "https://baijiahao.baidu.com/builder/rc/home"
 
+            def locator(self, selector):
+                marker = SimpleNamespace(count=AsyncMock(return_value=0))
+                return SimpleNamespace(first=marker)
+
             async def goto(self, *args, **kwargs):
                 return None
 
@@ -261,6 +265,11 @@ class BaiJiaHaoWaitTimeoutTests(unittest.TestCase):
             title="t", file_path="/fake.mp4", tags=[], publish_date=0,
             account_file="/fake.json",
         )
-        with patch.object(bj_main, "BAIJIAHAO_UPLOAD_WAIT_TIMEOUT", 0):
-            with self.assertRaises(TimeoutError):
+        # Exercise both the upload deadline and its real retry decorator without
+        # spending 300 seconds retrying the same expired upload.
+        with patch.object(bj_main, "BAIJIAHAO_UPLOAD_WAIT_TIMEOUT", 0), \
+             patch("utils.network.time.time", side_effect=[0, 301]):
+            with self.assertRaisesRegex(TimeoutError, "exceeded 300 seconds") as raised:
                 asyncio.run(uploader.uploading_video(page=None))
+        self.assertIsInstance(raised.exception.__cause__, TimeoutError)
+        self.assertIn("等待视频上传完成超时", str(raised.exception.__cause__))

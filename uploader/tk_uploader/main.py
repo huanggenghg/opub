@@ -29,6 +29,7 @@ class TiktokVideo(BaseBrowserUploader):
     LOGIN_URL = "https://www.tiktok.com/login?lang=en"
     LOGIN_MARKERS = ["/login", "/signup"]
     PUBLISH_MARKERS = []
+    LOGIN_SELECTORS = ('select[class*="SelectFormContainer"]', 'a[href*="/login"]')
 
     def __init__(
         self,

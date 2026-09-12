@@ -74,8 +74,10 @@ Report:
 
 ## Core CLI Usage
 
-`opub` is stateless: every publish run passes all settings (enabled platforms,
-content, asset paths, tags, scheduling) as command-line arguments. Account
+`opub` receives all settings (enabled platforms, content, asset paths, tags,
+scheduling) as command-line arguments for new runs. It persists per-platform
+results locally; use `--resume RUN_ID` to continue an existing run without
+resubmitting successful entries. `--dry-run` validates inputs without publishing. Account
 files are auto-discovered from the `cookies/` directory under the data
 directory.
 

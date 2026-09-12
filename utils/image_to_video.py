@@ -40,7 +40,7 @@ def images_to_video(
     """
     if not check_moviepy_installed():
         raise RuntimeError(
-            "moviepy 未安装，请运行: pip install moviepy\n"
+            "moviepy 未安装，请运行: opub --repair-env --with-video\n"
             "同时需要安装 ffmpeg: https://ffmpeg.org/download.html"
         )
 

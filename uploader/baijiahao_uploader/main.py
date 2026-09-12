@@ -11,6 +11,7 @@ import asyncio
 import re
 
 from conf import LOCAL_CHROME_PATH, LOCAL_CHROME_HEADLESS
+from publish.auth import LoginCheckError, login_check
 from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
@@ -196,7 +197,10 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
         """Override: 百家号登录完成需要 DOM marker 校验,不能只看 URL。"""
         return await _is_baijiahao_auth_page_valid(page)
 
+    LOGIN_SELECTORS = ('text="登录/注册百家号"', 'text="扫码登录"')
+
     @classmethod
+    @login_check
     async def cookie_auth(cls, account_file: str) -> bool:
         """Override: 百家号 cookie 校验需要 DOM marker 检查(_is_baijiahao_auth_page_valid)。"""
         if not os.path.exists(account_file):
@@ -206,23 +210,19 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
             try:
                 context = await cls._init_context(browser, account_file)
                 page = await context.new_page()
-                try:
-                    await page.goto(cls.UPLOAD_URL, timeout=60000, wait_until="domcontentloaded")
-                except Exception as exc:
-                    baijiahao_logger.warning(f"home 页 goto 异常(继续检测): {exc}")
+                await page.goto(cls.UPLOAD_URL, timeout=60000, wait_until="domcontentloaded")
 
                 # 首页 SPA 冷加载时 marker 可能 15 秒以上才渲染(高峰期更慢),
                 # 轮询 30 秒代替单次 5 秒判定, 避免有效 cookie 被误判失效
                 for _ in range(10):
                     await page.wait_for_timeout(timeout=3000)
+                    if await cls.is_login_required(page):
+                        return False
                     if await _is_baijiahao_auth_page_valid(page):
                         baijiahao_logger.success(_msg("🥳", "cookie 有效"))
                         return True
 
-                baijiahao_logger.error("首页登录态 marker 校验超时, 判定 cookie 失效")
-                return False
-            except Exception:
-                return False
+                raise LoginCheckError('page')
             finally:
                 await browser.close()
 

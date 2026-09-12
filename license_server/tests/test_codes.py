@@ -5,6 +5,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -309,35 +310,41 @@ def test_generate_inventory_writes_display_codes_and_hashes_only(tmp_path: Path,
     symbols = ALPHABET[:30]
     _choice_stream(monkeypatch, symbols)
 
-    generated = generate_inventory(database, 1, output)
+    # Pin a read snapshot so connection collection or an automatic checkpoint
+    # cannot remove the WAL before its plaintext checks on older SQLite builds.
+    with closing(sqlite3.connect(database.path)) as reader:
+        reader.execute("BEGIN")
+        reader.execute("SELECT COUNT(*) FROM activation_codes").fetchone()
+        generated = generate_inventory(database, 1, output)
 
-    assert generated == 1
-    assert output.stat().st_mode & 0o777 == 0o600
-    assert output.read_bytes().endswith(b"\n")
-    wal_path = Path(str(database.path) + "-wal")
-    assert wal_path.exists()
-    assert wal_path.stat().st_size > 0
+        assert generated == 1
+        assert output.stat().st_mode & 0o777 == 0o600
+        assert output.read_bytes().endswith(b"\n")
+        wal_path = Path(str(database.path) + "-wal")
+        assert wal_path.exists()
+        assert wal_path.stat().st_size > 0
 
-    line = output.read_text(encoding="utf-8").splitlines()
-    assert line == [_display_code(symbols)]
-    assert normalize_activation_code(line[0]) == "OPUB0" + symbols
+        line = output.read_text(encoding="utf-8").splitlines()
+        assert line == [_display_code(symbols)]
+        assert normalize_activation_code(line[0]) == "OPUB0" + symbols
 
-    expected_hash = hashlib.sha256(
-        b"opub-activation-code-v1\n" + normalize_activation_code(line[0]).encode("ascii")
-    ).hexdigest()
-    row = database.row("SELECT code_hash FROM activation_codes")
-    assert row is not None
-    assert row["code_hash"] == expected_hash
-    assert len(row["code_hash"]) == 64
-    assert database.code_stats() == {"available": 1, "redeemed": 0, "total": 1}
-    _assert_plaintext_absent(database.path, symbols)
-    _assert_plaintext_absent(database.path, line[0])
-    _assert_plaintext_absent(database.path, normalize_activation_code(line[0]))
-    database.row("PRAGMA wal_checkpoint(TRUNCATE)")
-    assert not wal_path.exists() or wal_path.stat().st_size == 0
-    _assert_plaintext_absent(database.path, symbols)
-    _assert_plaintext_absent(database.path, line[0])
-    _assert_plaintext_absent(database.path, normalize_activation_code(line[0]))
+        expected_hash = hashlib.sha256(
+            b"opub-activation-code-v1\n" + normalize_activation_code(line[0]).encode("ascii")
+        ).hexdigest()
+        row = database.row("SELECT code_hash FROM activation_codes")
+        assert row is not None
+        assert row["code_hash"] == expected_hash
+        assert len(row["code_hash"]) == 64
+        assert database.code_stats() == {"available": 1, "redeemed": 0, "total": 1}
+        _assert_plaintext_absent(database.path, symbols)
+        _assert_plaintext_absent(database.path, line[0])
+        _assert_plaintext_absent(database.path, normalize_activation_code(line[0]))
+        reader.rollback()
+        database.row("PRAGMA wal_checkpoint(TRUNCATE)")
+        assert not wal_path.exists() or wal_path.stat().st_size == 0
+        _assert_plaintext_absent(database.path, symbols)
+        _assert_plaintext_absent(database.path, line[0])
+        _assert_plaintext_absent(database.path, normalize_activation_code(line[0]))
 
 
 def test_generate_inventory_keeps_batch_codes_unique(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

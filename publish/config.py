@@ -22,6 +22,7 @@ class PublishOverrides:
     images: Optional[str] = None
     convert_to_video: bool = False
     video_duration: float = 5.0
+    dry_run: bool = False
 
 
 def _split_csv(value: Optional[str]) -> list:
@@ -103,8 +104,10 @@ def default_params_from_overrides(overrides: Optional[PublishOverrides] = None) 
         "platforms": _discover_account_files(),
         "convert_to_video": overrides.convert_to_video,
         "video_duration": overrides.video_duration,
-        "start_from": overrides.start_from if overrides.start_from else 1,
+        "start_from": overrides.start_from if overrides.start_from is not None else 1,
     }
     if overrides.force:
         params["force"] = True
+    if overrides.dry_run:
+        params["dry_run"] = True
     return params

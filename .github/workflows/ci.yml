@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-package:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12"]
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_DEFAULT_TIMEOUT: "60"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.17"
+          enable-cache: true
+
+      - name: Check dependency lock
+        run: uv lock --check
+
+      - name: Install project and test dependencies
+        timeout-minutes: 5
+        run: |
+          uv sync --locked --python "${{ matrix.python-version }}"
+          uv pip install --python .venv/bin/python "pytest>=8,<9" pip build "setuptools>=69" wheel -r license_server/requirements.txt
+
+      # Tests use fake browser pages and local license fixtures; no browser
+      # download, platform login, activation, or real publishing is needed.
+      - name: Run client and license server tests
+        timeout-minutes: 10
+        run: .venv/bin/python -m pytest tests license_server/tests -q --durations=10
+
+      - name: Build wheel and source distribution
+        timeout-minutes: 3
+        run: .venv/bin/python -m build --outdir dist
+
+      - name: Install wheel and smoke test outside the checkout
+        timeout-minutes: 5
+        run: |
+          smoke_dir="$(mktemp -d "${RUNNER_TEMP}/opub-smoke.XXXXXX")"
+          uv venv --python "${{ matrix.python-version }}" "$smoke_dir/venv"
+          uv pip install --python "$smoke_dir/venv/bin/python" "$GITHUB_WORKSPACE"/dist/opub-*.whl
+          cd "$smoke_dir"
+          unset PYTHONPATH
+          "$smoke_dir/venv/bin/opub" --help
+          "$smoke_dir/venv/bin/opub" --version

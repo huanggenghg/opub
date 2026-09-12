@@ -13,14 +13,24 @@ from publish import orchestrator
 from publish.errors import EXIT_CONFIG_ERROR
 
 
-class TitleGuardTests(unittest.TestCase):
+class MediaFixtureTests(unittest.TestCase):
+    def setUp(self):
+        workspace = tempfile.TemporaryDirectory()
+        self.addCleanup(workspace.cleanup)
+        self.test_video = Path(workspace.name) / "demo.mp4"
+        self.test_image = Path(workspace.name) / "demo.png"
+        self.test_video.write_bytes(b"video")
+        self.test_image.write_bytes(b"image")
+
+
+class TitleGuardTests(MediaFixtureTests):
     def test_video_mode_empty_title_after_resolution_returns_config_error(self):
         params = {
             "content_type": "video",
             "title": "",
             "desc": "",
             "tags": [],
-            "video_file": "videos/demo.mp4",
+            "video_file": str(self.test_video),
             "images": [],
             "publish_strategy": "immediate",
             "publish_time": None,
@@ -32,7 +42,7 @@ class TitleGuardTests(unittest.TestCase):
         }
 
         with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)), \
-             patch("publish.orchestrator.get_video_files", return_value=["videos/demo.mp4"]), \
+             patch("publish.orchestrator.get_video_files", return_value=[str(self.test_video)]), \
              patch("publish.orchestrator.get_video_content", return_value=("", "")), \
              patch("publish.orchestrator.publish_one_item", new=AsyncMock()) as publish_one_item:
             code = asyncio.run(publish_all.run_publish_with_params(params))
@@ -47,7 +57,7 @@ class TitleGuardTests(unittest.TestCase):
             "desc": "",
             "tags": [],
             "video_file": "",
-            "images": ["videos/demo.png"],
+            "images": [str(self.test_image)],
             "publish_strategy": "immediate",
             "publish_time": None,
             "enabled_platforms": ["weibo"],
@@ -66,7 +76,7 @@ class TitleGuardTests(unittest.TestCase):
         publish_one_item.assert_not_awaited()
 
 
-class PublishEngineTests(unittest.TestCase):
+class PublishEngineTests(MediaFixtureTests):
     def test_default_params_from_overrides_builds_full_params(self):
         publish_time = publish_all.datetime.strptime("2026-05-30 21:30", "%Y-%m-%d %H:%M")
         overrides = publish_all.PublishOverrides(
@@ -129,7 +139,7 @@ class PublishEngineTests(unittest.TestCase):
             "title": "标题",
             "desc": "描述",
             "tags": [],
-            "video_file": "videos/demo.mp4",
+            "video_file": str(self.test_video),
             "images": [],
             "publish_strategy": "immediate",
             "publish_time": None,
@@ -142,14 +152,14 @@ class PublishEngineTests(unittest.TestCase):
         }
 
         with patch("publish.orchestrator.runtime_preflight", new=AsyncMock(return_value=True)):
-            with patch("publish.orchestrator.get_video_files", return_value=["videos/demo.mp4"]):
+            with patch("publish.orchestrator.get_video_files", return_value=[str(self.test_video)]):
                 with patch("publish.orchestrator.get_video_content", return_value=("标题", "描述")) as get_video_content:
                     with patch("publish.orchestrator.publish_one_item", new=AsyncMock(return_value={"weibo": {"success": True}})) as publish_one_item:
                         code = asyncio.run(publish_all.run_publish_with_params(params))
 
         self.assertEqual(code, 0)
         get_video_content.assert_called_once_with(
-            "videos/demo.mp4",
+            str(self.test_video),
             "标题",
             "描述",
             force=True,
@@ -186,7 +196,7 @@ class PublishEngineTests(unittest.TestCase):
             "desc": "描述",
             "tags": [],
             "video_file": "",
-            "images": ["videos/demo.png"],
+            "images": [str(self.test_image)],
             "publish_strategy": "immediate",
             "publish_time": None,
             "enabled_platforms": ["kuaishou"],
@@ -205,7 +215,7 @@ class PublishEngineTests(unittest.TestCase):
         get_video_files.assert_not_called()
         publish_one_item.assert_awaited_once()
         called_params = publish_one_item.call_args.args[0]
-        self.assertEqual(called_params["images"], ["videos/demo.png"])
+        self.assertEqual(called_params["images"], [str(self.test_image)])
         self.assertEqual(called_params["content_type"], "note")
 
     def test_run_publish_with_params_note_mode_without_images_returns_error(self):
@@ -309,65 +319,36 @@ class RuntimePreflightTests(unittest.TestCase):
 
         self.assertIn(fake_home / "AppData" / "Local" / "ms-playwright", cache_dirs)
 
-    def test_runtime_preflight_installs_missing_chromium(self):
+    def test_runtime_preflight_missing_chromium_is_read_only(self):
         with patch("publish.runtime.patchright_available", return_value=True), \
              patch("publish.runtime.patchright_chromium_installed", return_value=False), \
-             patch("publish.runtime.install_patchright_chromium", return_value=True) as install, \
-             patch("publish.runtime.sync_python_dependencies", return_value=True):
+             patch("publish.runtime.subprocess.run") as run:
             ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
-
-        self.assertTrue(ok)
-        install.assert_called_once()
-
-    def test_runtime_preflight_fails_when_chromium_install_fails(self):
-        with patch("publish.runtime.patchright_available", return_value=True), \
-             patch("publish.runtime.patchright_chromium_installed", return_value=False), \
-             patch("publish.runtime.install_patchright_chromium", return_value=False), \
-             patch("publish.runtime.sync_python_dependencies", return_value=True):
-            ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
-
         self.assertFalse(ok)
+        run.assert_not_called()
+
+    def test_runtime_preflight_healthy_environment_is_read_only(self):
+        with patch("publish.runtime.patchright_available", return_value=True), \
+             patch("publish.runtime.patchright_chromium_installed", return_value=True), \
+             patch("publish.runtime.subprocess.run") as run:
+            ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
+        self.assertTrue(ok)
+        run.assert_not_called()
 
     def test_runtime_preflight_fails_without_patchright_and_does_not_install(self):
         with patch("publish.runtime.patchright_available", return_value=False), \
-             patch("publish.runtime.install_patchright_chromium", return_value=True) as install, \
-             patch("publish.runtime.sync_python_dependencies", return_value=True) as sync:
-            ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
-
-        self.assertFalse(ok)
-        install.assert_not_called()
-        sync.assert_not_called()
-
-    def test_runtime_preflight_fails_when_dep_sync_fails(self):
-        with patch("publish.runtime.patchright_available", return_value=True), \
-             patch("publish.runtime.sync_python_dependencies", return_value=False) as sync, \
-             patch("publish.runtime.patchright_chromium_installed", return_value=True) as chromium_check:
-            ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
-
-        self.assertFalse(ok)
-        sync.assert_called_once()
-        chromium_check.assert_not_called()
-
-    def test_sync_python_dependencies_calls_pip_install_with_requirements_path(self):
-        with patch("publish.runtime.subprocess.run") as run, \
-             patch("publish.runtime.Path.exists", return_value=True):
-            run.return_value.returncode = 0
-
-            ok = publish_all.sync_python_dependencies()
-
-        self.assertTrue(ok)
-        args = run.call_args.args[0]
-        self.assertEqual(args[0:3], [sys.executable, "-m", "pip"])
-        self.assertIn("install", args)
-        self.assertTrue(any("requirements.txt" in str(a) for a in args))
-
-    def test_sync_python_dependencies_returns_true_when_requirements_missing(self):
-        with patch("publish.runtime.Path.exists", return_value=False), \
              patch("publish.runtime.subprocess.run") as run:
-            ok = publish_all.sync_python_dependencies()
-
-        self.assertTrue(ok)
+            ok = publish_all.run_async_for_test(publish_all.runtime_preflight())
+        self.assertFalse(ok)
         run.assert_not_called()
+
+    def test_legacy_sync_uses_project_metadata(self):
+        with patch("publish.runtime.subprocess.run") as run:
+            run.return_value.returncode = 0
+            self.assertTrue(publish_all.sync_python_dependencies())
+        command = run.call_args.args[0]
+        self.assertEqual(command[:4], [sys.executable, "-m", "pip", "install"])
+        self.assertFalse(any("requirements.txt" in part for part in command))
 
     def test_install_patchright_chromium_defaults_to_playwright_cdn_for_chromium(self):
         with patch.dict("publish_all.os.environ", {}, clear=True):

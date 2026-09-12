@@ -47,7 +47,7 @@ def create_logger(log_name: str, file_path: str):
 # Remove all existing handlers
 logger.remove()
 # Add a standard console handler
-logger.add(sys.stdout, colorize=True, format=log_formatter)
+logger.add(lambda message: sys.stderr.write(message), colorize=False, format=log_formatter)
 
 douyin_logger = create_logger('douyin', 'logs/douyin.log')
 tencent_logger = create_logger('tencent', 'logs/tencent.log')

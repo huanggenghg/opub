@@ -395,6 +395,7 @@ class KSBaseUploader(BaseBrowserUploader):
     LOGIN_URL = KUAISHOU_LOGIN_URL
     LOGIN_MARKERS = list(KUAISHOU_LOGIN_MARKERS)
     PUBLISH_MARKERS = []
+    LOGIN_SELECTORS = ('main#login-form', 'div.qr-login img[alt="qrcode"]')
 
     def __init__(
         self,

@@ -6,7 +6,7 @@ import random
 from pathlib import Path
 
 from conf import BASE_DIR
-from publish.constants import TITLE_LIMITS
+from publish.constants import TITLE_LIMITS, VIDEO_EXTENSIONS
 
 # 内容模板文件路径(原 publish_all.py 位于仓库根,现 publish/content.py
 # 深一层,用 parent.parent 回到仓库根以保持解析路径不变)
@@ -148,11 +148,9 @@ def get_video_files(video_path: str) -> list:
 
     if os.path.isdir(path):
         # 文件夹，获取所有视频文件
-        video_extensions = ['.mp4', '.mov', '.mkv', '.avi', '.flv', '.mpeg', '.ogg', '.vob', '.webm', '.wmv', '.rmvb']
         video_files = []
         for file in os.listdir(path):
-            file_lower = file.lower()
-            if any(file_lower.endswith(ext) for ext in video_extensions):
+            if Path(file).suffix.lower() in VIDEO_EXTENSIONS:
                 video_files.append(os.path.join(path, file))
         # 按文件名排序
         video_files.sort()

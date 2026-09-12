@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """发布流程共享常量"""
 
+VIDEO_EXTENSIONS = frozenset({'.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm', '.flv', '.wmv'})
+IMAGE_EXTENSIONS = frozenset({'.jpg', '.jpeg', '.png', '.webp', '.bmp'})
+NOTE_PLATFORMS = frozenset({'douyin', 'xiaohongshu', 'kuaishou', 'weibo'})
+
 PLATFORM_NAMES = {
     "douyin": "抖音",
     "xiaohongshu": "小红书",

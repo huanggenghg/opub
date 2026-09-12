@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """运行时环境预检:patchright 可用性、Chromium 安装、Python 版本"""
 import asyncio
+import importlib.util
 import json
 import os
 import subprocess
 import sys
-from importlib import import_module
+from importlib import import_module, metadata
 from pathlib import Path
 
 from publish.errors import print_error
@@ -71,31 +72,74 @@ def patchright_chromium_installed() -> bool:
     return any((cache_dir / browser_dir_name).exists() for cache_dir in playwright_browser_cache_dirs())
 
 
+REPAIR_TIMEOUT_SECONDS = 600
+
+
 def install_patchright_chromium() -> bool:
+    """仅由显式修复流程调用；预检不下载安装浏览器。"""
     env = os.environ.copy()
     if not env.get("PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST") and not env.get("PLAYWRIGHT_DOWNLOAD_HOST"):
         env["PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST"] = "https://cdn.playwright.dev"
-    result = subprocess.run(
-        [sys.executable, "-m", "patchright", "install", "chromium"],
-        env=env,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "patchright", "install", "chromium"],
+            env=env,
+            timeout=REPAIR_TIMEOUT_SECONDS,
+            stdout=sys.stderr,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return result.returncode == 0
 
 
-def sync_python_dependencies() -> bool:
-    """同步 requirements.txt 里的 python 依赖。已装且版本匹配的包会跳过,缺失/版本不符的会装。"""
-    req_path = Path(__file__).resolve().parent.parent / "requirements.txt"
-    if not req_path.exists():
-        return True
+def sync_python_dependencies(with_video: bool = False) -> bool:
+    """兼容旧调用名：显式重装项目声明的依赖，绝不读取旧 requirements 清单。"""
+    project_root = Path(__file__).resolve().parent.parent
+    extra = "[video]" if with_video else ""
+    if (project_root / "pyproject.toml").is_file():
+        target = f"{project_root}{extra}"
+    else:
+        try:
+            installed_version = metadata.version("opub")
+        except metadata.PackageNotFoundError:
+            return False
+        if not installed_version:
+            return False
+        target = f"opub{extra}=={installed_version}"
 
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-r", str(req_path), "--quiet"],
-        cwd=str(req_path.parent),
-    )
+    try:
+        if importlib.util.find_spec("pip") is None:
+            bootstrap = subprocess.run(
+                [sys.executable, "-m", "ensurepip", "--upgrade"],
+                timeout=REPAIR_TIMEOUT_SECONDS,
+                stdout=sys.stderr,
+            )
+            if bootstrap.returncode != 0:
+                return False
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-input", target],
+            timeout=REPAIR_TIMEOUT_SECONDS,
+            stdout=sys.stderr,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return result.returncode == 0
+
+
+def repair_environment(with_video: bool = False) -> bool:
+    """用户显式请求时修复 Python 依赖并安装 Chromium。"""
+    repair_command = "opub --repair-env" + (" --with-video" if with_video else "")
+    if not sync_python_dependencies(with_video=with_video):
+        print_error("ENV-003", "Python 依赖修复失败", f'确认 opub 版本信息完整且网络可用；若当前解释器缺少 pip，可运行 uv pip install --python "{sys.executable}" pip，再运行 {repair_command} 重试')
+        return False
+    if not install_patchright_chromium():
+        print_error("ENV-004", "Patchright Chromium 安装失败", f"检查网络或浏览器下载镜像后，运行 {repair_command} 重试")
+        return False
+    return True
 
 
 async def runtime_preflight() -> bool:
+    """只读检查；常规发布绝不安装或更新 Python 包和浏览器。"""
     print("运行环境预检")
 
     if sys.version_info < (3, 9):
@@ -103,26 +147,12 @@ async def runtime_preflight() -> bool:
         return False
 
     if not patchright_available():
-        print_error("ENV-002", "未安装 patchright", "运行 pip install opub --upgrade 重新安装")
+        print_error("ENV-002", "未安装 patchright", "运行 opub --repair-env 修复当前环境")
         return False
 
-    if not sync_python_dependencies():
-        print_error("ENV-003", "Python 依赖同步失败", "运行 pip install -r requirements.txt 后重试")
+    if not patchright_chromium_installed():
+        print_error("ENV-004", "未安装匹配的 Patchright Chromium", "运行 opub --repair-env 修复当前环境")
         return False
-    print("Python 依赖已同步")
 
-    if patchright_chromium_installed():
-        print("Patchright Chromium 已安装")
-        return True
-
-    print("Patchright Chromium 未安装，正在安装...")
-    if install_patchright_chromium():
-        print("Patchright Chromium 安装成功")
-        return True
-
-    print_error(
-        "ENV-004",
-        "Patchright Chromium 安装失败",
-        '运行 PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright install chromium',
-    )
-    return False
+    print("Patchright Chromium 已安装")
+    return True

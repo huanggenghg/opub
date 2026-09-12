@@ -11,6 +11,7 @@ import os
 import time
 from pathlib import Path
 
+from publish.auth import classify_login_exception, login_check
 from uploader.base_video import BaseCliUploader, PlatformResultExtras, PublishStrategy
 from uploader.bilibili_uploader.runtime import run_biliup_command
 from utils.log import bilibili_logger
@@ -40,6 +41,7 @@ class BilibiliUploader(BaseCliUploader):
         self.tid = tid
 
     @classmethod
+    @login_check
     async def cookie_auth(cls, account_file: str) -> bool:
         """用 biliup renew 验证 cookie 是否有效。"""
         if not os.path.exists(account_file):
@@ -48,9 +50,13 @@ class BilibiliUploader(BaseCliUploader):
         if result.returncode == 0:
             bilibili_logger.success("[+] cookie 有效")
             return True
-        stderr = (result.stderr or "").strip()
-        bilibili_logger.error(f"cookie 失效: {stderr[:200]}")
-        return False
+        detail = ((result.stderr or "") + "\n" + (result.stdout or "")).lower()
+        if any(marker in detail for marker in (
+            "cookie expired", "cookies expired", "cookie 已失效", "cookie失效",
+            "账号未登录", "账号未登陆", "未登录", "not logged in", "please login",
+        )):
+            return False
+        raise classify_login_exception(RuntimeError(detail))
 
     @classmethod
     async def cookie_gen(cls, account_file: str) -> bool:

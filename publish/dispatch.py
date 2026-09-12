@@ -5,6 +5,7 @@ import os
 import sys
 
 from publish.constants import PLATFORM_NAMES, TITLE_LIMITS
+from publish.auth import LoginCheckError
 from publish.content import resolve_path, truncate_title
 
 
@@ -84,6 +85,8 @@ async def publish_to_douyin(params: dict) -> dict:
                 title=title, publish_strategy=params["publish_strategy"],
             )
         return await uploader.upload()
+    except LoginCheckError as exc:
+        return exc.to_result()
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -118,6 +121,8 @@ async def publish_to_xiaohongshu(params: dict) -> dict:
                 title=title, desc=params["desc"], publish_strategy=params["publish_strategy"],
             )
         return await uploader.upload()
+    except LoginCheckError as exc:
+        return exc.to_result()
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -152,6 +157,8 @@ async def publish_to_kuaishou(params: dict) -> dict:
                 title=title, publish_strategy=params["publish_strategy"],
             )
         return await uploader.upload()
+    except LoginCheckError as exc:
+        return exc.to_result()
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -180,6 +187,8 @@ async def publish_to_tencent(params: dict) -> dict:
         )
         result = await uploader.upload()
         return result
+    except LoginCheckError as exc:
+        return exc.to_result()
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -208,6 +217,8 @@ async def publish_to_baijiahao(params: dict) -> dict:
         )
         result = await uploader.upload()
         return result
+    except LoginCheckError as exc:
+        return exc.to_result()
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -236,6 +247,8 @@ async def publish_to_bilibili(params: dict) -> dict:
         )
         result = await uploader.upload()
         return result
+    except LoginCheckError as exc:
+        return exc.to_result()
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -271,6 +284,8 @@ async def publish_to_weibo(params: dict) -> dict:
             )
         result = await uploader.upload()
         return result
+    except LoginCheckError as exc:
+        return exc.to_result()
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -298,6 +313,8 @@ async def publish_to_tk(params: dict) -> dict:
             desc=params.get("desc", ""), publish_strategy=params["publish_strategy"],
         )
         return await uploader.upload()
+    except LoginCheckError as exc:
+        return exc.to_result()
     except Exception as e:
         return {"success": False, "message": str(e)}
 

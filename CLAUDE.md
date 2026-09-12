@@ -27,13 +27,13 @@ Platform, account, media, metadata, and schedule settings are passed as command-
     pip install -r requirements.txt
     ```
 
-2.  **Install Playwright browser drivers:**
+2.  **Prepare the current environment and Patchright browser:**
     ```bash
-    playwright install chromium
+    opub --repair-env
     ```
 
 3.  **Install ffmpeg (required for image-to-video conversion):**
-    The `convert_to_video` feature uses moviepy + ffmpeg to turn image notes into slideshow videos. moviepy is installed from `requirements.txt`, but ffmpeg must be installed separately as a system dependency:
+    The `convert_to_video` feature uses moviepy + ffmpeg to turn image notes into slideshow videos. Install the optional Python dependencies with `opub --repair-env --with-video`; ffmpeg must be installed separately as a system dependency:
     *   macOS: `brew install ffmpeg`
     *   Ubuntu/Debian: `sudo apt-get install ffmpeg`
     *   Windows: download from https://ffmpeg.org/download.html and add to PATH
@@ -56,4 +56,6 @@ opub --platforms douyin,weibo --video videos/demo.mp4 --title "标题"
 
 *   The code is located in the root directory and the `uploader` directory.
 *   The `conf.example.py` file should be copied to `conf.py` and configured with the appropriate settings.
-*   The `requirements.txt` file lists the Python dependencies.
+*   `pyproject.toml` is the dependency source. The compatibility `requirements.txt` references this project with its video extra. Normal publishing only checks the environment; it does not install dependencies.
+
+Publishing persists per-material/platform results in `publish-history.sqlite3` under the data directory. Use `--resume RUN_ID` for existing runs; unknown submission outcomes remain blocked. `--start-from` only selects a directory offset for a new run. `--dry-run` checks inputs and dependencies without license, login, publishing, conversion, or generated content. Run all tests with `.venv/bin/python -m pytest tests license_server/tests -q`; CI also checks Python 3.9/3.12 and standalone wheel installation.

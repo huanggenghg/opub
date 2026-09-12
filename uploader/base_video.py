@@ -7,10 +7,13 @@ from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Optional, TypedDict
+from urllib.parse import urlsplit
 
 from patchright.async_api import Page, Playwright, async_playwright
 
 from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from publish.auth import LoginCheckError, login_check
+from publish.constants import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from utils.base_social_media import set_init_script
 
 
@@ -53,12 +56,8 @@ def build_login_expired_result(
 
 
 class BasePlatformUploader:
-    SUPPORTED_VIDEO_EXTENSIONS = {
-        ".mp4", ".mov", ".avi", ".mkv", ".m4v", ".webm", ".flv", ".wmv",
-    }
-    SUPPORTED_IMAGE_EXTENSIONS = {
-        ".jpg", ".jpeg", ".png", ".webp", ".bmp",
-    }
+    SUPPORTED_VIDEO_EXTENSIONS = VIDEO_EXTENSIONS
+    SUPPORTED_IMAGE_EXTENSIONS = IMAGE_EXTENSIONS
     MIN_SCHEDULE_LEAD_TIME = timedelta(hours=2)
 
     @classmethod
@@ -186,6 +185,7 @@ class BaseBrowserUploader(BasePlatformUploader):
     LOGIN_URL: str = ""
     LOGIN_MARKERS: list = []
     PUBLISH_MARKERS: list = []
+    LOGIN_SELECTORS: tuple = ()
 
     @classmethod
     async def _launch_browser(cls, playwright: Playwright, headless: bool):
@@ -213,6 +213,20 @@ class BaseBrowserUploader(BasePlatformUploader):
         return None
 
     @classmethod
+    async def is_login_required(cls, page: Page) -> bool:
+        """Only explicit login URL/form evidence establishes expiry."""
+        url = urlsplit(page.url or "")
+        location = (url.netloc + url.path).lower()
+        if any(marker.lower() in location for marker in cls.LOGIN_MARKERS):
+            return True
+        for selector in cls.LOGIN_SELECTORS:
+            marker = page.locator(selector).first
+            if await marker.count() and await marker.is_visible():
+                return True
+        return False
+
+    @classmethod
+    @login_check
     async def cookie_auth(cls, account_file: str) -> bool:
         """Navigate to upload page, check if still logged in."""
         if not os.path.exists(account_file):
@@ -226,14 +240,15 @@ class BaseBrowserUploader(BasePlatformUploader):
                 # 长时间不触发, 默认 goto(30s, load) 会误判为导航失败
                 await page.goto(cls.UPLOAD_URL, timeout=60000, wait_until="domcontentloaded")
                 await page.wait_for_timeout(3000)
-                current_url = (page.url or "").lower()
-                if any(marker.lower() in current_url for marker in cls.LOGIN_MARKERS):
+                if await cls.is_login_required(page):
                     return False
+                expected_url = cls.UPLOAD_URL.split("?", 1)[0].rstrip("/")
+                current_url = (page.url or "").split("?", 1)[0].rstrip("/")
+                if current_url != expected_url:
+                    raise LoginCheckError('page')
                 if await cls.is_login_completed(page):
                     return True
-                return False
-            except Exception:
-                return False
+                raise LoginCheckError('page')
             finally:
                 await browser.close()
 

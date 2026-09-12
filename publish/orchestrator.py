@@ -44,7 +44,7 @@ from publish.reporter import print_header, print_results, print_summary
 from publish.output import record_result, record_plan, record_run, run_with_json
 from publish.validation import ValidationError, validate_inputs, validate_schedule
 from publish.history import HistoryError, HistoryStore
-from publish.runtime import runtime_preflight
+from publish.runtime import platform_runtime_preflight, runtime_preflight
 
 
 def exit_code_from_results(all_results: Dict[str, Dict[str, Any]]) -> int:
@@ -221,6 +221,10 @@ async def run_publish_with_params(params: Dict[str, Any]) -> int:
     if not await runtime_preflight():
         return EXIT_ENV_ERROR
 
+    # 启用平台的本地程序只读检查,位于首次账号检查之前;缺失时不登录、不发布
+    if not platform_runtime_preflight(params["enabled_platforms"]):
+        return EXIT_ENV_ERROR
+
     if params.get("convert_to_video"):
         from utils.image_to_video import check_moviepy_installed, convert_images_to_video_for_publish
         if not check_moviepy_installed() or not shutil.which("ffmpeg"):
@@ -287,6 +291,8 @@ async def resume_publish(run_id):
         print_error(exc.code, str(exc), exc.action)
         return EXIT_CONFIG_ERROR
     if runnable and not await runtime_preflight():
+        return EXIT_ENV_ERROR
+    if runnable and not platform_runtime_preflight({platform for _, platform in runnable}):
         return EXIT_ENV_ERROR
     return await execute_prepared(items, store, run_id, runnable)
 
@@ -359,6 +365,7 @@ def build_parser() -> argparse.ArgumentParser:
     license_group.add_argument("--repair-env", action="store_true", help="修复当前解释器中的依赖并安装 Chromium（不执行发布）")
     license_group.add_argument("--resume", metavar="RUN_ID", help="恢复已有任务：跳过成功项，保护结果未确认的项")
     parser.add_argument("--with-video", action="store_true", help="与 --repair-env 一起使用，同时安装图文转视频依赖")
+    parser.add_argument("--with-bilibili", action="store_true", help="与 --repair-env 一起使用，同时安装 B站 biliup 上传程序")
     parser.add_argument("--code", default=None, help="爱发电发放的激活码，仅与 --activate 一起使用")
     parser.add_argument("--platforms", default=None, help="启用的平台，逗号分隔（必填）")
     parser.add_argument("--video", default=None, help="视频文件或目录路径")
@@ -450,12 +457,14 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("恢复任务不能混入新的发布参数；要更换素材或文案请创建新任务")
     if args.with_video and not args.repair_env:
         parser.error("--with-video 只能与 --repair-env 一起使用")
+    if args.with_bilibili and not args.repair_env:
+        parser.error("--with-bilibili 只能与 --repair-env 一起使用")
     if args.repair_env:
         if args.code is not None or _contains_explicit_option(arguments, _PUBLISH_OPTION_NAMES):
             parser.error("环境修复不能与发布参数或激活码一起使用")
         from publish.runtime import repair_environment
 
-        if repair_environment(with_video=args.with_video):
+        if repair_environment(with_video=args.with_video, with_bilibili=args.with_bilibili):
             print("[opub] 环境修复完成")
             return EXIT_OK
         return EXIT_ENV_ERROR

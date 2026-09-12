@@ -105,7 +105,7 @@ class BlockCrypto(importlib.abc.MetaPathFinder):
             raise ImportError('simulated missing cryptography')
 sys.meta_path.insert(0, BlockCrypto())
 import publish.runtime
-publish.runtime.repair_environment = lambda with_video=False: True
+publish.runtime.repair_environment = lambda with_video=False, with_bilibili=False: True
 from publish_all import main
 raise SystemExit(main(['--output', 'json', '--repair-env']))
 '''

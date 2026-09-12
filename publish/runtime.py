@@ -126,15 +126,39 @@ def sync_python_dependencies(with_video: bool = False) -> bool:
     return result.returncode == 0
 
 
-def repair_environment(with_video: bool = False) -> bool:
-    """用户显式请求时修复 Python 依赖并安装 Chromium。"""
-    repair_command = "opub --repair-env" + (" --with-video" if with_video else "")
+def repair_environment(with_video: bool = False, with_bilibili: bool = False) -> bool:
+    """用户显式请求时修复 Python 依赖并安装 Chromium。
+
+    with_bilibili 额外安装/更新 B站 biliup 程序；普通修复不安装未启用的平台工具。
+    """
+    repair_command = "opub --repair-env" + (" --with-video" if with_video else "") + (" --with-bilibili" if with_bilibili else "")
     if not sync_python_dependencies(with_video=with_video):
         print_error("ENV-003", "Python 依赖修复失败", f'确认 opub 版本信息完整且网络可用；若当前解释器缺少 pip，可运行 uv pip install --python "{sys.executable}" pip，再运行 {repair_command} 重试')
         return False
     if not install_patchright_chromium():
         print_error("ENV-004", "Patchright Chromium 安装失败", f"检查网络或浏览器下载镜像后，运行 {repair_command} 重试")
         return False
+    if with_bilibili:
+        from uploader.bilibili_uploader.runtime import ensure_biliup_binary
+
+        try:
+            ensure_biliup_binary()
+        except Exception as exc:
+            print_error("ENV-007", "B站 biliup 程序安装失败", f"检查网络与 GitHub 可达性后，运行 {repair_command} 重试（{exc}）")
+            return False
+    return True
+
+
+def platform_runtime_preflight(platforms) -> bool:
+    """只读检查启用平台依赖的本地程序(当前仅 B站 biliup)；绝不下载安装。"""
+    if "bilibili" in set(platforms):
+        from uploader.bilibili_uploader.runtime import require_biliup_binary
+
+        try:
+            require_biliup_binary()
+        except FileNotFoundError as exc:
+            print_error("ENV-007", "B站 biliup 程序缺失或不可执行", f"{exc}；或运行 opub --repair-env --with-bilibili 安装后重试")
+            return False
     return True
 
 

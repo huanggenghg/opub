@@ -15,7 +15,7 @@ class EnvironmentCommandTests(unittest.TestCase):
         ) as license_check, patch('publish.orchestrator.run_publish', AsyncMock()) as publish:
             code = orchestrator.main(['--repair-env', '--with-video'])
         self.assertEqual(code, 0)
-        repair.assert_called_once_with(with_video=True)
+        repair.assert_called_once_with(with_video=True, with_bilibili=False)
         license_check.assert_not_called()
         publish.assert_not_called()
 
@@ -28,12 +28,33 @@ class EnvironmentCommandTests(unittest.TestCase):
             ['--repair-env', '--video', 'a.mp4'],
             ['--repair-env', '--activate'],
             ['--with-video'],
+            ['--with-bilibili'],
         ]:
             with self.subTest(args=args), self.assertRaises(SystemExit), patch(
                 'publish.runtime.repair_environment'
             ) as repair:
                 orchestrator.main(args)
             repair.assert_not_called()
+
+    def test_repair_with_bilibili_installs_biliup(self):
+        with patch('publish.runtime.repair_environment', return_value=True) as repair, patch(
+            'publish.orchestrator.require_valid_license'
+        ), patch('publish.orchestrator.run_publish', AsyncMock()):
+            code = orchestrator.main(['--repair-env', '--with-bilibili'])
+        self.assertEqual(code, 0)
+        repair.assert_called_once_with(with_video=False, with_bilibili=True)
+
+    def test_plain_repair_does_not_install_biliup(self):
+        with patch('publish.runtime.repair_environment', return_value=True) as repair:
+            code = orchestrator.main(['--repair-env'])
+        self.assertEqual(code, 0)
+        repair.assert_called_once_with(with_video=False, with_bilibili=False)
+
+    def test_repair_with_video_and_bilibili_combines_flags(self):
+        with patch('publish.runtime.repair_environment', return_value=True) as repair:
+            code = orchestrator.main(['--repair-env', '--with-video', '--with-bilibili'])
+        self.assertEqual(code, 0)
+        repair.assert_called_once_with(with_video=True, with_bilibili=True)
 
 
 class LoginClassificationIntegrationTests(unittest.TestCase):

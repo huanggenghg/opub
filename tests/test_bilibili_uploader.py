@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from uploader.bilibili_uploader.main import BilibiliUploader
 
@@ -117,6 +117,15 @@ class CaptureBvAfterUploadTests(unittest.TestCase):
 
 
 class UploadWireTests(unittest.TestCase):
+    def test_upload_runs_synchronous_work_in_thread(self):
+        import asyncio
+        uploader = _make_uploader()
+        with patch("os.path.exists", return_value=True), \
+             patch("uploader.bilibili_uploader.main.asyncio.to_thread", new=AsyncMock(return_value={"success": True, "message": "发布成功"})) as to_thread:
+            result = asyncio.run(uploader.upload())
+        self.assertTrue(result["success"])
+        to_thread.assert_awaited_once()
+
     def test_upload_success_with_bv_sets_result_url(self):
         import asyncio
         uploader = _make_uploader()
@@ -165,6 +174,39 @@ class UploadWireTests(unittest.TestCase):
         self.assertFalse(result["success"])
         capture_mock.assert_not_called()
         list_mock.assert_called_once()
+
+    def test_upload_timeout_is_unknown_and_not_safe_to_retry(self):
+        import asyncio
+        uploader = _make_uploader()
+        with patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs_with_status", return_value=(set(), True)), \
+             patch("uploader.bilibili_uploader.main.run_biliup_command", side_effect=subprocess.TimeoutExpired(["biliup", "upload"], 3600)):
+            result = asyncio.run(uploader.upload())
+        self.assertFalse(result["success"])
+        self.assertFalse(result["safe_to_retry"])
+        self.assertIn("结果不明", result["message"])
+
+    def test_successful_upload_stays_successful_when_link_query_raises(self):
+        import asyncio
+        uploader = _make_uploader()
+        with patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs_with_status", return_value=(set(), True)), \
+             patch("uploader.bilibili_uploader.main.run_biliup_command", return_value=_make_completed(0)), \
+             patch.object(uploader, "_capture_bv_after_upload", side_effect=RuntimeError("list unavailable")):
+            result = asyncio.run(uploader.upload())
+        self.assertTrue(result["success"])
+        self.assertNotIn("result_url", result)
+
+    def test_failed_before_list_skips_link_lookup_after_success(self):
+        import asyncio
+        uploader = _make_uploader()
+        with patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs_with_status", return_value=(set(), False)), \
+             patch("uploader.bilibili_uploader.main.run_biliup_command", return_value=_make_completed(0)), \
+             patch.object(uploader, "_capture_bv_after_upload") as capture:
+            result = asyncio.run(uploader.upload())
+        self.assertTrue(result["success"])
+        capture.assert_not_called()
 
 
 if __name__ == "__main__":

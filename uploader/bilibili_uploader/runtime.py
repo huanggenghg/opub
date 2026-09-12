@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import stat
@@ -15,6 +16,14 @@ import requests
 
 GITHUB_RELEASE_API = "https://api.github.com/repos/biliup/biliup/releases/latest"
 _CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
+
+# 子命令默认超时(秒):查询(list/renew)、扫码登录(login)、上传(upload)
+QUERY_TIMEOUT_SECONDS = 60
+LOGIN_TIMEOUT_SECONDS = 360
+UPLOAD_TIMEOUT_SECONDS = 3600
+
+# biliup 缺失/不可执行时的显式修复建议
+BILIUP_REPAIR_HINT = "opub --repair-env --with-bilibili"
 
 
 def get_biliup_runtime_root() -> Path:
@@ -177,6 +186,28 @@ def ensure_biliup_binary(force_check: bool = True) -> Path:
     return binary_path
 
 
+def require_biliup_binary() -> Path:
+    """只读检查本地 biliup 可执行文件，绝不下载。
+
+    发布路径只允许调用本函数：缺失/不可执行时抛 FileNotFoundError 并给出
+    显式修复建议；安装 biliup 只属于显式修复命令(ensure_biliup_binary)。
+    """
+    binary_path = build_biliup_runtime_path()
+    if not binary_path.exists():
+        raise FileNotFoundError(
+            f"biliup 可执行文件不存在: {binary_path}，请先运行 {BILIUP_REPAIR_HINT} 安装"
+        )
+    if binary_path.is_dir():
+        raise FileNotFoundError(
+            f"biliup 路径是目录而非可执行文件: {binary_path}，请运行 {BILIUP_REPAIR_HINT} 修复"
+        )
+    if not os.access(binary_path, os.X_OK):
+        raise FileNotFoundError(
+            f"biliup 可执行文件没有执行权限: {binary_path}，请运行 {BILIUP_REPAIR_HINT} 修复"
+        )
+    return binary_path
+
+
 def _needs_detached_login_console(interactive: bool) -> bool:
     """Agent 等非终端环境里,交互式 biliup login 没有可用的 stdin/stdout,
     需要弹出独立控制台让用户扫码;真实终端保持继承 stdio 的原行为。"""
@@ -187,17 +218,38 @@ def _needs_detached_login_console(interactive: bool) -> bool:
     )
 
 
-def run_biliup_command(arguments: list[str], interactive: bool = False) -> subprocess.CompletedProcess[str]:
-    binary_path = ensure_biliup_binary(force_check=False)
+def _resolve_command_timeout(arguments: list[str], timeout: float | None) -> float:
+    """显式 timeout 优先；否则按子命令选默认超时：查询 60s、登录 360s、上传 3600s。"""
+    if timeout is not None:
+        return timeout
+    if "upload" in arguments:
+        return UPLOAD_TIMEOUT_SECONDS
+    if "login" in arguments:
+        return LOGIN_TIMEOUT_SECONDS
+    return QUERY_TIMEOUT_SECONDS
+
+
+def run_biliup_command(
+    arguments: list[str],
+    interactive: bool = False,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """执行本地 biliup 命令，超时由 subprocess.run 终止并回收子进程。
+
+    只做只读检查(require_biliup_binary)，绝不自动下载；所有控制台分支均受超时约束。
+    """
+    binary_path = require_biliup_binary()
     command = [str(binary_path), *arguments]
+    effective_timeout = _resolve_command_timeout(arguments, timeout)
     if _needs_detached_login_console(interactive):
         return subprocess.run(
             command,
             check=False,
             creationflags=_CREATE_NEW_CONSOLE,
+            timeout=effective_timeout,
         )
     if interactive:
-        return subprocess.run(command, check=False)
+        return subprocess.run(command, check=False, timeout=effective_timeout)
     return subprocess.run(
         command,
         check=False,
@@ -205,4 +257,5 @@ def run_biliup_command(arguments: list[str], interactive: bool = False) -> subpr
         text=True,
         encoding="utf-8",
         errors="replace",
+        timeout=effective_timeout,
     )

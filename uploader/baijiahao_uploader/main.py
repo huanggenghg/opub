@@ -144,7 +144,8 @@ async def baijiahao_setup(
 
 class BaiJiaHaoVideo(BaseBrowserUploader):
     """百家号视频发布器 (1-tier, 直接继承 BaseBrowserUploader)。
-    保留 @async_retry 装饰器(uploading_video / publish_video)和 ai2video 辅助方法。"""
+    保留 @async_retry 装饰器(uploading_video)和 ai2video 辅助方法。
+    publish_video 不自动重试:最终提交只点击一次,_submission_attempted 标记后异常视为结果未确认。"""
 
     PLATFORM_NAME = "baijiahao"
     UPLOAD_URL = BAIJIAHAO_HOME_URL
@@ -179,6 +180,8 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
         self.headless = headless
         self.proxy_setting = proxy_setting
         self.publish_strategy = publish_strategy
+        # 最终提交按钮已点击(立即发布)或定时弹窗已确认,此后异常一律视为结果未确认,不可自动重试
+        self._submission_attempted = False
 
     @classmethod
     async def _init_context(cls, browser, account_file: str | None = None):
@@ -318,6 +321,8 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
         await open_dropdown_and_pick(2, publish_date_min, "分")
 
         # 4. 点弹窗内确认按钮(用 cheetah-modal-confirm-btns 限定,避免匹配到底层触发按钮)
+        # 这是定时流的最终提交动作,点击前先标记,点击后异常视为结果未确认
+        self._submission_attempted = True
         await page.locator('div.cheetah-modal-confirm-btns button:has-text("定时发布")').click()
 
     async def handle_upload_error(self, page):
@@ -483,8 +488,18 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
                     result["message"] = "发布成功"
             baijiahao_logger.success(_msg("🥳", "cookie 更新完毕"))
         except Exception as e:
-            result["message"] = str(e)
-            baijiahao_logger.error(_msg("❌", f"上传失败: {e}"))
+            if self._submission_attempted:
+                # 提交按钮已点击,结果未知:明确不可自动重试,引导人工核对
+                result["message"] = f"发布已提交但结果未确认: {e}"
+                result["safe_to_retry"] = False
+                result["error_code"] = "PUB-baijiahao"
+                result["action"] = "请到百家号内容管理页人工核对是否已发布,确认未发布后再重试"
+                baijiahao_logger.error(_msg("❌", f"提交后结果未确认(不自动重试): {e}"))
+            else:
+                # 提交前失败:未发生任何提交,可以安全重试
+                result["message"] = str(e)
+                result["safe_to_retry"] = True
+                baijiahao_logger.error(_msg("❌", f"上传失败(提交前,可重试): {e}"))
 
         return result
 
@@ -567,10 +582,10 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
                     await page.wait_for_timeout(500)
                 except Exception:
                     pass
-                raise  # 重新抛出异常，让重试装饰器捕获
+                raise  # 定时确认遵循与立即发布相同规则:异常不重试
 
-    @async_retry(timeout=300)  # 例如，最多重试3次，超时时间为180秒
     async def publish_video(self, page: Page, publish_date):
+        # 不再整体重试:最终提交只允许一次,点击后的异常一律视为结果未确认,由 upload() 标记不可自动重试
         if publish_date != 0:
             # 定时发布
             await self.set_schedule_publish(page, publish_date)
@@ -591,43 +606,47 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
                     pass
 
             publish_button = page.get_by_test_id("publish-btn")
-            if await publish_button.count():
-                disabled = await publish_button.get_attribute("disabled")
-                baijiahao_logger.info(f"发布按钮 disabled={disabled}, 即将点击")
-                await publish_button.click(force=True)
-                baijiahao_logger.info(f"发布按钮已点击, 当前 URL: {page.url}")
-                # 等待 2 秒后抓取页面状态, 看是否有错误提示或弹窗
-                await asyncio.sleep(2)
+            if not await publish_button.count():
+                # 缺发布按钮属于页面异常,必须报错,不能继续等待误判成功
+                raise RuntimeError("未找到发布按钮,无法提交,请检查页面")
+            disabled = await publish_button.get_attribute("disabled")
+            baijiahao_logger.info(f"发布按钮 disabled={disabled}, 即将点击")
+            # 点击前先标记:click 本身失败时提交可能已发生,宁可保守地不重试
+            self._submission_attempted = True
+            await publish_button.click(force=True)
+            baijiahao_logger.info(f"发布按钮已点击, 当前 URL: {page.url}")
+            # 等待 2 秒后抓取页面状态, 看是否有错误提示或弹窗
+            await asyncio.sleep(2)
+            try:
                 screenshot_path = "output/baijiahao_after_publish_click.png"
                 from pathlib import Path as _Path
                 _Path(screenshot_path).parent.mkdir(parents=True, exist_ok=True)
                 await page.screenshot(path=screenshot_path, full_page=True)
                 baijiahao_logger.info(f"点击后截图: {screenshot_path}")
-                # 检查是否有错误提示
-                error_toast = await page.locator('.cheetah-message-error, .cheetah-notification-error, [class*="error"][class*="toast"]').count()
-                if error_toast:
-                    error_text = await page.locator('.cheetah-message-error, .cheetah-notification-error, [class*="error"][class*="toast"]').first.text_content()
-                    baijiahao_logger.error(f"检测到错误提示: {error_text}")
-                # 检查是否有确认弹窗
-                confirm_btn = await page.locator('button:has-text("确认"), button:has-text("确定"), button:has-text("继续发布")').count()
-                if confirm_btn:
-                    baijiahao_logger.info(f"检测到确认弹窗, 按钮数量: {confirm_btn}")
-                    try:
-                        await page.locator('button:has-text("确认"), button:has-text("确定"), button:has-text("继续发布")').first.click(timeout=2000)
-                        baijiahao_logger.info("已点击确认按钮")
-                    except Exception:
-                        pass
-            else:
-                baijiahao_logger.error("未找到发布按钮")
+            except Exception as e:
+                # 截图仅是留证,失败不改变已提交状态,也不触发再提交
+                baijiahao_logger.warning(f"点击后截图失败(不影响提交结果): {e}")
+            # 检查是否有错误提示
+            error_toast = await page.locator('.cheetah-message-error, .cheetah-notification-error, [class*="error"][class*="toast"]').count()
+            if error_toast:
+                error_text = await page.locator('.cheetah-message-error, .cheetah-notification-error, [class*="error"][class*="toast"]').first.text_content()
+                baijiahao_logger.error(f"检测到错误提示: {error_text}")
+            # 检查是否有确认弹窗
+            confirm_btn = await page.locator('button:has-text("确认"), button:has-text("确定"), button:has-text("继续发布")').count()
+            if confirm_btn:
+                baijiahao_logger.info(f"检测到确认弹窗, 按钮数量: {confirm_btn}")
+                try:
+                    await page.locator('button:has-text("确认"), button:has-text("确定"), button:has-text("继续发布")').first.click(timeout=2000)
+                    baijiahao_logger.info("已点击确认按钮")
+                except Exception:
+                    pass
         except Exception as e:
             baijiahao_logger.error(f"直接发布视频失败: {e}")
-            raise  # 重新抛出异常，让重试装饰器捕获
+            raise
 
     async def add_title_tags(self, page):
         # 百家号 videoV2 编辑页只有"作品描述"字段(contenteditable div), 无独立标题输入框
-        # 用 title 填充作品描述
-        if len(self.title) <= 8:
-            self.title += " 你不知道的"
+        # 用 title 填充作品描述;不擅自追加营销字句,不符合平台要求时让上层明确报错
         editor = page.locator('div[contenteditable="true"][role="textbox"]').first
         await editor.click()
         await page.keyboard.press("ControlOrMeta+A")

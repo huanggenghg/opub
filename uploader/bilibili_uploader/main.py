@@ -10,12 +10,11 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
-import time
 from pathlib import Path
 
 from publish.auth import classify_login_exception, login_check
 from uploader.base_video import BaseCliUploader, PlatformResultExtras, PublishStrategy
-from uploader.bilibili_uploader.runtime import run_biliup_command
+from uploader.bilibili_uploader.runtime import run_biliup_command_async
 from utils.log import bilibili_logger
 
 # 默认投稿分区: 171=个人动态
@@ -52,7 +51,7 @@ class BilibiliUploader(BaseCliUploader):
         """用 biliup renew 验证 cookie 是否有效。"""
         if not os.path.exists(account_file):
             return False
-        result = await asyncio.to_thread(run_biliup_command, ["-u", account_file, "renew"])
+        result = await run_biliup_command_async(["-u", account_file, "renew"])
         if result.returncode == 0:
             bilibili_logger.success("[+] cookie 有效")
             return True
@@ -69,9 +68,7 @@ class BilibiliUploader(BaseCliUploader):
         """交互式扫码登录 B站, 保存 biliup 格式 cookie。"""
         bilibili_logger.info(f"启动 biliup 登录, cookie 将保存到: {account_file}")
         Path(account_file).parent.mkdir(parents=True, exist_ok=True)
-        result = await asyncio.to_thread(
-            run_biliup_command, ["-u", account_file, "login"], interactive=True,
-        )
+        result = await run_biliup_command_async(["-u", account_file, "login"], interactive=True)
         if result.returncode == 0 and os.path.exists(account_file):
             bilibili_logger.success("biliup 登录成功, cookie 已保存")
             return True
@@ -99,13 +96,13 @@ class BilibiliUploader(BaseCliUploader):
             return await cls.cookie_gen(account_file)
         return True
 
-    def _list_bvs(self, *, strict: bool = False) -> set[str]:
+    async def _list_bvs(self, *, strict: bool = False) -> set[str]:
         """跑 biliup list,返回当前账号所有 BV 集合。命令失败返回空集,不抛异常。
 
         strict=True 时命令失败改为抛 _BiliupListCommandError,
         供 _list_bvs_with_status 感知 list 成败。
         """
-        result = run_biliup_command(["-u", self.account_file, "list"])
+        result = await run_biliup_command_async(["-u", self.account_file, "list"])
         if result.returncode != 0:
             bilibili_logger.warning(f"biliup list 失败,返回空集: {(result.stderr or '').strip()[:200]}")
             if strict:
@@ -118,16 +115,16 @@ class BilibiliUploader(BaseCliUploader):
                 bvs.add(parts[0])
         return bvs
 
-    def _list_bvs_with_status(self) -> tuple[set[str], bool]:
+    async def _list_bvs_with_status(self) -> tuple[set[str], bool]:
         """跑 biliup list,返回 (BV 集合, list 是否成功)。命令失败或超时返回 (空集, False)。"""
         try:
-            return self._list_bvs(strict=True), True
+            return await self._list_bvs(strict=True), True
         except (subprocess.TimeoutExpired, _BiliupListCommandError):
             return set(), False
 
-    def _match_bv_by_title(self) -> str | None:
+    async def _match_bv_by_title(self) -> str | None:
         """fallback: 在 biliup list 里找 title 等于 self.title 的行,返回 BV。"""
-        result = run_biliup_command(["-u", self.account_file, "list"])
+        result = await run_biliup_command_async(["-u", self.account_file, "list"])
         if result.returncode != 0:
             return None
         matches: list[str] = []
@@ -141,7 +138,7 @@ class BilibiliUploader(BaseCliUploader):
             bilibili_logger.warning(f"title 匹配到多个 BV: {matches},取第一个")
         return matches[0]
 
-    def _capture_bv_after_upload(self, before_bvs: set[str], max_retries: int = 3, delay: float = 2.0) -> str | None:
+    async def _capture_bv_after_upload(self, before_bvs: set[str], max_retries: int = 3, delay: float = 2.0) -> str | None:
         """上传后轮询 biliup list,找本次上传产生的新 BV。
 
         - 1 个新 BV: 返回它(主路径)
@@ -150,33 +147,30 @@ class BilibiliUploader(BaseCliUploader):
         - 重试耗尽: fallback 到 title 匹配
         """
         for attempt in range(max_retries):
-            after_bvs = self._list_bvs()
+            after_bvs = await self._list_bvs()
             new_bvs = after_bvs - before_bvs
             if len(new_bvs) == 1:
                 return next(iter(new_bvs))
             if len(new_bvs) > 1:
                 bilibili_logger.warning(f"diff 出 {len(new_bvs)} 个新 BV,fallback 到 title 匹配: {new_bvs}")
-                return self._match_bv_by_title()
+                return await self._match_bv_by_title()
             if attempt < max_retries - 1:
-                time.sleep(delay)
+                await asyncio.sleep(delay)
         bilibili_logger.warning(f"重试 {max_retries} 次仍未拿到新 BV,fallback 到 title 匹配")
-        return self._match_bv_by_title()
+        return await self._match_bv_by_title()
 
     async def upload(self) -> PlatformResultExtras:
         """用 biliup 上传视频到 B站。
 
-        同步 biliup 子进程调用整体在工作线程执行,不阻塞事件循环。
+        逐步异步执行 biliup；取消时回收当前进程，不再启动后续投稿。
         上传成功后会尝试抓取本次发布视频的公开链接,写入 result_url。
         抓取失败不影响发布成功状态(发布已成功,只是缺链接)。
         """
-        return await asyncio.to_thread(self._upload_sync)
-
-    def _upload_sync(self) -> PlatformResultExtras:
         tag_str = ",".join(self.tags) if isinstance(self.tags, list) else str(self.tags)
         if not os.path.exists(self.file_path):
             return {"success": False, "message": f"视频文件不存在: {self.file_path}"}
 
-        before_bvs, list_ok = self._list_bvs_with_status()
+        before_bvs, list_ok = await self._list_bvs_with_status()
 
         args = [
             "-u", self.account_file,
@@ -189,7 +183,7 @@ class BilibiliUploader(BaseCliUploader):
         ]
         bilibili_logger.info(f"biliup 上传: {self.file_path}, title={self.title}, tid={self.tid}")
         try:
-            result = run_biliup_command(args)
+            result = await run_biliup_command_async(args)
         except subprocess.TimeoutExpired as exc:
             # 上传可能已部分/全部完成,自动重发有重复投稿风险,必须人工确认
             message = (
@@ -212,7 +206,7 @@ class BilibiliUploader(BaseCliUploader):
             bilibili_logger.warning("上传前 biliup list 失败,跳过链接抓取,请到 B站创作中心查看")
             return result_dict
         try:
-            bv = self._capture_bv_after_upload(before_bvs)
+            bv = await self._capture_bv_after_upload(before_bvs)
         except Exception as exc:
             # 发布已成功,链接查询失败不能把结果改失败
             bilibili_logger.warning(f"抓取内容链接失败(不影响发布结果): {exc}")

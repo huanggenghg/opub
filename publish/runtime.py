@@ -140,10 +140,11 @@ def repair_environment(with_video: bool = False, with_bilibili: bool = False) ->
         print_error("ENV-004", "Patchright Chromium 安装失败", f"检查网络或浏览器下载镜像后，运行 {repair_command} 重试")
         return False
     if with_bilibili:
-        from uploader.bilibili_uploader.runtime import ensure_biliup_binary
+        from uploader.bilibili_uploader.runtime import ensure_biliup_binary, require_biliup_binary
 
         try:
             ensure_biliup_binary()
+            require_biliup_binary()
         except Exception as exc:
             print_error("ENV-007", "B站 biliup 程序安装失败", f"检查网络与 GitHub 可达性后，运行 {repair_command} 重试（{exc}）")
             return False

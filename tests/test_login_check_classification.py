@@ -184,7 +184,7 @@ class BilibiliLoginClassificationTests(unittest.TestCase):
             ('request failed: connection reset token=secret', 'network'),
             ('unknown renew response token=secret', 'page'),
         ]:
-            with self.subTest(stderr=stderr), patch('uploader.bilibili_uploader.main.os.path.exists', return_value=True), patch('uploader.bilibili_uploader.main.run_biliup_command', return_value=subprocess.CompletedProcess([], 1, '', stderr)):
+            with self.subTest(stderr=stderr), patch('uploader.bilibili_uploader.main.os.path.exists', return_value=True), patch('uploader.bilibili_uploader.main.run_biliup_command_async', return_value=subprocess.CompletedProcess([], 1, '', stderr)):
                 if expected is False:
                     self.assertFalse(asyncio.run(BilibiliUploader.cookie_auth('/fake/account.json')))
                 else:
@@ -195,7 +195,7 @@ class BilibiliLoginClassificationTests(unittest.TestCase):
 
     def test_missing_biliup_is_environment_failure(self):
         from publish.auth import LoginCheckError
-        with patch('uploader.bilibili_uploader.main.os.path.exists', return_value=True), patch('uploader.bilibili_uploader.main.run_biliup_command', side_effect=FileNotFoundError('private path')):
+        with patch('uploader.bilibili_uploader.main.os.path.exists', return_value=True), patch('uploader.bilibili_uploader.main.run_biliup_command_async', side_effect=FileNotFoundError('private path')):
             with self.assertRaises(LoginCheckError) as raised:
                 asyncio.run(BilibiliUploader.cookie_auth('/fake/account.json'))
         self.assertEqual(raised.exception.kind, 'environment')

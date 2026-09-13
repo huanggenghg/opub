@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -88,8 +89,9 @@ class RepairWithBilibiliTests(unittest.TestCase):
         with patch(
             "uploader.bilibili_uploader.runtime.ensure_biliup_binary",
             return_value=Path("/mock/biliup"),
-        ) as ensure:
+        ) as ensure, patch("uploader.bilibili_uploader.runtime.require_biliup_binary", return_value=Path("/mock/biliup")) as require:
             self.assertTrue(runtime.repair_environment(with_bilibili=True))
+        require.assert_called_once()
         ensure.assert_called_once()
 
     def test_normal_repair_does_not_install_biliup(self):
@@ -186,6 +188,37 @@ class PublishGateIntegrationTests(unittest.TestCase):
         self.assertEqual(code, 0)
         platform_check.assert_not_called()
         prepared.assert_awaited_once()
+
+
+class RepairExecutableRegressionTests(unittest.TestCase):
+    @unittest.skipIf(os.name == 'nt', 'POSIX executable permissions')
+    def test_repair_restores_existing_binary_permissions(self):
+        from uploader.bilibili_uploader import runtime as biliup_runtime
+
+        for offline in (False, True):
+            with self.subTest(offline=offline), tempfile.TemporaryDirectory() as temp_dir:
+                binary = Path(temp_dir) / 'biliup'
+                binary.write_text('fake CLI')
+                binary.chmod(0o600)
+                with patch.object(biliup_runtime, 'build_biliup_runtime_path', return_value=binary), \
+                     patch.object(biliup_runtime, 'read_local_biliup_version', return_value='v1'), \
+                     patch.object(biliup_runtime, 'fetch_latest_release', return_value={'tag_name': 'v1'},
+                                  side_effect=OSError('offline') if offline else None), \
+                     patch.object(biliup_runtime, 'download_biliup_asset') as download, \
+                     patch('publish.runtime.sync_python_dependencies', return_value=True), \
+                     patch('publish.runtime.install_patchright_chromium', return_value=True):
+                    self.assertTrue(runtime.repair_environment(with_bilibili=True))
+                    self.assertTrue(os.access(binary, os.X_OK))
+                    self.assertTrue(runtime.platform_runtime_preflight(['bilibili']))
+                    download.assert_not_called()
+
+    def test_repair_rejects_installer_success_without_runnable_binary(self):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+             patch('uploader.bilibili_uploader.runtime.build_biliup_runtime_path', return_value=Path(temp_dir) / 'missing'), \
+             patch('uploader.bilibili_uploader.runtime.ensure_biliup_binary'), \
+             patch('publish.runtime.sync_python_dependencies', return_value=True), \
+             patch('publish.runtime.install_patchright_chromium', return_value=True):
+            self.assertFalse(runtime.repair_environment(with_bilibili=True))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
 import shutil
@@ -165,6 +166,10 @@ def ensure_biliup_binary(force_check: bool = True) -> Path:
     binary_path = build_biliup_runtime_path()
     local_version = read_local_biliup_version()
 
+    # 显式修复也要处理已有文件丢失执行权限的情况，包括离线复用。
+    if binary_path.is_file() and _normalize_system() != "windows" and not os.access(binary_path, os.X_OK):
+        binary_path.chmod(binary_path.stat().st_mode | stat.S_IXUSR)
+
     # 默认优先复用本地已存在的 biliup，避免每次执行都去请求 GitHub latest release。
     if binary_path.exists() and not force_check:
         return binary_path
@@ -258,4 +263,51 @@ def run_biliup_command(
         encoding="utf-8",
         errors="replace",
         timeout=effective_timeout,
+    )
+
+
+async def run_biliup_command_async(
+    arguments: list[str],
+    interactive: bool = False,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """可取消的只读执行入口；取消或超时后先终止、回收进程，再向上抛出。"""
+    command = [str(require_biliup_binary()), *arguments]
+    effective_timeout = _resolve_command_timeout(arguments, timeout)
+    options = {}
+    if _needs_detached_login_console(interactive):
+        options["creationflags"] = _CREATE_NEW_CONSOLE
+    if not interactive:
+        options.update(stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    process = await asyncio.create_subprocess_exec(*command, **options)
+    communication = asyncio.create_task(process.communicate())
+    try:
+        # Python 3.9 的 wait_for 在完成与取消同时发生时可能吞掉取消。
+        done, _ = await asyncio.wait({communication}, timeout=effective_timeout)
+        if not done:
+            raise asyncio.TimeoutError
+        stdout, stderr = communication.result()
+    except BaseException as exc:
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        # 管道读取异常也必须 wait；重复取消不能打断排空、回收。
+        cleanup = asyncio.gather(communication, process.wait(), return_exceptions=True)
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError as cancelled:
+                # 清理期间的新取消优先于超时，不能让上层继续下一个命令。
+                exc = cancelled
+        if isinstance(exc, asyncio.TimeoutError):
+            output = cleanup.result()[0]
+            stdout, stderr = output if isinstance(output, tuple) else (None, None)
+            raise subprocess.TimeoutExpired(command, effective_timeout, output=stdout, stderr=stderr) from exc
+        raise exc
+    return subprocess.CompletedProcess(
+        command, process.returncode,
+        stdout.decode("utf-8", errors="replace") if stdout is not None else None,
+        stderr.decode("utf-8", errors="replace") if stderr is not None else None,
     )

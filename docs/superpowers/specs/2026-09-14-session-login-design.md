@@ -6,7 +6,7 @@
 
 ## 现状
 
-`publish_one_item` 在上传前单独调 `ensure_account_login`：`cookie_auth` 自起一套浏览器导航判定；失效时 `cookie_gen` 再起一套扫码，扫码后 `_save_state_and_validate` 又起一套校验；上传时 `upload()` 的 `_browser_session` 再起一套。cookie 有效时每素材每平台 2 次浏览器冷启动，需扫码时最多 4 次；tencent 扫码与上传之间的新上下文存在 22 秒 session 失效窗口。各平台 `upload_video_content(page)` 均自带 `goto(UPLOAD_URL)`；浏览器默认有头（`chrome_headless` 缺省 False），扫码可直接在页面完成。
+对应 `docs/KNOWN_ISSUES.md` 的 BROWSER-01。`publish_one_item` 在上传前单独调 `ensure_account_login`：`cookie_auth` 自起一套浏览器导航判定；失效时 `cookie_gen` 再起一套扫码，扫码后 `_save_state_and_validate` 又起一套校验；上传时 `upload()` 的 `_browser_session` 再起一套。此外 douyin / xiaohongshu / kuaishou / baijiahao / weibo 的 `validate_login_and_strategy` 还会调 `cookie_auth` 再开一套（tencent 只查文件存在）。cookie 有效时每素材每平台最多 3 次浏览器冷启动，需扫码时最多 4 次；tencent 扫码与上传之间的新上下文存在 22 秒 session 失效窗口。各平台 `upload_video_content(page)` 均自带 `goto(UPLOAD_URL)`；浏览器默认有头（`chrome_headless` 缺省 False），扫码可直接在页面完成。
 
 ## 核心机制
 
@@ -33,14 +33,16 @@
 
 - orchestrator 登录预检循环：浏览器平台整段跳过 `ensure_account_login`，登录由上传会话完成；仅 bilibili 保留预检（其 `cookie_auth` 为 biliup 查询子进程，无浏览器）。`platform_requires_account_login` 相应收窄。"未发现账号文件，将触发扫码登录"提示保留。
 - orchestrator 中途失效重试（`_is_safe_login_expiry` 命中，如 tencent `_TencentPreMediaLoginExpired`）：改为直接重调一次 `publish_to_platform`——新会话的状态机自行完成重新登录——移除 `ensure_account_login(force=True)`。重试仍限一次；`safe_to_retry=True` 契约保证未发生提交，重试安全。重试路径从 2-3 次浏览器降到 1 次。
-- dispatch：扫码提醒抽共享 helper（dispatch 与基类状态机共用同一文案）；`publish_to_platform` 统一包裹 `LoginCheckError` / `LoginTimeoutError` 转换为结果 dict，各 `publish_to_*` 内现有 `except LoginCheckError` 分支保留（先到先转，行为一致）。
+- dispatch：扫码提醒抽共享 helper（dispatch 与基类状态机共用同一文案）；`LoginCheckError` / `LoginTimeoutError` 的结果转换统一上移到 `publish_to_platform` 包裹，各 `publish_to_*` 内现有 `except LoginCheckError` 分支移除——wrapper 的通用 `except Exception` 会吞掉放行上来的登录异常，只有移除后集中转换才能生效。
 - `cookie_auth` / `cookie_gen` / `ensure_login` / `ensure_account_login` 本体保留：bilibili 预检与独立登录路径仍在用，发布主路径不再经过。
 
 ## 平台层
 
 6 平台各在 `upload()` except 链最前加一行 `except (LoginCheckError, LoginTimeoutError): raise` 放行：douyin / xiaohongshu / kuaishou / weibo 各 2 个调用点（video + note），baijiahao 1 个，tencent 2 个。登录异常发生在 `yield` 之前，不会落入平台通用 except 误判成 `PUB-xxx`，也不会触碰 `_submission_attempted` 分支。
 
-tencent 补充：确认 `LOGIN_MARKERS` 覆盖 login.html 重定向（不足则补）；其 `is_login_completed` 为 DOM marker override，状态机直接复用；扫码后保存点（状态机内）与退出保存（`save_state=False` 禁用）天然分离。各平台类的 `UPLOAD_URL` / `LOGIN_URL` / `LOGIN_MARKERS` 类属性需对状态机可用（tencent 现用模块级常量，需对齐到类属性）。tk 被动继承。bilibili 无改动。
+tencent 补充：`LOGIN_MARKERS = ["login.html"]` 已在类属性上（含 `UPLOAD_URL` / `LOGIN_URL`），状态机直接复用；其 `is_login_completed` 为 DOM marker override；扫码后保存点（状态机内）与退出保存（`save_state=False` 禁用）天然分离。tk 被动继承。bilibili 无改动。
+
+`validate_login_and_strategy` 移除 `cookie_auth` 调用（douyin / xiaohongshu / kuaishou / baijiahao / weibo）：保留文件存在、发布策略、发布日期的本地校验；运行时登录有效性交给会话状态机（KNOWN_ISSUES 方向："文件和参数校验保持为本地操作"）。
 
 ## 验证
 
@@ -50,7 +52,7 @@ tencent 补充：确认 `LOGIN_MARKERS` 覆盖 login.html 重定向（不足则�
 
 ## 发布
 
-随 0.8.5 发布（工作区已 bump pyproject / SKILL / test_package_build；发布前 `uv lock` 同步 uv.lock）。SKILL.md / docs/CLI.md 登录流程措辞微调，对外行为不变（无账号文件仍自动弹浏览器扫码）。
+随 0.8.6 发布（0.8.5 已于 2026-09-14 发布至 PyPI，本功能顺延一个版本号；pyproject / SKILL / test_package_build 四处同步 bump，`uv lock` 同步 uv.lock）。SKILL.md / docs/CLI.md 登录流程措辞微调，对外行为不变（无账号文件仍自动弹浏览器扫码）。KNOWN_ISSUES.md 的 BROWSER-01 标记为已实现。
 
 ## 非目标
 

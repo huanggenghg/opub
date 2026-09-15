@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime
 import base64
 from pathlib import Path
@@ -79,3 +80,28 @@ def print_terminal_qrcode(
     print("在 Windows 下建议使用 Windows Terminal（支持 UTF-8，可完整显示二维码）")
     print(f"否则请打开 {qrcode_path} 扫码")
     print()
+
+
+@asynccontextmanager
+async def session_qrcode(page, account_file, save_qrcode, refresh_qrcode=None):
+    """Present and refresh an existing platform QR flow on its current page."""
+    qrcode_path = None
+
+    async def save():
+        nonlocal qrcode_path
+        info = await save_qrcode(page, account_file, previous_qrcode_path=qrcode_path)
+        qrcode_path = Path(info["image_path"]) if info.get("image_path") else None
+
+    async def poll():
+        if refresh_qrcode and await refresh_qrcode(page):
+            await save()
+
+    try:
+        await save()
+        yield poll
+    finally:
+        # Local QR cleanup must not hide cancellation or a login outcome.
+        try:
+            remove_qrcode_file(qrcode_path)
+        except OSError:
+            pass

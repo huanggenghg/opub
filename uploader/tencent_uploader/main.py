@@ -13,6 +13,7 @@ from patchright.async_api import Page
 from patchright.async_api import async_playwright
 
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS
+from publish.auth import LoginCheckError, LoginTimeoutError
 from uploader.base_video import (
     BaseBrowserUploader,
     LoginExpiredError,
@@ -24,6 +25,7 @@ from uploader.base_video import (
     _get_qrcode_utils,
     _msg,
 )
+from utils.login_qrcode import session_qrcode
 from utils.log import tencent_logger
 
 TENCENT_LOGIN_URL = "https://channels.weixin.qq.com"
@@ -163,6 +165,18 @@ async def _is_tencent_login_completed(page: Page) -> bool:
     return True
 
 
+def _tencent_qrcode_scopes(page: Page):
+    """Return the iframe first, then the top document for old page layouts."""
+    scopes = []
+    if hasattr(page, "frame_locator"):
+        try:
+            scopes.append(page.frame_locator('[src*="qrconnect"]'))
+        except Exception:
+            pass
+    scopes.append(page)
+    return scopes
+
+
 async def _is_tencent_qrcode_expired(page: Page) -> bool:
     tip_selectors = [
         'div.mask.show p.refresh-tip:has-text("二维码已过期，点击刷新")',
@@ -170,13 +184,14 @@ async def _is_tencent_qrcode_expired(page: Page) -> bool:
         'p.refresh-tip:has-text("二维码已过期，点击刷新")',
         'p.refresh-tip:has-text("网络不可用，点击刷新")',
     ]
-    for selector in tip_selectors:
-        tip = page.locator(selector).first
-        try:
-            if await tip.count() and await tip.is_visible():
-                return True
-        except Exception:
-            continue
+    for scope in _tencent_qrcode_scopes(page):
+        for selector in tip_selectors:
+            tip = scope.locator(selector).first
+            try:
+                if await tip.count() and await tip.is_visible():
+                    return True
+            except Exception:
+                continue
     return False
 
 
@@ -200,15 +215,17 @@ async def _refresh_tencent_qrcode(page: Page) -> None:
         "div.login-qrcode-wrap div.mask.show div.refresh-wrap",
         "div.login-qrcode-wrap div.mask.show .refresh-wrap",
     ]
-    for selector in visible_refresh_selectors:
-        refresh_wrap = page.locator(selector).first
-        try:
-            if not await refresh_wrap.count() or not await refresh_wrap.is_visible():
+    scopes = _tencent_qrcode_scopes(page)
+    for scope in scopes:
+        for selector in visible_refresh_selectors:
+            refresh_wrap = scope.locator(selector).first
+            try:
+                if not await refresh_wrap.count() or not await refresh_wrap.is_visible():
+                    continue
+                await refresh_wrap.click()
+                return
+            except Exception:
                 continue
-            await refresh_wrap.click()
-            return
-        except Exception:
-            continue
 
     tip_selectors = [
         'div.mask.show p.refresh-tip:has-text("二维码已过期，点击刷新")',
@@ -216,24 +233,26 @@ async def _refresh_tencent_qrcode(page: Page) -> None:
         'p.refresh-tip:has-text("二维码已过期，点击刷新")',
         'p.refresh-tip:has-text("网络不可用，点击刷新")',
     ]
-    for selector in tip_selectors:
-        tip = page.locator(selector).first
-        try:
-            if not await tip.count() or not await tip.is_visible():
+    for scope in scopes:
+        for selector in tip_selectors:
+            tip = scope.locator(selector).first
+            try:
+                if not await tip.count() or not await tip.is_visible():
+                    continue
+                refresh_wrap = tip.locator("xpath=ancestor::div[contains(@class, 'refresh-wrap')]").first
+                if await refresh_wrap.count():
+                    await refresh_wrap.click()
+                else:
+                    await tip.click()
+                return
+            except Exception:
                 continue
-            refresh_wrap = tip.locator("xpath=ancestor::div[contains(@class, 'refresh-wrap')]").first
-            if await refresh_wrap.count():
-                await refresh_wrap.click()
-            else:
-                await tip.click()
-            return
-        except Exception:
-            continue
 
-    fallback_refresh = page.locator("div.login-qrcode-wrap div.refresh-wrap").first
-    if await fallback_refresh.count():
-        await fallback_refresh.click()
-        return
+    for scope in scopes:
+        fallback_refresh = scope.locator("div.login-qrcode-wrap div.refresh-wrap").first
+        if await fallback_refresh.count():
+            await fallback_refresh.click()
+            return
 
     raise RuntimeError("未找到可点击的视频号二维码刷新区域")
 
@@ -401,6 +420,14 @@ async def weixin_setup(
     )
 
 
+async def _refresh_session_qrcode(page):
+    if await _is_tencent_qrcode_expired(page):
+        await _refresh_tencent_qrcode(page)
+        await page.wait_for_timeout(1000)
+        return True
+    return False
+
+
 class TencentBaseUploader(BaseBrowserUploader):
     """微信视频号上传器基类 - hook layer for BaseBrowserUploader."""
 
@@ -408,6 +435,10 @@ class TencentBaseUploader(BaseBrowserUploader):
     UPLOAD_URL = TENCENT_UPLOAD_URL
     LOGIN_URL = TENCENT_LOGIN_URL
     LOGIN_MARKERS = ["login.html"]
+    LOGIN_SELECTORS = (
+        'iframe[src*="qrconnect"]', 'div.login-qrcode-wrap', 'div.qrcode-wrap',
+        'img.qrcode', 'span:has-text("微信扫码登录 视频号助手")',
+    )
     PUBLISH_MARKERS = []
 
     def __init__(
@@ -446,17 +477,11 @@ class TencentBaseUploader(BaseBrowserUploader):
         """Override hook: 视频号登录完成判断(基于 DOM marker,不是 URL)。"""
         return await _is_tencent_login_completed(page)
 
-    async def validate_login_and_strategy(self):
-        """Renamed from `validate_base_args(self)` to avoid collision with
-        `BasePlatformUploader.validate_base_args(params)` staticmethod (called by dispatch).
-        Checks cookie existence + publish_strategy + publish_date.
+    def _session_login_interaction(self, page):
+        return session_qrcode(page, self.account_file, _save_tencent_qrcode, _refresh_session_qrcode)
 
-        不主动调 cookie_auth:tencent sessionid 在新浏览器上下文里 22 秒失效,
-        ensure_login 已在 upload() 前验过,再开浏览器会让 sessionid 误判失效。
-        文件存在即认为有效,失效会在 _browser_session 导航时暴露。
-        """
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成视频号登录: {self.account_file}")
+    async def validate_login_and_strategy(self):
+        """Validate local strategy and schedule; session login checks the account."""
         if self.publish_strategy not in {TENCENT_PUBLISH_STRATEGY_IMMEDIATE, TENCENT_PUBLISH_STRATEGY_SCHEDULED}:
             raise ValueError(f"不支持的发布策略: {self.publish_strategy}")
 
@@ -877,6 +902,8 @@ class TencentVideo(TencentBaseUploader):
                 if getattr(self, "_result_url", None):
                     result["result_url"] = self._result_url
             tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except _TencentPreMediaLoginExpired as e:
             result.update(build_login_expired_result(str(e) or "cookie 已失效，请重新扫码登录"))
             tencent_logger.error(_msg("❌", f"上传失败: {e}"))
@@ -976,6 +1003,8 @@ class TencentNote(TencentBaseUploader):
                 result["success"] = True
                 result["message"] = "发布成功"
             tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except Exception as e:
             result["message"] = str(e)
             tencent_logger.error(_msg("❌", f"上传失败: {e}"))

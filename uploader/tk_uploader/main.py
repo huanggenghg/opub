@@ -8,6 +8,7 @@ from datetime import datetime
 from patchright.async_api import Page, async_playwright
 
 from conf import LOCAL_CHROME_HEADLESS
+from publish.auth import LoginCheckError, LoginTimeoutError
 from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
@@ -100,6 +101,8 @@ class TiktokVideo(BaseBrowserUploader):
                 await self.upload_video_content(page)
                 result["success"] = True
                 result["message"] = "发布成功"
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except Exception as e:
             result["message"] = str(e)
             tiktok_logger.error(_msg("❌", f"上传失败: {e}"))

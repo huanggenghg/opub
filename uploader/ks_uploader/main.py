@@ -11,6 +11,7 @@ from patchright.async_api import Page
 from patchright.async_api import async_playwright
 
 from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from publish.auth import LoginCheckError, LoginTimeoutError
 from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
@@ -25,6 +26,7 @@ from utils.login_qrcode import decode_qrcode_from_path
 from utils.login_qrcode import print_terminal_qrcode
 from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
+from utils.login_qrcode import session_qrcode
 from utils.log import kuaishou_logger
 
 KUAISHOU_UPLOAD_URL = "https://cp.kuaishou.com/article/publish/video"
@@ -387,6 +389,16 @@ async def get_share_link(page: Page) -> dict:
         return {"success": False, "share_link": "", "video_id": ""}
 
 
+async def _refresh_session_qrcode(page):
+    if await _is_ks_qrcode_expired(page):
+        button = page.locator("p.qrcode-refresh").first
+        if await button.count():
+            await button.click()
+            await page.wait_for_timeout(1000)
+            return True
+    return False
+
+
 class KSBaseUploader(BaseBrowserUploader):
     """快手上传器基类 - hook layer for BaseBrowserUploader."""
 
@@ -417,14 +429,11 @@ class KSBaseUploader(BaseBrowserUploader):
         """快手登录完成判断:页面在发布页且没有登录表单/QR码,上传按钮可见。"""
         return await _is_ks_auth_page_valid(page)
 
+    def _session_login_interaction(self, page):
+        return session_qrcode(page, self.account_file, _save_ks_qrcode, _refresh_session_qrcode)
+
     async def validate_login_and_strategy(self):
-        """Renamed from `validate_base_args(self)` to avoid collision with
-        `BasePlatformUploader.validate_base_args(params)` staticmethod (called by dispatch).
-        Checks cookie existence/validity + publish_strategy + publish_date."""
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成快手登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成快手登录: {self.account_file}")
+        """Validate local strategy and schedule; session login checks the account."""
 
         if self.publish_strategy is None:
             self.publish_strategy = (
@@ -679,6 +688,8 @@ class KSVideo(KSBaseUploader):
                 if not share_link:
                     result["message"] = "发布成功，但获取分享链接失败"
             kuaishou_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except Exception as e:
             result["message"] = str(e)
             kuaishou_logger.error(_msg("❌", f"上传失败: {e}"))
@@ -861,6 +872,8 @@ class KSNote(KSBaseUploader):
                 if not share_link:
                     result["message"] = "发布成功，但获取分享链接失败"
             kuaishou_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except Exception as e:
             result["message"] = str(e)
             kuaishou_logger.error(_msg("❌", f"上传失败: {e}"))

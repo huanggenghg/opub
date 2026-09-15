@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from functools import wraps
 
 
@@ -33,20 +34,37 @@ class LoginCheckError(RuntimeError):
         }
 
 
+class LoginTimeoutError(RuntimeError):
+    """Interactive login timed out or was interrupted before submission."""
+
+    def __init__(self, message: str = "扫码登录超时或中断"):
+        super().__init__(message)
+
+    def to_result(self) -> dict:
+        return {
+            'success': False,
+            'message': str(self),
+            'account_issue': True,
+            'issue_type': 'login_timeout',
+            'error_code': 'AUTH-001',
+            'action': '引导用户在弹出的浏览器中完成扫码登录后重试',
+            'safe_to_retry': True,
+        }
+
+
+def warn_qr_login_pending(platform_label: str) -> None:
+    print(
+        f"[opub] {platform_label} 未登录,即将打开浏览器等待扫码登录(最长约 5 分钟)。"
+        f"若由 Agent 调用,请确保工具超时不低于 360 秒",
+        file=sys.stderr,
+    )
+
+
 def classify_login_exception(exc: Exception) -> LoginCheckError:
     """Inspect diagnostics only to classify; never expose raw exception details."""
     if isinstance(exc, LoginCheckError):
         return exc
     detail = str(exc).lower()
-    if isinstance(exc, (FileNotFoundError, PermissionError, ImportError, json.JSONDecodeError)) or any(
-        marker in detail for marker in (
-            'browsertype.launch', 'executable doesn\'t exist', 'missing executable',
-            'target page, context or browser has been closed', 'browser closed',
-            'error reading storage state', 'failed to launch',
-            "module 'greenlet'", "module 'patchright'",
-        )
-    ):
-        return LoginCheckError('environment')
     # Locator waits indicate an unrecognized/slow page, not a network diagnosis.
     if any(marker in detail for marker in ('locator.', 'wait_for_selector', 'wait_for_url')):
         return LoginCheckError('page')
@@ -57,6 +75,15 @@ def classify_login_exception(exc: Exception) -> LoginCheckError:
         )
     ):
         return LoginCheckError('network')
+    if isinstance(exc, (OSError, ImportError, json.JSONDecodeError)) or any(
+        marker in detail for marker in (
+            'browsertype.launch', 'executable doesn\'t exist', 'missing executable',
+            'target page, context or browser has been closed', 'browser closed',
+            'error reading storage state', 'failed to launch',
+            "module 'greenlet'", "module 'patchright'",
+        )
+    ):
+        return LoginCheckError('environment')
     return LoginCheckError('page')
 
 
@@ -66,7 +93,7 @@ def login_check(check):
     async def checked(*args, **kwargs):
         try:
             return await check(*args, **kwargs)
-        except LoginCheckError:
+        except (LoginCheckError, LoginTimeoutError):
             raise
         except Exception as exc:
             raise classify_login_exception(exc) from None

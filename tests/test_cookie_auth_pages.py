@@ -18,6 +18,7 @@ import uploader.ks_uploader.main as ks_main
 import uploader.tencent_uploader.main as tencent_main
 import uploader.tk_uploader.main as tk_main
 import uploader.xiaohongshu_uploader.main as xhs_main
+from publish.auth import LoginCheckError
 
 
 class FakeLocator:
@@ -94,6 +95,23 @@ class CookieAuthPageTests(unittest.TestCase):
         )
 
         valid = asyncio.run(ks_main._is_ks_auth_page_valid(page))
+
+        self.assertTrue(valid)
+
+    def test_xhs_upload_page_requires_positive_upload_control(self):
+        page = FakePage(xhs_main.XHS_PUBLISH_VIDEO_URL)
+
+        with self.assertRaises(LoginCheckError):
+            asyncio.run(xhs_main.XiaoHongShuBaseUploader.check_upload_page(page))
+
+    def test_xhs_upload_page_accepts_attached_upload_control(self):
+        selector = "div[class^='upload-content'] input[class='upload-input'], input.upload-input"
+        page = FakePage(
+            xhs_main.XHS_PUBLISH_VIDEO_URL,
+            {selector: FakeLocator(count=1, visible=True)},
+        )
+
+        valid = asyncio.run(xhs_main.XiaoHongShuBaseUploader.check_upload_page(page))
 
         self.assertTrue(valid)
 

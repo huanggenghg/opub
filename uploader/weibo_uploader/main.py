@@ -9,7 +9,7 @@ from pathlib import Path
 from patchright.async_api import Page, TimeoutError as PlaywrightTimeoutError, async_playwright
 
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS
-from publish.auth import LoginCheckError, login_check
+from publish.auth import LoginCheckError, LoginTimeoutError, login_check
 from uploader.base_video import (
     BaseBrowserUploader,
     LoginExpiredError,
@@ -277,22 +277,24 @@ class WeiboBaseUploader(BaseBrowserUploader):
                 context = await cls._init_context(browser, account_file)
                 page = await context.new_page()
                 await page.goto(WEIBO_UPLOAD_CHANNEL_URL)
-                try:
-                    await _wait_for_weibo_upload_button(page)
-                except LoginExpiredError:
-                    return False
-                return True
+                return await cls.check_upload_page(page)
             finally:
                 await browser.close()
 
+    @classmethod
+    async def is_login_required(cls, page: Page) -> bool:
+        return await _is_weibo_login_page(page)
+
+    @classmethod
+    async def check_upload_page(cls, page: Page) -> bool:
+        try:
+            await _wait_for_weibo_upload_button(page)
+        except LoginExpiredError:
+            return False
+        return True
+
     async def validate_login_and_strategy(self):
-        """Renamed from `validate_base_args(self)` to avoid collision with
-        `BasePlatformUploader.validate_base_args(params)` staticmethod (called by dispatch).
-        Checks cookie existence/validity + publish_strategy + publish_date."""
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成微博登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise LoginExpiredError("cookie 已失效，请重新扫码登录")
+        """Validate local strategy and schedule; session login checks the account."""
 
         if self.publish_strategy not in {PublishStrategy.IMMEDIATE, PublishStrategy.SCHEDULED}:
             raise ValueError(f"不支持的发布策略: {self.publish_strategy}")
@@ -655,8 +657,8 @@ class WeiboVideo(WeiboBaseUploader):
                 else:
                     result["message"] = "发布成功，但未获取到视频链接"
             weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
-        except LoginCheckError as exc:
-            result.update(exc.to_result())
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except _WeiboPreMediaLoginExpired as e:
             result.update(build_login_expired_result(str(e) or "cookie 已失效，请重新扫码登录"))
             weibo_logger.error(_msg("❌", f"上传失败: {e}"))
@@ -777,8 +779,8 @@ class WeiboNote(WeiboBaseUploader):
                 result["success"] = True
                 result["message"] = "发布成功"
             weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
-        except LoginCheckError as exc:
-            result.update(exc.to_result())
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except _WeiboPreMediaLoginExpired as e:
             result.update(build_login_expired_result(str(e) or "cookie 已失效，请重新扫码登录"))
             weibo_logger.error(_msg("❌", f"上传失败: {e}"))

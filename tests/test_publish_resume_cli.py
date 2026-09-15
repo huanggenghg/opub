@@ -48,7 +48,7 @@ def test_resume_reuses_success_and_retries_only_safe_failure(tmp_path, isolated)
     assert second['exit_code'] == 0
     assert second['mode'] == 'resume'
     assert publish.await_count == 1
-    assert login.await_count == 1
+    assert login.await_count == 0
     assert publish.await_args.args[0] == 'weibo'
     assert second['results'][0]['reused'] is True
     assert second['results'][0]['result_url'] == 'https://example.com/1'
@@ -72,12 +72,14 @@ def test_uncertain_submission_is_never_retried(tmp_path, isolated, outcome):
 
 def test_failed_login_can_be_resumed_without_prior_submission(tmp_path, isolated):
     login, publish = isolated
-    login.return_value = False
+    failure = {'success': False, 'message': '登录超时', 'error_code': 'AUTH-001',
+               'account_issue': True, 'issue_type': 'login_timeout', 'safe_to_retry': True}
+    publish.side_effect = [failure, {'success': True, 'message': 'ok'}, {'success': True, 'message': 'ok'}]
     first = run(inputs(tmp_path))
-    publish.assert_not_awaited()
-    login.return_value = True
+    assert first['exit_code'] == 1
     assert run(['--resume', first['run_id']])['exit_code'] == 0
-    assert publish.await_count == 2
+    assert publish.await_count == 3
+    login.assert_not_awaited()
 
 
 def test_changed_media_rejected_before_login(tmp_path, isolated):

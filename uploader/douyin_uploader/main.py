@@ -14,7 +14,7 @@ from patchright.async_api import Page
 from patchright.async_api import async_playwright
 
 from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS
-from publish.auth import LoginCheckError, login_check
+from publish.auth import LoginCheckError, LoginTimeoutError, login_check
 from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
@@ -25,6 +25,7 @@ from uploader.base_video import (
     _msg,
 )
 from utils.base_social_media import set_init_script
+from utils.login_qrcode import session_qrcode
 from utils.log import douyin_logger
 
 DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
@@ -293,6 +294,15 @@ async def douyin_cookie_gen(
         return result
 
 
+async def _refresh_session_qrcode(page):
+    expired = page.get_by_text("二维码失效", exact=True).locator("..").first
+    if await expired.count() and await expired.is_visible():
+        await expired.click()
+        await page.wait_for_timeout(1000)
+        return True
+    return False
+
+
 class DouYinBaseUploader(BaseBrowserUploader):
     """抖音上传器基类 - hook layer for BaseBrowserUploader."""
 
@@ -331,16 +341,20 @@ class DouYinBaseUploader(BaseBrowserUploader):
                 context = await cls._init_context(browser, account_file)
                 page = await context.new_page()
                 await page.goto(cls.UPLOAD_URL, timeout=60000, wait_until="domcontentloaded")
-                if await cls.is_login_required(page):
-                    return False
-                await _wait_for_douyin_publish_marker(page)
-                if await cls.is_login_required(page):
-                    return False
-                if await _is_douyin_auth_page_valid(page):
-                    return True
-                raise LoginCheckError('page')
+                return await cls.check_upload_page(page)
             finally:
                 await browser.close()
+
+    @classmethod
+    async def check_upload_page(cls, page: Page) -> bool:
+        if await cls.is_login_required(page):
+            return False
+        await _wait_for_douyin_publish_marker(page)
+        if await cls.is_login_required(page):
+            return False
+        if await _is_douyin_auth_page_valid(page):
+            return True
+        raise LoginCheckError('page')
 
     @classmethod
     async def is_login_completed(cls, page: Page) -> bool:
@@ -362,14 +376,11 @@ class DouYinBaseUploader(BaseBrowserUploader):
             context = await browser.new_context(permissions=permissions)
         return await set_init_script(context)
 
+    def _session_login_interaction(self, page):
+        return session_qrcode(page, self.account_file, _save_douyin_qrcode, _refresh_session_qrcode)
+
     async def validate_login_and_strategy(self):
-        """Renamed from `validate_base_args(self)` to avoid collision with
-        `BasePlatformUploader.validate_base_args(params)` staticmethod (called by dispatch).
-        Checks cookie existence/validity + publish_strategy + publish_date."""
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成抖音登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成抖音登录: {self.account_file}")
+        """Validate local strategy and schedule; session login checks the account."""
         if self.publish_strategy not in {DOUYIN_PUBLISH_STRATEGY_IMMEDIATE, DOUYIN_PUBLISH_STRATEGY_SCHEDULED}:
             raise ValueError(f"不支持的发布策略: {self.publish_strategy}")
 
@@ -715,6 +726,8 @@ class DouYinVideo(DouYinBaseUploader):
                 else:
                     result["message"] = "发布成功"
             douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except DouyinPublishRestrictedError as exc:
             result["message"] = f"账号被限制发布: {exc.toast_text}"
             result["account_issue"] = True
@@ -877,6 +890,8 @@ class DouYinNote(DouYinBaseUploader):
                 result["success"] = True
                 result["message"] = "发布成功"
             douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except DouyinPublishRestrictedError as exc:
             result["message"] = f"账号被限制发布: {exc.toast_text}"
             result["account_issue"] = True

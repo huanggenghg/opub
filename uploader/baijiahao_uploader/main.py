@@ -11,7 +11,7 @@ import asyncio
 import re
 
 from conf import LOCAL_CHROME_PATH, LOCAL_CHROME_HEADLESS
-from publish.auth import LoginCheckError, login_check
+from publish.auth import LoginCheckError, LoginTimeoutError, login_check
 from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
@@ -215,28 +215,26 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
                 page = await context.new_page()
                 await page.goto(cls.UPLOAD_URL, timeout=60000, wait_until="domcontentloaded")
 
-                # 首页 SPA 冷加载时 marker 可能 15 秒以上才渲染(高峰期更慢),
-                # 轮询 30 秒代替单次 5 秒判定, 避免有效 cookie 被误判失效
-                for _ in range(10):
-                    await page.wait_for_timeout(timeout=3000)
-                    if await cls.is_login_required(page):
-                        return False
-                    if await _is_baijiahao_auth_page_valid(page):
-                        baijiahao_logger.success(_msg("🥳", "cookie 有效"))
-                        return True
-
-                raise LoginCheckError('page')
+                return await cls.check_upload_page(page)
             finally:
                 await browser.close()
 
+    @classmethod
+    async def check_upload_page(cls, page: Page) -> bool:
+        # 首页 SPA 冷加载时 marker 可能 15 秒以上才渲染(高峰期更慢),
+        # 轮询 30 秒代替单次 5 秒判定, 避免有效 cookie 被误判失效
+        for _ in range(10):
+            await page.wait_for_timeout(timeout=3000)
+            if await cls.is_login_required(page):
+                return False
+            if await _is_baijiahao_auth_page_valid(page):
+                baijiahao_logger.success(_msg("🥳", "cookie 有效"))
+                return True
+
+        raise LoginCheckError('page')
+
     async def validate_login_and_strategy(self):
-        """检查 cookie 存在/有效 + publish_strategy + publish_date。
-        Renamed from validate_base_args(self) to avoid collision with
-        BasePlatformUploader.validate_base_args(params) staticmethod (called by dispatch)."""
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成百家号登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成百家号登录: {self.account_file}")
+        """Validate local strategy and schedule; session login checks the account."""
         if self.publish_strategy not in {PublishStrategy.IMMEDIATE, PublishStrategy.SCHEDULED}:
             raise ValueError(f"不支持的发布策略: {self.publish_strategy}")
 
@@ -487,6 +485,8 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
                 else:
                     result["message"] = "发布成功"
             baijiahao_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except Exception as e:
             if self._submission_attempted:
                 # 提交按钮已点击,结果未知:明确不可自动重试,引导人工核对

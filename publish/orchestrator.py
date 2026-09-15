@@ -162,20 +162,24 @@ async def publish_one_item(video_params: Dict[str, Any]) -> Dict[str, Any]:
         retryable = result.get('safe_to_retry') is True
         auth_failure_reported = False
         if _is_safe_login_expiry(result):
-            login_error = None
-            try:
-                login_ok = await ensure_account_login(platform, account_file, force=True)
-            except Exception as exc:
-                login_ok = False
-                login_error = classify_login_exception(exc).to_result()
-            if login_ok:
+            if not platform_requires_account_login(platform):
+                # Only a proven pre-submit expiry may start one fresh session.
                 result = await publish_to_platform(platform, platform_params)
                 retryable = result.get('safe_to_retry') is True
             else:
-                result = login_error or _auth_failure(platform_name)
-                print_error(result["error_code"], result["message"], result.get("action") or f"引导用户在弹出的浏览器中完成 {platform_name} 扫码登录后重试")
-                auth_failure_reported = True
-
+                login_error = None
+                try:
+                    login_ok = await ensure_account_login(platform, account_file, force=True)
+                except Exception as exc:
+                    login_ok = False
+                    login_error = classify_login_exception(exc).to_result()
+                if login_ok:
+                    result = await publish_to_platform(platform, platform_params)
+                    retryable = result.get('safe_to_retry') is True
+                else:
+                    result = login_error or _auth_failure(platform_name)
+                    print_error(result["error_code"], result["message"], result.get("action") or f"引导用户在弹出的浏览器中完成 {platform_name} 扫码登录后重试")
+                    auth_failure_reported = True
         save_result(platform, result, retryable=retryable)
         if auth_failure_reported:
             continue

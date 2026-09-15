@@ -1,7 +1,7 @@
 ---
 name: opub-cli
 description: Use when 用户要用 opub 发布/上传视频或图文、配置多平台发布、发布到抖音/小红书/快手/微博/B站/视频号/百家号，或排查 opub、账号登录校验、浏览器驱动环境问题
-version: "0.8.5"
+version: "0.8.6"
 ---
 
 # opub CLI 使用指南
@@ -78,7 +78,7 @@ opub --version                        # 查看已安装版本
 opub --help                           # 全部参数说明
 ```
 
-参数说明:**素材路径(`--video`/`--images`)、标题、描述、话题标签(`--tags`)、目标平台是每次发布的输入,执行前必须逐项向用户确认,不要自行检索文件系统挑素材,也不要替用户编写标题/描述/话题**。仅当用户明确表示留空自动生成时,`--title`/`--desc` 才可留空走自动生成(需视频同名 JSON 或 ZHIPU_API_KEY),生成失败报 CFG-001,此时向用户报告错误并请用户提供 `--title` 重试,不要自行编一个标题;`--schedule` 指定后本次为定时发布。每个平台只自动发现一个规范账号文件；未发现账号时，发布流程会引导扫码并写入对应上传器目录的 `account.json`。**启用平台若无账号文件,发布时会自动弹出浏览器扫码登录**,登录完成后继续发布,不需要提前单独登录。
+参数说明:**素材路径(`--video`/`--images`)、标题、描述、话题标签(`--tags`)、目标平台是每次发布的输入,执行前必须逐项向用户确认,不要自行检索文件系统挑素材,也不要替用户编写标题/描述/话题**。仅当用户明确表示留空自动生成时,`--title`/`--desc` 才可留空走自动生成(需视频同名 JSON 或 ZHIPU_API_KEY),生成失败报 CFG-001,此时向用户报告错误并请用户提供 `--title` 重试,不要自行编一个标题;`--schedule` 指定后本次为定时发布。每个平台只自动发现一个规范账号文件；未发现账号时，发布流程会引导扫码并写入对应上传器目录的 `account.json`。**启用平台若无账号文件,发布时会自动弹出浏览器扫码登录**,登录完成后继续发布,不需要提前单独登录。浏览器平台每个素材复用同一窗口和页签完成登录、上传及结果确认，结束后关闭；不同平台或账号分别管理会话。
 
 ### 预检与恢复
 
@@ -189,7 +189,7 @@ Agent 的运行沙箱可能自带**独立 Python 环境**（与项目 venv、系
 
 1. **统一用 `python -m pip ...` 而不是裸 `pip`**，确保 pip 操作的就是当前 `python` 的环境。
 2. **诊断与修复必须用同一个解释器**：修复前先运行 `python -c "import opub, sys; print(sys.executable)"` 确认该环境里 opub 可导入；若 `pip show` 说已安装而 `python -c "import ..."` 报 ModuleNotFoundError，说明两者不是同一环境，先定位 opub 实际所在的解释器再操作。
-3. **多平台同时报同一非登录类错误时，优先怀疑依赖损坏而不是引导用户扫码**。典型症状：发布时报 `module 'greenlet' has no attribute 'greenlet'`（以 AUTH-001 形式出现在多个浏览器平台）——greenlet 安装不完整，残缺的包目录会被 Python 当作 namespace package（导入成功但属性缺失），而残留的 dist-info 元数据会让 pip 误判为已装好、重装 opub 也不会补上。
+3. **多平台同时报同一非登录类错误时，优先怀疑依赖损坏而不是引导用户扫码**。典型症状：发布时报 `ENV-006`，内部诊断为 `module 'greenlet' has no attribute 'greenlet'`——greenlet 安装不完整，残缺的包目录会被 Python 当作 namespace package（导入成功但属性缺失），而残留的 dist-info 元数据会让 pip 误判为已装好、重装 opub 也不会补上。
 4. **修复依赖损坏**：删除 site-packages 下残缺的包目录及其 `*.dist-info`（dist-info 内缺少 METADATA/RECORD 即为残骸），再 `python -m pip install --force-reinstall --no-deps <包名>` 重装，最后用 `opub --version` 验证。
 
 ## Agent 注意事项

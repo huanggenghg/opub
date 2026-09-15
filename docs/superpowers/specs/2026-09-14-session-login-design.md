@@ -1,6 +1,6 @@
 # 发布会话内登录合并（每素材单浏览器）
 
-目标：同一平台对同一素材的发布只启动一次浏览器；登录判定、扫码登录、上传、结果确认都在同一会话内完成，素材发布结束统一关闭。
+目标：同一平台对同一素材的正常发布只启动一次浏览器（仅已确认提交前登录失效时允许另开一次恢复会话）；登录判定、扫码登录、上传、结果确认都在同一会话内完成，素材发布结束统一关闭。
 
 已确认的范围决策：会话粒度为**每素材一次**（不做跨素材复用）；主线 6 个浏览器平台（douyin / xiaohongshu / kuaishou / tencent / baijiahao / weibo）全面改造；tk 被动继承基类、不专门验证、不修其已知 iframe bug；bilibili 走 biliup 子进程无浏览器，不涉及。
 
@@ -13,11 +13,15 @@
 登录状态机做进 `_browser_session` 的 `yield page` 之前，全部在同一浏览器、同一 context、同一 page 上：
 
 1. `new_page()` 后 `goto(UPLOAD_URL, 60s, domcontentloaded)`，等待 3s（参数与现 `cookie_auth` 一致）。
-2. 无登录证据且 URL 未被重定向走：直接 `yield page`（快路径，cookie 有效时全程 1 次浏览器）。
-3. `is_login_required` 命中（登录标记或登录表单，即发布页上的真实失效证据）：stderr 打印扫码提醒（现 `dispatch.ensure_login` 的文案，抽共享 helper，Agent ≥360s 超时契约不变）→ `goto(LOGIN_URL)` 规范化导航 → 轮询 `is_login_completed`（3s × 100 次，上限 300s，与"最长约 5 分钟"契约一致）→ 完成后 `context.storage_state(account_file)` 立即落盘（后续上传失败也不丢登录）→ `goto(UPLOAD_URL)` 回发布页 → `yield page`。
+2. 无登录证据，且通过平台原有的发布页 URL / DOM 正向判定：直接 `yield page`（快路径，cookie 有效时全程 1 次浏览器）。
+3. `is_login_required` 命中（登录标记或登录表单，即发布页上的真实失效证据）：stderr 打印扫码提醒（现 `dispatch.ensure_login` 的文案，抽共享 helper，Agent ≥360s 超时契约不变）→ `goto(LOGIN_URL)` 规范化导航 → 轮询 `is_login_completed`（3s × 100 次，上限 300s，与"最长约 5 分钟"契约一致）→ 完成后在同一页回到 `UPLOAD_URL` 并重新确认发布页登录状态 → 创建账号文件父目录并保存 `context.storage_state(account_file)`（后续上传失败也不丢登录）→ `yield page`。回跳仍是登录页时不进入上传；未知页面、网络和文件保存失败仍按对应非登录错误分类。
 4. 导航阶段网络/超时/环境异常经 `classify_login_exception` 抛 `LoginCheckError`（NET-001 / PAGE-001 / ENV-006）；扫码轮询阶段超时、浏览器被用户关闭或页面崩溃抛 `LoginTimeoutError`。两阶段划分：登录证据确立之前的不确定异常不触发扫码，确立之后的交互阶段中断视为定论性登录失败。
 
-`upload_video_content` 自带的 goto 等同刷新一次表单（约 1-3s，接受，换取平台上传代码零改动）。退出侧（`save_on_success_only`、`save_state`）一字不动：tencent 仍不退出保存（防止衰减 session 覆盖完整 cookie）。`_save_state_and_validate` 里"再开浏览器校验新 cookie"的路径不再出现在发布主路径——活体会话中 `is_login_completed` 已返回 True，回到发布页的导航即最终校验。异常路径的 `finally` 保证 context/browser 照常关闭，不留孤儿进程。
+平台现有的结果链接提取可能打开临时页签（如微博）；本次保留该行为，主工作页不再因登录和上传切换而重建。
+
+`upload_video_content` 自带的 goto 等同刷新一次表单（约 1-3s，接受，换取平台上传代码零改动）。退出侧保留已进入上传阶段的 `save_on_success_only`、`save_state` 语义；登录失败时不保存不完整状态：tencent 仍不退出保存（防止衰减 session 覆盖完整 cookie）。`_save_state_and_validate` 里"再开浏览器校验新 cookie"的路径不再出现在发布主路径——最终校验必须验证回到发布页后的 URL / DOM，不能仅以导航完成作为登录成功。异常路径的 `finally` 覆盖 context / page 初始化及登录；context 关闭失败仍尝试关闭 browser，清理错误不能覆盖原始异常或已确认的发布结果。
+
+扫码交互还需保留平台既有行为：视频号发布页内的 `qrconnect` iframe 属于明确登录证据；小红书、快手沿用切换二维码面板的动作。原先支持二维码本地输出和失效刷新的平台继续在当前页完成这些动作，兼容无头浏览器配置；二维码文件按原规则清理，不额外启动浏览器。浏览器驱动管理器自身的进入/退出也属于初始化分类与资源清理边界。
 
 ## 错误契约
 
@@ -32,8 +36,8 @@
 ## 编排层
 
 - orchestrator 登录预检循环：浏览器平台整段跳过 `ensure_account_login`，登录由上传会话完成；仅 bilibili 保留预检（其 `cookie_auth` 为 biliup 查询子进程，无浏览器）。`platform_requires_account_login` 相应收窄。"未发现账号文件，将触发扫码登录"提示保留。
-- orchestrator 中途失效重试（`_is_safe_login_expiry` 命中，如 tencent `_TencentPreMediaLoginExpired`）：改为直接重调一次 `publish_to_platform`——新会话的状态机自行完成重新登录——移除 `ensure_account_login(force=True)`。重试仍限一次；`safe_to_retry=True` 契约保证未发生提交，重试安全。重试路径从 2-3 次浏览器降到 1 次。
-- dispatch：扫码提醒抽共享 helper（dispatch 与基类状态机共用同一文案）；`LoginCheckError` / `LoginTimeoutError` 的结果转换统一上移到 `publish_to_platform` 包裹，各 `publish_to_*` 内现有 `except LoginCheckError` 分支移除——wrapper 的通用 `except Exception` 会吞掉放行上来的登录异常，只有移除后集中转换才能生效。
+- orchestrator 中途失效重试（`_is_safe_login_expiry` 命中，如 tencent `_TencentPreMediaLoginExpired`）：改为直接重调一次 `publish_to_platform`——新会话的状态机自行完成重新登录——仅浏览器平台移除 `ensure_account_login(force=True)`，B站仍保留其原恢复路径。重试仍限一次；`safe_to_retry=True` 契约保证未发生提交，重试安全。重试路径从 2-3 次浏览器降到 1 次。
+- dispatch：扫码提醒抽共享 helper（dispatch 与基类状态机共用同一文案）；`LoginCheckError` / `LoginTimeoutError` 的结果转换统一上移到 `publish_to_platform` 包裹，各浏览器 `publish_to_*` wrapper 在通用 `except Exception` 之前显式放行两类登录异常，避免被吞成通用发布错误；B站保留原有转换兼容性。对外错误消息不含原始异常、敏感 URL 或账号状态。
 - `cookie_auth` / `cookie_gen` / `ensure_login` / `ensure_account_login` 本体保留：bilibili 预检与独立登录路径仍在用，发布主路径不再经过。
 
 ## 平台层
@@ -42,7 +46,7 @@
 
 tencent 补充：`LOGIN_MARKERS = ["login.html"]` 已在类属性上（含 `UPLOAD_URL` / `LOGIN_URL`），状态机直接复用；其 `is_login_completed` 为 DOM marker override；扫码后保存点（状态机内）与退出保存（`save_state=False` 禁用）天然分离。tk 被动继承。bilibili 无改动。
 
-`validate_login_and_strategy` 移除 `cookie_auth` 调用（douyin / xiaohongshu / kuaishou / baijiahao / weibo）：保留文件存在、发布策略、发布日期的本地校验；运行时登录有效性交给会话状态机（KNOWN_ISSUES 方向："文件和参数校验保持为本地操作"）。
+`validate_login_and_strategy` 移除 `cookie_auth` 调用（douyin / xiaohongshu / kuaishou / baijiahao / weibo）：保留素材文件、发布策略、发布日期的本地校验；6 个浏览器平台均移除账号文件必须已存在的限制；运行时登录有效性交给会话状态机（KNOWN_ISSUES 方向："文件和参数校验保持为本地操作"）。
 
 ## 验证
 

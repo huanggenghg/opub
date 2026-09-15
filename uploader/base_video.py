@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from enum import Enum
@@ -12,7 +13,10 @@ from urllib.parse import urlsplit
 from patchright.async_api import Page, Playwright, async_playwright
 
 from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
-from publish.auth import LoginCheckError, login_check
+from publish.auth import (
+    LoginCheckError, LoginTimeoutError, classify_login_exception, login_check,
+    warn_qr_login_pending,
+)
 from publish.constants import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from utils.base_social_media import set_init_script
 
@@ -327,30 +331,127 @@ class BaseBrowserUploader(BasePlatformUploader):
                 await browser.close()
             return result
 
+    @classmethod
+    async def check_upload_page(cls, page: Page) -> bool:
+        """Return False only for proven expiry; unknown pages raise an error.
+
+        Platforms with stronger authentication evidence override this same-page
+        hook so session login retains their standalone cookie check semantics.
+        """
+        if await cls.is_login_required(page):
+            return False
+        expected = cls.UPLOAD_URL.split("?", 1)[0].rstrip("/")
+        current = (page.url or "").split("?", 1)[0].rstrip("/")
+        if current == expected and await cls.is_login_completed(page):
+            return True
+        raise LoginCheckError('page')
+
+    @asynccontextmanager
+    async def _session_login_interaction(self, page: Page):
+        """Prepare platform QR UI, optionally yielding a refresh callback."""
+        yield None
+
+    @login_check
+    async def _ensure_session_login(self, page: Page) -> None:
+        """Authenticate on the upload page without creating another browser."""
+        await page.goto(self.UPLOAD_URL, timeout=60000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(3000)
+        if await self.check_upload_page(page):
+            return
+
+        warn_qr_login_pending(self.PLATFORM_NAME)
+
+        deadline = time.monotonic() + 300
+        try:
+            await page.goto(self.LOGIN_URL, timeout=60000, wait_until="domcontentloaded")
+            # Some valid sessions redirect away from LOGIN_URL immediately.
+            # Avoid trying to extract a QR code from the authenticated page.
+            if not await self.is_login_completed(page):
+                async with self._session_login_interaction(page) as refresh:
+                    for _ in range(100):
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise LoginTimeoutError()
+                        await page.wait_for_timeout(min(3000, remaining * 1000))
+                        if await self.is_login_completed(page):
+                            break
+                        if refresh is not None:
+                            await refresh()
+                    else:
+                        raise LoginTimeoutError()
+        except LoginTimeoutError:
+            raise LoginTimeoutError(f"{self.PLATFORM_NAME}扫码登录超时或中断") from None
+        except Exception as exc:
+            detail = str(exc).lower()
+            if any(marker in detail for marker in (
+                "target page, context or browser has been closed",
+                "browser has been closed", "browser closed", "page crashed",
+            )):
+                # Once expiry is proven, closing/crashing the interactive page
+                # is a definitive interrupted login, with no raw diagnostics.
+                raise LoginTimeoutError(f"{self.PLATFORM_NAME}扫码登录超时或中断") from None
+            # Network, unknown-page and QR/state persistence failures retain
+            # their non-auth classification and remain non-retryable.
+            raise classify_login_exception(exc) from None
+
+        # A completion marker alone is not sufficient: validate the destination
+        # on this very page before saving state or allowing media submission.
+        await page.goto(self.UPLOAD_URL, timeout=60000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(3000)
+        if not await self.check_upload_page(page):
+            raise LoginTimeoutError(f"{self.PLATFORM_NAME}扫码后仍需登录")
+        Path(self.account_file).parent.mkdir(parents=True, exist_ok=True)
+        await page.context.storage_state(path=self.account_file)
+
     @asynccontextmanager
     async def _browser_session(self, headless: Optional[bool] = None, save_on_success_only: bool = False, save_state: bool = True):
-        """Launch browser + context with stored cookies, yield page.
-        Saves storage_state on exit. If save_on_success_only=True, skips save
-        when the yielded block raised an exception. If save_state=False, skips
-        save entirely (for platforms whose cookies expire mid-session, e.g.
-        tencent video channel where storage_state at end of upload would
-        overwrite the complete cookie file with only sessionid/wxuin)."""
-        async with async_playwright() as playwright:
-            browser = await self._launch_browser(playwright, headless if headless is not None else self.headless)
-            context = await self._init_context(browser, self.account_file)
-            page = await context.new_page()
-            success = False
+        """Own one browser for authentication, upload and result confirmation.
+
+        Exit saves retain their existing platform policy. A failed login never
+        saves partial state; freshly validated interactive login saves separately
+        even when the platform disables exit saves.
+        """
+        driver = None
+        driver_started = False
+        browser = None
+        context = None
+        ready = False
+        success = False
+        try:
             try:
-                yield page
-                success = True
-            finally:
-                if save_state and (not save_on_success_only or success):
+                driver = async_playwright()
+                playwright = await driver.__aenter__()
+                driver_started = True
+                browser = await self._launch_browser(playwright, headless if headless is not None else self.headless)
+                context = await self._init_context(browser, self.account_file)
+                page = await context.new_page()
+                await self._ensure_session_login(page)
+                ready = True
+            except (LoginCheckError, LoginTimeoutError):
+                raise
+            except Exception as exc:
+                raise classify_login_exception(exc) from None
+            yield page
+            success = True
+        finally:
+            if ready and save_state and (not save_on_success_only or success):
+                try:
+                    await context.storage_state(path=self.account_file)
+                except Exception:
+                    pass
+            # Cleanup failures must neither skip browser.close nor replace a
+            # confirmed submission result or its original exception.
+            for resource in (context, browser):
+                if resource is not None:
                     try:
-                        await context.storage_state(path=self.account_file)
+                        await resource.close()
                     except Exception:
                         pass
-                await context.close()
-                await browser.close()
+            if driver_started:
+                try:
+                    await driver.__aexit__(None, None, None)
+                except Exception:
+                    pass
 
 
 class BaseCliUploader(BasePlatformUploader):

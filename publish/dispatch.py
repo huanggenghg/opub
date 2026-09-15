@@ -2,10 +2,9 @@
 """平台分发:登录校验与各平台发布实现"""
 import importlib
 import os
-import sys
 
 from publish.constants import PLATFORM_NAMES, TITLE_LIMITS
-from publish.auth import LoginCheckError
+from publish.auth import LoginCheckError, LoginTimeoutError, warn_qr_login_pending
 from publish.content import resolve_path, truncate_title
 
 
@@ -37,11 +36,7 @@ async def ensure_login(platform: str, account_file: str, force: bool = False) ->
 
     # 扫码登录会打开浏览器并阻塞等待用户扫码(最长约 5 分钟),
     # 提前告知调用方,避免 Agent 工具默认超时杀掉进程组导致浏览器一并退出
-    print(
-        f"[opub] {platform} 未登录,即将打开浏览器等待扫码登录(最长约 5 分钟)。"
-        f"若由 Agent 调用,请确保工具超时不低于 360 秒",
-        file=sys.stderr,
-    )
+    warn_qr_login_pending(platform)
     setup_func = getattr(module, setup_name)
     return await setup_func(account_file, handle=True)
 
@@ -52,7 +47,8 @@ async def ensure_account_login(platform: str, account_file: str, force: bool = F
 
 
 def platform_requires_account_login(platform: str) -> bool:
-    return platform in _PLATFORM_LOGIN
+    # Browser platforms authenticate inside their upload session.
+    return platform == "bilibili"
 
 
 async def publish_to_douyin(params: dict) -> dict:
@@ -85,8 +81,8 @@ async def publish_to_douyin(params: dict) -> dict:
                 title=title, publish_strategy=params["publish_strategy"],
             )
         return await uploader.upload()
-    except LoginCheckError as exc:
-        return exc.to_result()
+    except (LoginCheckError, LoginTimeoutError):
+        raise
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -121,8 +117,8 @@ async def publish_to_xiaohongshu(params: dict) -> dict:
                 title=title, desc=params["desc"], publish_strategy=params["publish_strategy"],
             )
         return await uploader.upload()
-    except LoginCheckError as exc:
-        return exc.to_result()
+    except (LoginCheckError, LoginTimeoutError):
+        raise
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -157,8 +153,8 @@ async def publish_to_kuaishou(params: dict) -> dict:
                 title=title, publish_strategy=params["publish_strategy"],
             )
         return await uploader.upload()
-    except LoginCheckError as exc:
-        return exc.to_result()
+    except (LoginCheckError, LoginTimeoutError):
+        raise
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -187,8 +183,8 @@ async def publish_to_tencent(params: dict) -> dict:
         )
         result = await uploader.upload()
         return result
-    except LoginCheckError as exc:
-        return exc.to_result()
+    except (LoginCheckError, LoginTimeoutError):
+        raise
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -217,8 +213,8 @@ async def publish_to_baijiahao(params: dict) -> dict:
         )
         result = await uploader.upload()
         return result
-    except LoginCheckError as exc:
-        return exc.to_result()
+    except (LoginCheckError, LoginTimeoutError):
+        raise
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -247,8 +243,8 @@ async def publish_to_bilibili(params: dict) -> dict:
         )
         result = await uploader.upload()
         return result
-    except LoginCheckError as exc:
-        return exc.to_result()
+    except (LoginCheckError, LoginTimeoutError):
+        raise
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -284,8 +280,8 @@ async def publish_to_weibo(params: dict) -> dict:
             )
         result = await uploader.upload()
         return result
-    except LoginCheckError as exc:
-        return exc.to_result()
+    except (LoginCheckError, LoginTimeoutError):
+        raise
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -313,8 +309,8 @@ async def publish_to_tk(params: dict) -> dict:
             desc=params.get("desc", ""), publish_strategy=params["publish_strategy"],
         )
         return await uploader.upload()
-    except LoginCheckError as exc:
-        return exc.to_result()
+    except (LoginCheckError, LoginTimeoutError):
+        raise
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -335,5 +331,8 @@ async def publish_to_platform(platform: str, params: dict) -> dict:
     """发布到指定平台"""
     handler = _PUBLISH_DISPATCH.get(platform)
     if handler is not None:
-        return await handler(params)
+        try:
+            return await handler(params)
+        except (LoginCheckError, LoginTimeoutError) as exc:
+            return exc.to_result()
     return {"success": False, "message": f"未知平台: {platform}"}

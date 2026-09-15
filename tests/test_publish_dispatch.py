@@ -22,9 +22,10 @@ class PlatformLoginRegistryTests(unittest.TestCase):
             self.assertTrue(setup_name.endswith("_setup"), f"{platform} setup_name wrong: {setup_name}")
 
     def test_platform_requires_account_login(self):
-        self.assertTrue(platform_requires_account_login("douyin"))
-        self.assertTrue(platform_requires_account_login("weibo"))
-        self.assertTrue(platform_requires_account_login("tk"))
+        self.assertTrue(platform_requires_account_login("bilibili"))
+        self.assertFalse(platform_requires_account_login("douyin"))
+        self.assertFalse(platform_requires_account_login("weibo"))
+        self.assertFalse(platform_requires_account_login("tk"))
         self.assertFalse(platform_requires_account_login("unknown_platform"))
 
 

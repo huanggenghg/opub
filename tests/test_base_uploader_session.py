@@ -21,6 +21,13 @@ class FakePage:
         self.url = "https://example.com/upload"
 
 
+    async def goto(self, url, **kwargs):
+        self.url = url
+
+    async def wait_for_timeout(self, *args, **kwargs):
+        pass
+
+
 class FakeContext:
     def __init__(self):
         self.storage_state_calls = []
@@ -168,9 +175,8 @@ class BrowserSessionTests(unittest.TestCase):
              patch("uploader.base_video.os.path.exists", return_value=True):
             mock_ap.return_value = FakePlaywright(FakeContext())
             with patch.object(FakeUploader, "_launch_browser", side_effect=fake_launch_browser):
-                with self.assertRaises(LoginCheckError):
-                    asyncio.run(FakeUploader.cookie_auth("/fake.json"))
-        # The incomplete page fixture raises a classified page error after launch.
+                self.assertTrue(asyncio.run(FakeUploader.cookie_auth("/fake.json")))
+        # Authentication retains the configured headless setting.
         self.assertEqual(captured_headless, [LOCAL_CHROME_HEADLESS])
 
     def test_storage_state_saved_before_code_after_async_with(self):

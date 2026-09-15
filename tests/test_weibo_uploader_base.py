@@ -34,20 +34,26 @@ class WeiboBaseUploaderInheritanceTests(unittest.TestCase):
 
 
 class WeiboVideoUploadTests(unittest.TestCase):
-    def test_upload_maps_validation_cookie_auth_failure_to_safe_retry_result(self):
+    def test_upload_does_not_open_a_separate_cookie_auth_browser(self):
         import asyncio
+        from contextlib import asynccontextmanager
 
         uploader = WeiboVideo(
             title="t", file_path="/fake.mp4", tags=[], publish_date=0,
             account_file="/fake.json", desc="", publish_strategy=PublishStrategy.IMMEDIATE,
         )
-        with patch("uploader.weibo_uploader.main.os.path.exists", return_value=True), \
-             patch("uploader.weibo_uploader.main.cookie_auth", AsyncMock(return_value=False)):
+        @asynccontextmanager
+        async def fake_session(**kwargs):
+            yield object()
+
+        with patch.object(uploader, "validate_upload_args", AsyncMock()), \
+             patch.object(uploader, "_browser_session", fake_session), \
+             patch.object(WeiboVideo, "upload_video_content", AsyncMock(return_value="https://weibo.com/v/1")), \
+             patch("uploader.weibo_uploader.main.cookie_auth", AsyncMock(side_effect=AssertionError("must not open browser"))) as auth:
             result = asyncio.run(uploader.upload())
 
-        self.assertEqual(result["issue_type"], "login_expired")
-        self.assertTrue(result["account_issue"])
-        self.assertTrue(result["safe_to_retry"])
+        self.assertTrue(result["success"])
+        auth.assert_not_awaited()
 
     def test_upload_returns_platform_result_extras(self):
         import asyncio
@@ -410,20 +416,26 @@ class WeiboVideoLinkExtractionTests(unittest.TestCase):
 
 
 class WeiboNoteUploadTests(unittest.TestCase):
-    def test_upload_maps_validation_cookie_auth_failure_to_safe_retry_result(self):
+    def test_upload_does_not_open_a_separate_cookie_auth_browser(self):
         import asyncio
+        from contextlib import asynccontextmanager
 
         uploader = WeiboNote(
             image_paths=["/fake.jpg"], note="test note", tags=[],
             publish_date=0, account_file="/fake.json",
         )
-        with patch("uploader.weibo_uploader.main.os.path.exists", return_value=True), \
-             patch("uploader.weibo_uploader.main.cookie_auth", AsyncMock(return_value=False)):
+        @asynccontextmanager
+        async def fake_session(**kwargs):
+            yield object()
+
+        with patch.object(uploader, "validate_upload_args", AsyncMock()), \
+             patch.object(uploader, "_browser_session", fake_session), \
+             patch.object(WeiboNote, "upload_note_content", AsyncMock()), \
+             patch("uploader.weibo_uploader.main.cookie_auth", AsyncMock(side_effect=AssertionError("must not open browser"))) as auth:
             result = asyncio.run(uploader.upload())
 
-        self.assertEqual(result["issue_type"], "login_expired")
-        self.assertTrue(result["account_issue"])
-        self.assertTrue(result["safe_to_retry"])
+        self.assertTrue(result["success"])
+        auth.assert_not_awaited()
 
     def test_upload_returns_platform_result_extras(self):
         import asyncio

@@ -13,6 +13,7 @@ from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 from patchright.async_api import async_playwright
 
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS
+from publish.auth import LoginCheckError, LoginTimeoutError
 from uploader.base_video import (
     BaseBrowserUploader,
     PlatformResultExtras,
@@ -26,6 +27,7 @@ from utils.login_qrcode import decode_qrcode_from_path
 from utils.login_qrcode import print_terminal_qrcode
 from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
+from utils.login_qrcode import session_qrcode
 from utils.log import xiaohongshu_logger
 
 XHS_LOGIN_URL = "https://xiaohongshu.com/login"
@@ -453,6 +455,23 @@ class XiaoHongShuBaseUploader(BaseBrowserUploader):
         return await _is_xhs_login_completed(page)
 
     @classmethod
+    async def check_upload_page(cls, page: Page) -> bool:
+        if await cls.is_login_required(page):
+            return False
+        expected = cls.UPLOAD_URL.split("?", 1)[0].rstrip("/")
+        current = (page.url or "").split("?", 1)[0].rstrip("/")
+        if current != expected:
+            raise LoginCheckError('page')
+        upload_input = page.locator(
+            "div[class^='upload-content'] input[class='upload-input'], input.upload-input"
+        ).first
+        try:
+            await upload_input.wait_for(state="attached", timeout=15000)
+        except Exception:
+            raise LoginCheckError('page') from None
+        return True
+
+    @classmethod
     async def extract_qrcode_src(cls, page):
         return await _extract_xhs_qrcode_src(page)
 
@@ -466,14 +485,11 @@ class XiaoHongShuBaseUploader(BaseBrowserUploader):
             context = await browser.new_context(permissions=permissions)
         return await set_init_script(context)
 
+    def _session_login_interaction(self, page):
+        return session_qrcode(page, self.account_file, _save_xhs_qrcode)
+
     async def validate_login_and_strategy(self):
-        """Renamed from `validate_base_args(self)` to avoid collision with
-        `BasePlatformUploader.validate_base_args(params)` staticmethod (called by dispatch).
-        Checks cookie existence/validity + publish_strategy + publish_date."""
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成小红书登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成小红书登录: {self.account_file}")
+        """Validate local strategy and schedule; session login checks the account."""
 
         if self.publish_strategy not in {
             XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
@@ -795,6 +811,8 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                     share_msg = share_result.get("message", "") if share_result else ""
                     result["message"] = f"发布成功，但获取分享链接失败: {share_msg}"
             xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except XhsPublishRestrictedError as exc:
             result["message"] = f"账号被限制发布: {exc.toast_text}"
             result["account_issue"] = True
@@ -951,6 +969,8 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                     share_msg = share_result.get("message", "") if share_result else ""
                     result["message"] = f"发布成功，但获取分享链接失败: {share_msg}"
             xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
+        except (LoginCheckError, LoginTimeoutError):
+            raise
         except XhsPublishRestrictedError as exc:
             result["message"] = f"账号被限制发布: {exc.toast_text}"
             result["account_issue"] = True

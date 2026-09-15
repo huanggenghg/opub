@@ -58,7 +58,7 @@ class EnvironmentCommandTests(unittest.TestCase):
 
 
 class LoginClassificationIntegrationTests(unittest.TestCase):
-    def test_weibo_upload_validation_preserves_check_error(self):
+    def test_weibo_upload_validation_preserves_typed_check_error_for_dispatch(self):
         from publish.auth import LoginCheckError
         from uploader.weibo_uploader.main import WeiboVideo, WeiboNote
 
@@ -70,9 +70,9 @@ class LoginClassificationIntegrationTests(unittest.TestCase):
             with self.subTest(uploader=type(uploader).__name__), patch.object(
                 uploader, 'validate_upload_args', AsyncMock(side_effect=LoginCheckError('network'))
             ):
-                result = asyncio.run(uploader.upload())
-            self.assertEqual(result.get('error_code'), 'NET-001')
-            self.assertFalse(result.get('account_issue', False))
+                with self.assertRaises(LoginCheckError) as caught:
+                    asyncio.run(uploader.upload())
+            self.assertEqual(caught.exception.kind, 'network')
 
     def test_uploader_check_error_keeps_its_classification_in_dispatch(self):
         from publish.auth import LoginCheckError
@@ -93,8 +93,11 @@ class LoginClassificationIntegrationTests(unittest.TestCase):
         ))
 
     def test_network_error_does_not_report_account_failure(self):
-        with patch('publish.orchestrator.ensure_account_login', AsyncMock(side_effect=TimeoutError('private url'))), patch(
-            'publish.orchestrator.publish_to_platform', AsyncMock()
+        from publish.auth import classify_login_exception
+
+        failure = classify_login_exception(TimeoutError('private url')).to_result()
+        with patch('publish.orchestrator.ensure_account_login', AsyncMock()) as login, patch(
+            'publish.orchestrator.publish_to_platform', AsyncMock(return_value=failure)
         ) as publish, contextlib.redirect_stderr(io.StringIO()):
             results = asyncio.run(orchestrator.publish_one_item(self.params()))
         result = results['weibo']
@@ -102,22 +105,34 @@ class LoginClassificationIntegrationTests(unittest.TestCase):
         self.assertFalse(result.get('account_issue', False))
         self.assertNotIn('private url', result['message'])
         self.assertEqual(orchestrator.exit_code_from_results({'video': results}), 2)
-        publish.assert_not_called()
+        login.assert_not_awaited()
+        publish.assert_awaited_once()
 
     def test_broken_greenlet_is_environment_failure(self):
-        with patch('publish.orchestrator.ensure_account_login', AsyncMock(side_effect=AttributeError(
+        from publish.auth import classify_login_exception
+
+        failure = classify_login_exception(AttributeError(
             "module 'greenlet' has no attribute 'greenlet'"
-        ))), contextlib.redirect_stderr(io.StringIO()):
+        )).to_result()
+        with patch('publish.orchestrator.ensure_account_login', AsyncMock()) as login, patch(
+            'publish.orchestrator.publish_to_platform', AsyncMock(return_value=failure)
+        ), contextlib.redirect_stderr(io.StringIO()):
             result = asyncio.run(orchestrator.publish_one_item(self.params()))['weibo']
         self.assertEqual(result['error_code'], 'ENV-006')
         self.assertFalse(result['account_issue'])
+        login.assert_not_awaited()
 
     def test_recovery_error_preserves_environment_classification(self):
-        expired = {'success': False, 'account_issue': True, 'issue_type': 'login_expired', 'safe_to_retry': True}
-        with patch('publish.orchestrator.ensure_account_login', AsyncMock(side_effect=[True, ImportError('greenlet')])), patch(
-            'publish.orchestrator.publish_to_platform', AsyncMock(return_value=expired)
+        from publish.auth import classify_login_exception
+
+        expired = {'success': False, 'message': 'expired', 'account_issue': True,
+                   'issue_type': 'login_expired', 'safe_to_retry': True}
+        environment = classify_login_exception(ImportError('greenlet')).to_result()
+        with patch('publish.orchestrator.ensure_account_login', AsyncMock()) as login, patch(
+            'publish.orchestrator.publish_to_platform', AsyncMock(side_effect=[expired, environment])
         ) as publish, contextlib.redirect_stderr(io.StringIO()):
             results = asyncio.run(orchestrator.publish_one_item(self.params()))
         self.assertEqual(results['weibo']['error_code'], 'ENV-006')
         self.assertFalse(results['weibo']['account_issue'])
-        self.assertEqual(publish.await_count, 1)
+        login.assert_not_awaited()
+        self.assertEqual(publish.await_count, 2)

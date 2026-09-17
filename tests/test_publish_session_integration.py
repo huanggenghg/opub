@@ -88,6 +88,7 @@ class Browser:
 @pytest.fixture
 def transport(monkeypatch):
     browsers = []
+    launch_flags = []
     uploaded_pages = []
 
     @asynccontextmanager
@@ -97,6 +98,7 @@ def transport(monkeypatch):
     async def launch(cls, playwright, headless):
         browser = Browser()
         browsers.append(browser)
+        launch_flags.append(headless)
         return browser
 
     async def upload(self, page):
@@ -112,7 +114,7 @@ def transport(monkeypatch):
     # Any legacy precheck would both violate the contract and touch a real site.
     monkeypatch.setattr('publish.orchestrator.ensure_account_login', AsyncMock(side_effect=AssertionError('unexpected separate login')))
     monkeypatch.setattr(weibo, 'cookie_auth', AsyncMock(side_effect=AssertionError('unexpected separate auth browser')))
-    return browsers, uploaded_pages
+    return browsers, launch_flags, uploaded_pages
 
 
 def params(tmp_path, account):
@@ -132,17 +134,35 @@ def test_publish_uses_one_browser_context_and_working_page(tmp_path, transport, 
     if existing_account:
         account.parent.mkdir()
         account.write_text('{"cookies": [], "origins": []}')
-    browsers, uploaded_pages = transport
+    browsers, launch_flags, uploaded_pages = transport
     result = asyncio.run(publish_one_item(params(tmp_path, account)))
     assert result['weibo']['success'] is True
-    assert len(browsers) == 1
-    context, = browsers[0].contexts
-    page, = context.pages
-    assert uploaded_pages == [page]
-    assert (weibo.WEIBO_LOGIN_URL in page.visited) is not existing_account
-    assert context.saved_paths and set(context.saved_paths) == {str(account)}
+    if existing_account:
+        assert len(browsers) == 1
+        assert launch_flags == [True]
+        context, = browsers[0].contexts
+        page, = context.pages
+        assert uploaded_pages == [page]
+        assert weibo.WEIBO_LOGIN_URL not in page.visited
+        assert context.saved_paths and set(context.saved_paths) == {str(account)}
+        assert context.closed and browsers[0].closed
+        return
+    # 无头发布遇到未登录:无头探测会话不落盘,弹有头窗口扫码,带新 cookie 重启无头会话上传
+    assert len(browsers) == 3
+    assert launch_flags == [True, False, True]
+    probe_context, = browsers[0].contexts
+    assert not probe_context.saved_paths
+    login_context, = browsers[1].contexts
+    login_page, = login_context.pages
+    assert weibo.WEIBO_LOGIN_URL in login_page.visited
+    publish_context, = browsers[2].contexts
+    assert publish_context.loaded_state == str(account)
+    assert uploaded_pages == publish_context.pages
+    assert login_context.saved_paths == [str(account)]
+    assert publish_context.saved_paths == [str(account)]
     assert account.exists()
-    assert context.closed and browsers[0].closed
+    assert all(browser.closed for browser in browsers)
+    assert probe_context.closed and login_context.closed and publish_context.closed
 
 
 def test_distinct_accounts_and_materials_do_not_reuse_context(tmp_path, transport):
@@ -150,7 +170,7 @@ def test_distinct_accounts_and_materials_do_not_reuse_context(tmp_path, transpor
     for account in accounts:
         account.parent.mkdir()
         account.write_text('{"cookies": [], "origins": []}')
-    browsers, uploaded_pages = transport
+    browsers, launch_flags, uploaded_pages = transport
     for account in [accounts[0], accounts[1], accounts[0]]:
         result = asyncio.run(publish_one_item(params(tmp_path, account)))
         assert result['weibo']['success'] is True

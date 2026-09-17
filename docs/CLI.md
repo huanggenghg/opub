@@ -42,7 +42,7 @@ opub --platforms weibo --video videos/ --title "标题" --schedule "2027-01-01 1
 
 ## 无头模式
 
-发布过程默认无头（不弹出浏览器窗口），包括发布前的登录状态检查；扫码登录始终显示浏览器窗口。排查平台风控或页面元素定位问题时，可用 `--no-headless` 临时回到有头模式：
+发布过程默认无头（不弹出浏览器窗口），包括发布前的登录状态检查；需要扫码登录时会自动弹出独立的可见浏览器窗口完成扫码，随后带新登录状态重启无头会话继续上传。排查平台风控或页面元素定位问题时，可用 `--no-headless` 临时回到有头模式：
 
 ```bash
 opub --platforms douyin --video videos/demo.mp4 --title "标题" --no-headless

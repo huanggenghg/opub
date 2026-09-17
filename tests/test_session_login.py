@@ -221,12 +221,12 @@ def test_session_cleanup_never_leaks_browser_or_masks_outcome(tmp_path, failure_
     async def playwright():
         yield object()
     init = AsyncMock(return_value=context, side_effect=RuntimeError('setup failed') if failure_stage == 'context' else None)
-    login = AsyncMock(side_effect=LoginTimeoutError() if failure_stage == 'login' else None)
+    probe = AsyncMock(side_effect=LoginTimeoutError() if failure_stage == 'login' else None, return_value=True)
     async def run():
         async with uploader._browser_session():
             if failure_stage == 'publish':
                 raise ValueError('publish failed')
-    with patch('uploader.base_video.async_playwright', playwright), patch.object(uploader, '_launch_browser', AsyncMock(return_value=browser)), patch.object(uploader, '_init_context', init), patch.object(uploader, '_ensure_session_login', login):
+    with patch('uploader.base_video.async_playwright', playwright), patch.object(uploader, '_launch_browser', AsyncMock(return_value=browser)), patch.object(uploader, '_init_context', init), patch.object(uploader, '_probe_upload_page', probe):
         if failure_stage in {'context', 'page'}:
             with pytest.raises(LoginCheckError):
                 asyncio.run(run())
@@ -247,6 +247,7 @@ def test_session_cleanup_never_leaks_browser_or_masks_outcome(tmp_path, failure_
 
 def test_successful_login_state_survives_upload_failure_with_exit_save_disabled(tmp_path):
     uploader = SessionUploader(tmp_path / 'new' / 'cookie.json')
+    uploader.headless = False  # 有头发布:登录在同一会话页完成,单浏览器
     page = SessionPage(login=True)
     context = page.context
     context.new_page = AsyncMock(return_value=page)
@@ -529,7 +530,7 @@ def test_driver_lifecycle_is_classified_without_masking_publish(tmp_path, stage)
     async def run():
         async with uploader._browser_session():
             pass
-    with patch('uploader.base_video.async_playwright', return_value=driver), patch.object(uploader, '_launch_browser', AsyncMock(return_value=browser)), patch.object(uploader, '_init_context', AsyncMock(return_value=context)), patch.object(uploader, '_ensure_session_login', AsyncMock()):
+    with patch('uploader.base_video.async_playwright', return_value=driver), patch.object(uploader, '_launch_browser', AsyncMock(return_value=browser)), patch.object(uploader, '_init_context', AsyncMock(return_value=context)), patch.object(uploader, '_probe_upload_page', AsyncMock(return_value=True)):
         if stage == 'enter':
             with pytest.raises(LoginCheckError) as caught:
                 asyncio.run(run())
@@ -552,13 +553,14 @@ def test_external_cancellation_closes_resources_and_propagates(tmp_path, stage):
         async def pause():
             reached.set()
             await asyncio.Event().wait()
-        async def login(page):
+        async def probe(page):
             if stage == 'login':
                 await pause()
+            return True
         async def run():
             async with uploader._browser_session():
                 await pause()
-        with patch('uploader.base_video.async_playwright', driver), patch.object(uploader, '_launch_browser', AsyncMock(return_value=browser)), patch.object(uploader, '_init_context', AsyncMock(return_value=context)), patch.object(uploader, '_ensure_session_login', login):
+        with patch('uploader.base_video.async_playwright', driver), patch.object(uploader, '_launch_browser', AsyncMock(return_value=browser)), patch.object(uploader, '_init_context', AsyncMock(return_value=context)), patch.object(uploader, '_probe_upload_page', probe):
             task = asyncio.create_task(run())
             await reached.wait()
             task.cancel()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
 import time
@@ -134,6 +135,33 @@ def _build_launch_kwargs(headless: bool) -> dict:
     else:
         launch_kwargs["channel"] = "chrome"
     return launch_kwargs
+
+
+# 有头真 Chrome 在真实扫码登录后偶发数分钟不退出(2026-09-18 三轮实测约
+# 333s;健康关闭 0.5-0.7s,未登录/纯 cookie 场景秒退,无中间态)。发布
+# 流程不等待它:超时后放弃关闭,残留进程由 playwright 驱动退出时的强杀
+# 兜底(实测 ~2.4s、无残留)。登录态在放弃前已落盘,强杀无副作用。
+_BROWSER_CLOSE_TIMEOUT = 15.0
+
+
+async def _close_browser_bounded(browser) -> None:
+    """Bounded browser close; never raises so it cannot mask prior outcomes.
+
+    On timeout the close is abandoned (not cancelled) so the leftover browser's
+    late close result is consumed by the done-callback instead of surfacing
+    as an unread-Future warning after the driver SIGKILLs the process.
+    """
+    close_task = asyncio.ensure_future(browser.close())
+
+    def consume_outcome(done_task) -> None:
+        if not done_task.cancelled():
+            done_task.exception()
+
+    close_task.add_done_callback(consume_outcome)
+    try:
+        await asyncio.wait_for(asyncio.shield(close_task), timeout=_BROWSER_CLOSE_TIMEOUT)
+    except Exception:
+        pass
 
 
 async def _emit_qrcode_callback(qrcode_callback, payload: dict) -> None:
@@ -352,14 +380,21 @@ class BaseBrowserUploader(BasePlatformUploader):
         """Prepare platform QR UI, optionally yielding a refresh callback."""
         yield None
 
+    @classmethod
+    async def _probe_upload_page(cls, page: Page) -> bool:
+        """Navigate to the upload page; False only for proven login expiry."""
+        await page.goto(cls.UPLOAD_URL, timeout=60000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(3000)
+        return await cls.check_upload_page(page)
+
     @login_check
     async def _ensure_session_login(self, page: Page) -> None:
-        """Authenticate on the upload page without creating another browser."""
-        await page.goto(self.UPLOAD_URL, timeout=60000, wait_until="domcontentloaded")
-        await page.wait_for_timeout(3000)
-        if await self.check_upload_page(page):
-            return
+        """Authenticate on the visible upload page without creating another browser."""
+        if not await self._probe_upload_page(page):
+            await self._qr_login_on_page(page)
 
+    async def _qr_login_on_page(self, page: Page) -> None:
+        """Complete QR login on this visible page, validate back, save state."""
         warn_qr_login_pending(self.PLATFORM_NAME)
 
         deadline = time.monotonic() + 300
@@ -404,30 +439,93 @@ class BaseBrowserUploader(BasePlatformUploader):
         Path(self.account_file).parent.mkdir(parents=True, exist_ok=True)
         await page.context.storage_state(path=self.account_file)
 
+    async def _headed_qr_login(self) -> None:
+        """Open a separate visible window for the QR scan; publish stays headless.
+
+        The login state is persisted before this returns; closing the headed
+        browser afterwards is best-effort and time-bounded (see
+        _BROWSER_CLOSE_TIMEOUT) so a lingering Chrome cannot stall the
+        publish restart that follows.
+        """
+        async with async_playwright() as playwright:
+            browser = await self._launch_browser(playwright, False)
+            context = None
+            try:
+                context = await self._init_context(browser, None)
+                page = await context.new_page()
+                await self._qr_login_on_page(page)
+            finally:
+                # Cleanup failures must not mask a completed login or its error.
+                if context is not None:
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
+                await _close_browser_bounded(browser)
+
+    @staticmethod
+    async def _teardown_session(context, browser, driver) -> None:
+        if context is not None:
+            try:
+                await context.close()
+            except Exception:
+                pass
+        if browser is not None:
+            await _close_browser_bounded(browser)
+        if driver is not None:
+            try:
+                await driver.__aexit__(None, None, None)
+            except Exception:
+                pass
+
     @asynccontextmanager
     async def _browser_session(self, headless: Optional[bool] = None, save_on_success_only: bool = False, save_state: bool = True):
         """Own one browser for authentication, upload and result confirmation.
 
-        Exit saves retain their existing platform policy. A failed login never
-        saves partial state; freshly validated interactive login saves separately
+        A headless session never waits on an invisible QR code: when login is
+        required it opens a separate headed window for the scan, then relaunches
+        headless with the fresh cookie (tencent's login session decays within
+        seconds, so the relaunch must follow the scan immediately). Exit saves
+        retain their existing platform policy. A failed login never saves
+        partial state; freshly validated interactive login saves separately
         even when the platform disables exit saves.
         """
+        session_headless = headless if headless is not None else self.headless
         driver = None
         driver_started = False
         browser = None
         context = None
+        page = None
         ready = False
         success = False
         try:
             try:
-                driver = async_playwright()
-                playwright = await driver.__aenter__()
-                driver_started = True
-                browser = await self._launch_browser(playwright, headless if headless is not None else self.headless)
-                context = await self._init_context(browser, self.account_file)
-                page = await context.new_page()
-                await self._ensure_session_login(page)
-                ready = True
+                for attempt in (0, 1):
+                    driver = async_playwright()
+                    playwright = await driver.__aenter__()
+                    driver_started = True
+                    browser = await self._launch_browser(playwright, session_headless)
+                    context = await self._init_context(browser, self.account_file)
+                    page = await context.new_page()
+                    if not session_headless:
+                        await self._ensure_session_login(page)
+                    elif await self._probe_upload_page(page):
+                        pass
+                    elif attempt == 0:
+                        # 无头会话里等扫码,用户既看不到窗口也看不到实时终端
+                        # 输出;弹有头窗口完成扫码,再立刻带新 cookie 重启
+                        # 无头会话继续上传。
+                        await self._headed_qr_login()
+                        await self._teardown_session(context, browser, driver)
+                        driver_started = False
+                        browser = None
+                        context = None
+                        page = None
+                        continue
+                    else:
+                        raise LoginTimeoutError(f"{self.PLATFORM_NAME}扫码后仍需登录")
+                    ready = True
+                    break
             except (LoginCheckError, LoginTimeoutError):
                 raise
             except Exception as exc:
@@ -442,12 +540,13 @@ class BaseBrowserUploader(BasePlatformUploader):
                     pass
             # Cleanup failures must neither skip browser.close nor replace a
             # confirmed submission result or its original exception.
-            for resource in (context, browser):
-                if resource is not None:
-                    try:
-                        await resource.close()
-                    except Exception:
-                        pass
+            if context is not None:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+            if browser is not None:
+                await _close_browser_bounded(browser)
             if driver_started:
                 try:
                     await driver.__aexit__(None, None, None)

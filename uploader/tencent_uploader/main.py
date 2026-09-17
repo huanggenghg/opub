@@ -28,7 +28,9 @@ from uploader.base_video import (
 from utils.login_qrcode import session_qrcode
 from utils.log import tencent_logger
 
-TENCENT_LOGIN_URL = "https://channels.weixin.qq.com"
+# 不能用站点首页:首页是否跳 login.html 由站点异步决定、不可控(2026-09-17 实测
+# 有失效 cookie 时 8s 不跳、goto 甚至被跳转打断),二维码 iframe 只在 login.html 上。
+TENCENT_LOGIN_URL = "https://channels.weixin.qq.com/login.html"
 TENCENT_UPLOAD_URL = "https://channels.weixin.qq.com/platform/post/create"
 TENCENT_MANAGE_URL = "https://channels.weixin.qq.com/platform/post/list"
 TENCENT_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
@@ -91,12 +93,16 @@ def format_str_for_short_title(origin_title: str) -> str:
 
 
 async def _find_tencent_qrcode_element(page: Page):
-    """真实登录页(2026-08 微信改版后)的二维码在 qrconnect iframe 内,img.qrcode
-    的 src 是相对 URL,不能走 data:image 解析,调用方须用 element.screenshot 存图。"""
+    """真实登录页(2026-08 微信改版后)的二维码在 qrconnect iframe 内,src 是相对
+    URL,不能走 data:image 解析,调用方须用 element.screenshot 存图。
+    2026-09-17:登录页默认暗色主题,可见二维码 class 为 'js_qrcode_img
+    web_qrcode_img';亮色变体(class 含 'qrcode lightBorder')隐藏,旧选择器
+    img.qrcode 会匹配到隐藏元素,wait_for(visible) 必超时。两个变体都有
+    js_qrcode_img,按 :visible 选取当前主题渲染的那张。"""
     if not hasattr(page, "frame_locator"):
         raise RuntimeError("未获取到视频号登录二维码地址")
     iframe_locator = page.frame_locator('[src*="qrconnect"]')
-    qr_code_img = iframe_locator.locator("img.qrcode").first
+    qr_code_img = iframe_locator.locator("img.js_qrcode_img:visible").first
     await qr_code_img.wait_for(state="visible", timeout=30000)
     return qr_code_img
 
@@ -477,6 +483,57 @@ class TencentBaseUploader(BaseBrowserUploader):
         """Override hook: 视频号登录完成判断(基于 DOM marker,不是 URL)。"""
         return await _is_tencent_login_completed(page)
 
+    @classmethod
+    async def check_upload_page(cls, page: Page, timeout: float = 30.0) -> bool:
+        """Override hook: 会话登录检查用与上传控件同级的强证据。
+
+        Why: 视频号的登录失效证据(login.html 跳转/qrconnect iframe)是延迟出现的,
+        基类的弱证据(URL 匹配 + 登录标记不可见)会提前放行,导致会话内扫码登录
+        被跳过、上传阶段才发现失效。这里等到上传控件或登录证据出现为止,与
+        _wait_for_tencent_upload_input 的判定保持一致。
+        """
+        deadline = time.monotonic() + timeout
+        opened_menu = False
+        opened_video = False
+        opened_publish = False
+        while True:
+            url = (page.url or "").lower()
+            try:
+                if "login.html" in url or await page.locator('iframe[src*="qrconnect"]').count():
+                    return False
+                if await page.locator('input[type="file"]').count():
+                    return True
+                # A restored session can land on the dashboard. Use the site's
+                # SPA navigation: reloading the upload URL can send it back home.
+                current = url.split('?', 1)[0].rstrip('/')
+                remaining_ms = max(1, (deadline - time.monotonic()) * 1000)
+                if current == 'https://channels.weixin.qq.com/platform' and not opened_video:
+                    video_link = page.get_by_role('link', name='视频', exact=True).first
+                    content_link = page.get_by_role('link', name='内容管理', exact=True).first
+                    if await video_link.is_visible():
+                        await video_link.click(timeout=remaining_ms)
+                        opened_video = True
+                    elif not opened_menu and await content_link.is_visible():
+                        await content_link.click(timeout=remaining_ms)
+                        opened_menu = True
+                elif current == TENCENT_MANAGE_URL and not opened_publish:
+                    publish_entry = page.get_by_text('发表视频', exact=True).first
+                    if await publish_entry.is_visible():
+                        await publish_entry.click(timeout=remaining_ms)
+                        opened_publish = True
+            except Exception as exc:
+                # 跳转瞬间 count() 会抛 execution context destroyed;在期限内
+                # 视为暂态继续等终局证据,超时才判 PAGE-001。
+                if "execution context was destroyed" not in str(exc).lower():
+                    raise
+                if time.monotonic() >= deadline:
+                    raise LoginCheckError('page') from None
+                await page.wait_for_timeout(250)
+                continue
+            if time.monotonic() >= deadline:
+                raise LoginCheckError('page')
+            await page.wait_for_timeout(250)
+
     def _session_login_interaction(self, page):
         return session_qrcode(page, self.account_file, _save_tencent_qrcode, _refresh_session_qrcode)
 
@@ -515,7 +572,8 @@ class TencentBaseUploader(BaseBrowserUploader):
         await page.locator("div.input-editor").click()
 
     async def open_upload_page(self, page: Page):
-        await page.goto(TENCENT_UPLOAD_URL)
+        # _browser_session already established readiness in this very tab.
+        # Reloading it can discard SPA state and redirect a valid session home.
         try:
             return await _wait_for_tencent_upload_input(page)
         except LoginExpiredError as exc:

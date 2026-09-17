@@ -80,10 +80,8 @@ class TencentVideoUploadTests(unittest.TestCase):
         @asynccontextmanager
         async def fake_session():
             class FakePage:
-                url = "https://channels.weixin.qq.com/platform/post/create"
-
-                async def goto(self, *args, **kwargs):
-                    self.url = "https://channels.weixin.qq.com/login.html"
+                # Expiry can redirect the existing tab after session readiness.
+                url = "https://channels.weixin.qq.com/login.html"
 
                 def locator(self, selector):
                     raise AssertionError(f"login redirect should be detected before querying {selector}")
@@ -363,9 +361,13 @@ class TencentCookieGenTests(unittest.TestCase):
 
 
 class TencentQrcodeExtractionTests(unittest.TestCase):
-    """真实登录页(2026-08 观察):二维码在 qrconnect iframe 内,img.qrcode 的 src 是
-    相对 URL(/connect/qrcode/...),不是 data:image/。
-    提取必须:1) 用 iframe[src*="qrconnect"];2) 用 element.screenshot 存 PNG。
+    """真实登录页(2026-08 观察):二维码在 qrconnect iframe 内,src 是相对 URL
+    (/connect/qrcode/...),不是 data:image/。提取必须:1) 用 iframe[src*="qrconnect"];
+    2) 用 element.screenshot 存 PNG。
+    2026-09-17 观察:登录页默认暗色主题,可见二维码的 class 是
+    'js_qrcode_img web_qrcode_img';亮色变体 'qrcode lightBorder js_qrcode_img' 隐藏,
+    只选 img.qrcode 会匹配到隐藏元素导致 wait_for(visible) 必超时。两个变体都有
+    js_qrcode_img,须按可见性选择。
     """
 
     def _make_page(self, calls):
@@ -411,7 +413,7 @@ class TencentQrcodeExtractionTests(unittest.TestCase):
             result = asyncio.run(_save_tencent_qrcode(page, account_file))
 
         self.assertIn("qrconnect", calls.get("iframe_selector", ""))
-        self.assertEqual("img.qrcode", calls.get("inner_selector"))
+        self.assertEqual("img.js_qrcode_img:visible", calls.get("inner_selector"))
         self.assertTrue(calls["screenshot_path"].endswith(".png"))
         self.assertEqual(result["image_path"], calls["screenshot_path"])
 

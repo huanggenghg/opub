@@ -355,6 +355,167 @@ def test_tencent_login_iframe_at_upload_url_is_explicit_expiry():
     assert asyncio.run(TencentBaseUploader.is_login_required(page)) is True
 
 
+class _FlippingLocator:
+    """count() flips to 1 after `after` polls of wait_for_timeout."""
+
+    def __init__(self, after=None):
+        self.after = after
+        self.polls = 0
+        self.first = self
+
+    async def count(self):
+        if self.after is not None and self.polls >= self.after:
+            return 1
+        return 0
+
+    async def is_visible(self):
+        return bool(await self.count())
+
+
+class TencentLateEvidencePage:
+    """视频号发布页:登录证据/上传控件在若干次轮询后才出现。"""
+
+    def __init__(self, input_after=None, qr_after=None, url=None):
+        self.url = url or 'https://channels.weixin.qq.com/platform/post/create'
+        self.input_locator = _FlippingLocator(input_after)
+        self.qr_locator = _FlippingLocator(qr_after)
+        self._generic = _FlippingLocator()
+
+    def locator(self, selector):
+        if 'input[type="file"]' in selector:
+            return self.input_locator
+        if 'qrconnect' in selector:
+            return self.qr_locator
+        return self._generic
+
+    async def wait_for_timeout(self, *args, **kwargs):
+        for loc in (self.input_locator, self.qr_locator, self._generic):
+            loc.polls += 1
+
+
+@pytest.mark.parametrize('qr_after', [1, 3])
+def test_tencent_check_waits_for_late_login_evidence(qr_after):
+    from uploader.tencent_uploader.main import TencentBaseUploader
+    page = TencentLateEvidencePage(qr_after=qr_after)
+    assert asyncio.run(TencentBaseUploader.check_upload_page(page)) is False
+
+
+@pytest.mark.parametrize('input_after', [0, 3])
+def test_tencent_check_waits_for_late_upload_input(input_after):
+    from uploader.tencent_uploader.main import TencentBaseUploader
+    page = TencentLateEvidencePage(input_after=input_after)
+    assert asyncio.run(TencentBaseUploader.check_upload_page(page)) is True
+
+
+def test_tencent_check_times_out_without_evidence():
+    from uploader.tencent_uploader.main import TencentBaseUploader
+    page = TencentLateEvidencePage()
+    with pytest.raises(LoginCheckError):
+        asyncio.run(TencentBaseUploader.check_upload_page(page, timeout=0.2))
+
+
+def test_tencent_check_survives_navigation_race_during_redirect():
+    """跳转瞬间 count() 抛 execution context destroyed 不应直接判 PAGE-001。"""
+    from uploader.tencent_uploader.main import TencentBaseUploader
+    page = TencentLateEvidencePage(qr_after=3)
+
+    real_count = page.qr_locator.count
+
+    async def flaky_count():
+        if page.qr_locator.polls < 2:
+            raise RuntimeError("Locator.count: Execution context was destroyed, most likely because of a navigation.")
+        return await real_count()
+
+    page.qr_locator.count = flaky_count
+    assert asyncio.run(TencentBaseUploader.check_upload_page(page, timeout=5)) is False
+
+
+def test_tencent_check_preserves_non_navigation_errors():
+    from uploader.tencent_uploader.main import TencentBaseUploader
+    page = TencentLateEvidencePage()
+    page.qr_locator.count = AsyncMock(side_effect=ConnectionError("connection reset"))
+    with pytest.raises(ConnectionError):
+        asyncio.run(TencentBaseUploader.check_upload_page(page, timeout=0))
+
+
+def test_tencent_check_bounds_persistent_navigation_races():
+    from uploader.tencent_uploader.main import TencentBaseUploader
+    page = TencentLateEvidencePage()
+    page.qr_locator.count = AsyncMock(side_effect=RuntimeError("Execution context was destroyed"))
+    with pytest.raises(LoginCheckError) as error:
+        asyncio.run(TencentBaseUploader.check_upload_page(page, timeout=0))
+    assert error.value.kind == 'page'
+
+
+@pytest.mark.parametrize('start_url, expected_actions', [
+    ('https://channels.weixin.qq.com/platform', ['内容管理', '视频', '发表视频']),
+    ('https://channels.weixin.qq.com/platform/post/list', ['发表视频']),
+])
+def test_tencent_check_navigates_dashboard_to_ready_upload_page(start_url, expected_actions):
+    from uploader.tencent_uploader.main import TencentBaseUploader
+    page = TencentLateEvidencePage(url=start_url)
+    actions = []
+
+    def navigation(name):
+        async def click(**kwargs):
+            actions.append(name)
+            if name == '视频':
+                page.url = 'https://channels.weixin.qq.com/platform/post/list'
+            elif name == '发表视频':
+                page.url = TencentBaseUploader.UPLOAD_URL
+                page.input_locator.after = 0
+        async def is_visible():
+            return name != '视频' or '内容管理' in actions
+        locator = SimpleNamespace(is_visible=is_visible, click=click)
+        locator.first = locator
+        return locator
+
+    page.get_by_role = lambda role, name, exact: navigation(name)
+    page.get_by_text = lambda text, exact: navigation(text)
+    assert asyncio.run(TencentBaseUploader.check_upload_page(page, timeout=0.1)) is True
+    assert actions == expected_actions
+
+
+def test_tencent_upload_reuses_ready_page_without_reload():
+    from uploader.tencent_uploader.main import TencentVideo
+    page = TencentLateEvidencePage(input_after=0)
+    page.goto = AsyncMock()
+    uploader = TencentVideo(title='test', file_path='test.mp4', tags=[], publish_date=0, account_file='test.json')
+    assert asyncio.run(uploader.open_upload_page(page)) is page.input_locator
+    page.goto.assert_not_awaited()
+
+
+def test_tencent_dashboard_navigation_is_bounded_when_click_does_not_navigate():
+    from uploader.tencent_uploader import main as tencent
+    page = TencentLateEvidencePage(url='https://channels.weixin.qq.com/platform')
+    link = SimpleNamespace(is_visible=AsyncMock(return_value=True), click=AsyncMock())
+    link.first = link
+    page.get_by_role = lambda *args, **kwargs: link
+    clock = {'now': 0.0}
+
+    async def wait(milliseconds):
+        clock['now'] += milliseconds / 1000
+
+    page.wait_for_timeout = wait
+    with patch.object(tencent, 'time', SimpleNamespace(monotonic=lambda: clock['now'])):
+        with pytest.raises(LoginCheckError) as error:
+            asyncio.run(tencent.TencentBaseUploader.check_upload_page(page, timeout=1))
+    assert error.value.kind == 'page'
+    link.click.assert_awaited_once()
+
+
+def test_tencent_login_url_is_actual_login_page():
+    """LOGIN_URL 必须是 login.html,不能是站点首页。
+
+    Why: 首页(channels.weixin.qq.com)是否跳 login.html 由站点异步决定、不可控
+    (2026-09-17 实测:有失效 cookie 时 8s 不跳、goto 甚至被跳转打断 ERR_ABORTED),
+    二维码 iframe 只在 login.html 上;等首页自跳会 30s 超时判 PAGE-001。
+    """
+    from uploader.tencent_uploader.main import TencentBaseUploader
+    assert 'login.html' in TencentBaseUploader.LOGIN_URL
+    assert TencentBaseUploader.LOGIN_URL != 'https://channels.weixin.qq.com'
+
+
 @pytest.mark.parametrize('stage', ['enter', 'exit'])
 def test_driver_lifecycle_is_classified_without_masking_publish(tmp_path, stage):
     uploader = SessionUploader(tmp_path / 'cookie.json')

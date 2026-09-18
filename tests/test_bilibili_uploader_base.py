@@ -19,14 +19,7 @@ class ModuleWrapperTests(unittest.TestCase):
         params = list(sig.parameters.keys())
         self.assertEqual(params, ["account_file", "handle", "return_detail", "qrcode_callback", "headless"])
 
-    def test_cookie_gen_awaits_interactive_command(self):
-        import asyncio
-        with patch("pathlib.Path.mkdir"), patch("os.path.exists", return_value=True), \
-             patch("uploader.bilibili_uploader.main.run_biliup_command_async", new=AsyncMock()) as command:
-            command.return_value.returncode = 0
-            result = asyncio.run(BilibiliUploader.cookie_gen("/fake/account.json"))
-        self.assertTrue(result)
-        command.assert_awaited_once_with(["-u", "/fake/account.json", "login"], interactive=True)
+    # cookie_gen 的 pty/Windows 路由由 tests/test_bilibili_login_pty.py 覆盖
 
 
 if __name__ == "__main__":

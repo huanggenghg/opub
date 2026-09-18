@@ -9,17 +9,26 @@ from __future__ import annotations
 
 import asyncio
 import os
+import platform
+import re
 import subprocess
 from pathlib import Path
 
 from publish.auth import classify_login_exception, login_check
 from uploader.base_video import BaseCliUploader, PlatformResultExtras, PublishStrategy
+from uploader.bilibili_uploader.login_pty import run_biliup_login_pty_async
 from uploader.bilibili_uploader.runtime import run_biliup_command_async
 from utils.log import bilibili_logger
 from utils.fs import ensure_dir
 
 # 默认投稿分区: 171=个人动态
 DEFAULT_TID = 171
+
+_IS_WINDOWS = platform.system().lower() == "windows"
+
+# cookie renew 通过但上传 token 已失效的特征(2026-09-18 定因):
+# 旧登录态下 biliup 上传对 upos 全部重试失败,报 Request failed after N retries
+_STALE_LOGIN_UPLOAD_FAILURE = re.compile(r"request failed after \d+ retries", re.IGNORECASE)
 
 
 class _BiliupListCommandError(RuntimeError):
@@ -66,11 +75,22 @@ class BilibiliUploader(BaseCliUploader):
 
     @classmethod
     async def cookie_gen(cls, account_file: str) -> bool:
-        """交互式扫码登录 B站, 保存 biliup 格式 cookie。"""
-        bilibili_logger.info(f"启动 biliup 登录, cookie 将保存到: {account_file}")
-        ensure_dir(Path(account_file).parent)
-        result = await run_biliup_command_async(["-u", account_file, "login"], interactive=True)
-        if result.returncode == 0 and os.path.exists(account_file):
+        """扫码登录 B站, 保存 biliup 格式 cookie。
+
+        biliup login 要求 TTY 且先弹登录方式菜单(默认停在短信登录):
+        POSIX 下用 pty 驱动自动选择"扫码登录"并转发二维码输出,Agent 等
+        无终端环境也能完成;Windows 保持独立控制台原行为。
+        """
+        resolved = str(Path(account_file).resolve())
+        bilibili_logger.info(f"启动 biliup 扫码登录, cookie 将保存到: {resolved}")
+        ensure_dir(Path(resolved).parent)
+        if _IS_WINDOWS:
+            result = await run_biliup_command_async(["-u", resolved, "login"], interactive=True)
+        else:
+            result = await run_biliup_login_pty_async(
+                ["-u", resolved, "login"], str(Path(resolved).parent)
+            )
+        if result.returncode == 0 and os.path.exists(resolved):
             bilibili_logger.success("biliup 登录成功, cookie 已保存")
             return True
         bilibili_logger.error(f"biliup 登录失败, returncode={result.returncode}")
@@ -160,6 +180,35 @@ class BilibiliUploader(BaseCliUploader):
         bilibili_logger.warning(f"重试 {max_retries} 次仍未拿到新 BV,fallback 到 title 匹配")
         return await self._match_bv_by_title()
 
+    @staticmethod
+    def _is_stale_login_upload_failure(detail: str) -> bool:
+        """cookie renew 通过但上传 token 已失效的特征(2026-09-18 定因)。"""
+        return bool(_STALE_LOGIN_UPLOAD_FAILURE.search(detail))
+
+    async def _recover_stale_login(self) -> PlatformResultExtras:
+        """上传 token 失效:重新扫码登录后整体重试一次;只恢复一次。"""
+        if getattr(self, "_stale_login_recovered", False):
+            message = "重新登录后上传仍失败,可能是网络或 B站上传线路问题"
+            bilibili_logger.error(message)
+            return {"success": False, "message": message}
+        self._stale_login_recovered = True
+        bilibili_logger.warning("cookie 校验通过但上传 token 已失效,即将重新扫码登录后重试上传")
+        try:
+            login_ok = await self.cookie_gen(self.account_file)
+        except subprocess.TimeoutExpired:
+            login_ok = False
+        if not login_ok:
+            return {
+                "success": False,
+                "message": "cookie 校验通过但上传 token 已失效,重新扫码登录未完成",
+                "account_issue": True,
+                "issue_type": "login_expired",
+                "error_code": "AUTH-001",
+                "action": "引导用户在终端二维码中完成 B站 扫码登录后重试",
+                "safe_to_retry": True,
+            }
+        return await self.upload()
+
     async def upload(self) -> PlatformResultExtras:
         """用 biliup 上传视频到 B站。
 
@@ -197,6 +246,8 @@ class BilibiliUploader(BaseCliUploader):
         stderr = result.stderr or ""
 
         if result.returncode != 0:
+            if self._is_stale_login_upload_failure(f"{stderr or ''}\n{stdout or ''}"):
+                return await self._recover_stale_login()
             bilibili_logger.error(f"biliup 上传失败: {stderr.strip()[:300]}")
             return {"success": False, "message": f"biliup 上传失败: {stderr.strip()[:200]}"}
 

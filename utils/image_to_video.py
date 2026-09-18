@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 from conf import BASE_DIR
+from utils.fs import ensure_dir
 
 
 def check_moviepy_installed() -> bool:
@@ -63,7 +64,7 @@ def images_to_video(
 
     # 确保输出目录存在
     output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(output_path.parent)
 
     # 统一图片尺寸 - 使用第一张图片的尺寸
     first_img = Image.open(valid_images[0])
@@ -144,7 +145,7 @@ def convert_images_to_video_for_publish(
 
     # 生成输出路径
     output_dir = Path(BASE_DIR) / "videos" / "converted"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    ensure_dir(output_dir)
 
     # 使用标题作为文件名（去除特殊字符）
     safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:50]

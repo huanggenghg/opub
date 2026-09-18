@@ -21,6 +21,7 @@ from uploader.base_video import (
 from utils.base_social_media import set_init_script
 from utils.log import baijiahao_logger
 from utils.network import async_retry
+from utils.fs import ensure_dir
 
 BAIJIAHAO_HOME_URL = "https://baijiahao.baidu.com/builder/rc/home"
 BAIJIAHAO_COVER_WAIT_TIMEOUT = 300
@@ -619,7 +620,7 @@ class BaiJiaHaoVideo(BaseBrowserUploader):
             try:
                 screenshot_path = "output/baijiahao_after_publish_click.png"
                 from pathlib import Path as _Path
-                _Path(screenshot_path).parent.mkdir(parents=True, exist_ok=True)
+                ensure_dir(_Path(screenshot_path).parent)
                 await page.screenshot(path=screenshot_path, full_page=True)
                 baijiahao_logger.info(f"点击后截图: {screenshot_path}")
             except Exception as e:

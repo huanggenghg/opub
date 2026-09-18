@@ -9,6 +9,7 @@ import sys
 
 import cv2
 import segno
+from utils.fs import ensure_dir
 
 
 def build_login_qrcode_path(account_file: str, suffix: str = "login_qrcode") -> Path:
@@ -25,7 +26,7 @@ def save_data_url_image(data_url: str, output_path: Path) -> Path:
     if ";base64" not in header:
         raise ValueError("二维码图片不是 base64 编码")
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(output_path.parent)
     output_path.write_bytes(base64.b64decode(encoded))
     return output_path
 

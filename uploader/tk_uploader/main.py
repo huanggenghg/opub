@@ -17,6 +17,7 @@ from uploader.base_video import (
 )
 from uploader.tk_uploader.tk_config import Tk_Locator
 from utils.log import tiktok_logger
+from utils.fs import ensure_dir
 
 TK_UPLOAD_WAIT_TIMEOUT = 1800
 TK_PUBLISH_WAIT_TIMEOUT = 600
@@ -67,7 +68,7 @@ class TiktokVideo(BaseBrowserUploader):
     ):
         """tk 用 page.pause 手动登录,qrcode_callback 被忽略。"""
         from pathlib import Path
-        Path(account_file).parent.mkdir(parents=True, exist_ok=True)
+        ensure_dir(Path(account_file).parent)
         async with async_playwright() as playwright:
             browser = await cls._launch_browser(playwright, headless)
             context = await cls._init_context(browser, None)

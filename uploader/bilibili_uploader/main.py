@@ -16,6 +16,7 @@ from publish.auth import classify_login_exception, login_check
 from uploader.base_video import BaseCliUploader, PlatformResultExtras, PublishStrategy
 from uploader.bilibili_uploader.runtime import run_biliup_command_async
 from utils.log import bilibili_logger
+from utils.fs import ensure_dir
 
 # 默认投稿分区: 171=个人动态
 DEFAULT_TID = 171
@@ -67,7 +68,7 @@ class BilibiliUploader(BaseCliUploader):
     async def cookie_gen(cls, account_file: str) -> bool:
         """交互式扫码登录 B站, 保存 biliup 格式 cookie。"""
         bilibili_logger.info(f"启动 biliup 登录, cookie 将保存到: {account_file}")
-        Path(account_file).parent.mkdir(parents=True, exist_ok=True)
+        ensure_dir(Path(account_file).parent)
         result = await run_biliup_command_async(["-u", account_file, "login"], interactive=True)
         if result.returncode == 0 and os.path.exists(account_file):
             bilibili_logger.success("biliup 登录成功, cookie 已保存")

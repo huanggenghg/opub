@@ -29,6 +29,7 @@ from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
 from utils.login_qrcode import session_qrcode
 from utils.log import xiaohongshu_logger
+from utils.fs import ensure_dir
 
 XHS_LOGIN_URL = "https://xiaohongshu.com/login"
 XHS_UPLOAD_WAIT_TIMEOUT = 1800
@@ -154,7 +155,7 @@ async def _save_xhs_qrcode(
     if qrcode_src.startswith("data:image/"):
         save_data_url_image(qrcode_src, qrcode_path)
     else:
-        qrcode_path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_dir(qrcode_path.parent)
         await qrcode_img.screenshot(path=str(qrcode_path))
 
     if previous_qrcode_path and previous_qrcode_path != qrcode_path:
@@ -367,7 +368,7 @@ async def xiaohongshu_cookie_gen(
 
     account_file = _resolve_account_file(account_file)
     account_path = Path(account_file)
-    account_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(account_path.parent)
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=headless)

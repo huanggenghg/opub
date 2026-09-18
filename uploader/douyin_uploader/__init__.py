@@ -1,5 +1,6 @@
 from pathlib import Path
 
 from conf import BASE_DIR
+from utils.fs import ensure_dir
 
-Path(BASE_DIR / "cookies" / "douyin_uploader").mkdir(exist_ok=True)
+ensure_dir(Path(BASE_DIR / "cookies" / "douyin_uploader"))

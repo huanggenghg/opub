@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from utils.fs import ensure_dir
 
 _PROJECT_ROOT = Path(__file__).parent.resolve()
 
@@ -24,8 +25,8 @@ BASE_DIR = _detect_mode()
 
 # 首次运行自动创建数据目录
 try:
-    BASE_DIR.mkdir(parents=True, exist_ok=True)
-    (BASE_DIR / "cookies").mkdir(exist_ok=True)
+    ensure_dir(BASE_DIR)
+    ensure_dir((BASE_DIR / "cookies"))
 except OSError:
     pass  # 权限不足时静默忽略，后续操作会报具体错误
 

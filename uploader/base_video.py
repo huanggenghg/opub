@@ -20,6 +20,7 @@ from publish.auth import (
 )
 from publish.constants import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from utils.base_social_media import set_init_script
+from utils.fs import ensure_dir
 
 
 class PublishStrategy(str, Enum):
@@ -325,7 +326,7 @@ class BaseBrowserUploader(BasePlatformUploader):
         If the page is already at a logged-in state (non-blank URL without login
         markers, e.g. valid context cookies caused an immediate redirect), skip
         the QR flow and save state directly."""
-        Path(account_file).parent.mkdir(parents=True, exist_ok=True)
+        ensure_dir(Path(account_file).parent)
         async with async_playwright() as playwright:
             browser = await cls._launch_browser(playwright, headless)
             context = await cls._init_context(browser, None)
@@ -436,7 +437,7 @@ class BaseBrowserUploader(BasePlatformUploader):
         await page.wait_for_timeout(3000)
         if not await self.check_upload_page(page):
             raise LoginTimeoutError(f"{self.PLATFORM_NAME}扫码后仍需登录")
-        Path(self.account_file).parent.mkdir(parents=True, exist_ok=True)
+        ensure_dir(Path(self.account_file).parent)
         await page.context.storage_state(path=self.account_file)
 
     async def _headed_qr_login(self) -> None:

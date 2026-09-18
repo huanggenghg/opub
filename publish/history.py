@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from conf import BASE_DIR
+from utils.fs import ensure_dir
 
 
 class HistoryError(Exception):
@@ -70,7 +71,7 @@ class HistoryStore:
     def _connection(self):
         connection = None
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            ensure_dir(self.path.parent)
             connection = sqlite3.connect(str(self.path), timeout=5)
             connection.row_factory = sqlite3.Row
             try:

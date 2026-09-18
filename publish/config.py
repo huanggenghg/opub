@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from conf import BASE_DIR
+from utils.fs import ensure_dir
 
 
 @dataclass
@@ -50,7 +51,7 @@ def default_account_file(platform: str) -> Optional[str]:
     if subdir is None:
         return None
     account_dir = BASE_DIR / "cookies" / subdir
-    account_dir.mkdir(parents=True, exist_ok=True)
+    ensure_dir(account_dir)
     return str(account_dir / "account.json")
 
 

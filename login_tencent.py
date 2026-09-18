@@ -6,6 +6,7 @@ cookies/tencent_uploader/account.json。
 import asyncio
 from pathlib import Path
 from patchright.async_api import async_playwright
+from utils.fs import ensure_dir
 
 ACCOUNT_FILE = "cookies/tencent_uploader/account.json"
 LOGIN_URL = "https://channels.weixin.qq.com"
@@ -13,7 +14,7 @@ MANAGE_URL = "https://channels.weixin.qq.com/platform/post/list"
 
 
 async def main():
-    Path(ACCOUNT_FILE).parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(Path(ACCOUNT_FILE).parent)
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False, channel="chrome")

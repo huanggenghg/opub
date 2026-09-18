@@ -3,6 +3,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Optional
+from utils.fs import ensure_dir
 
 
 def data_dir(home: Optional[Path] = None, environ: Optional[Mapping[str, str]] = None) -> Path:
@@ -16,7 +17,7 @@ def license_path(base: Optional[Path] = None) -> Path:
 
 def atomic_write_json(path: Path, value: Any) -> None:
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(path.parent)
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     try:
         os.fchmod(fd, 0o600)

@@ -13,6 +13,7 @@ import zipfile
 from pathlib import Path
 
 import requests
+from utils.fs import ensure_dir
 
 
 GITHUB_RELEASE_API = "https://api.github.com/repos/biliup/biliup/releases/latest"
@@ -114,7 +115,7 @@ def read_local_biliup_version() -> str | None:
 
 def write_local_biliup_version(version: str) -> None:
     version_path = _build_biliup_version_path()
-    version_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(version_path.parent)
     version_path.write_text(version, encoding="utf-8")
 
 
@@ -133,7 +134,7 @@ def _pick_executable(extract_root: Path) -> Path:
 
 
 def download_biliup_asset(release: dict, destination: Path) -> Path:
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(destination.parent)
     with tempfile.TemporaryDirectory(prefix="biliup-download-") as temp_dir:
         temp_root = Path(temp_dir)
         archive_path = temp_root / release["asset_name"]
@@ -145,7 +146,7 @@ def download_biliup_asset(release: dict, destination: Path) -> Path:
                         file_obj.write(chunk)
 
         extract_root = temp_root / "extract"
-        extract_root.mkdir(parents=True, exist_ok=True)
+        ensure_dir(extract_root)
         if archive_path.suffix.lower() == ".zip":
             with zipfile.ZipFile(archive_path) as zip_file:
                 zip_file.extractall(extract_root)

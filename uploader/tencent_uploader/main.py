@@ -27,6 +27,7 @@ from uploader.base_video import (
 )
 from utils.login_qrcode import session_qrcode
 from utils.log import tencent_logger
+from utils.fs import ensure_dir
 
 # 不能用站点首页:首页是否跳 login.html 由站点异步决定、不可控(2026-09-17 实测
 # 有失效 cookie 时 8s 不跳、goto 甚至被跳转打断),二维码 iframe 只在 login.html 上。
@@ -111,7 +112,7 @@ async def _save_tencent_qrcode(page: Page, account_file: str, previous_qrcode_pa
     qrcode_utils = _get_qrcode_utils()
     qr_code_img = await _find_tencent_qrcode_element(page)
     qrcode_path = qrcode_utils["build_login_qrcode_path"](account_file, suffix="tencent_login_qrcode")
-    qrcode_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(qrcode_path.parent)
     await qr_code_img.screenshot(path=qrcode_path)
     if previous_qrcode_path and previous_qrcode_path != qrcode_path:
         if qrcode_utils["remove_qrcode_file"](previous_qrcode_path):
@@ -316,7 +317,7 @@ async def tencent_cookie_gen(
     headless: bool = False,
 ):
     account_file = _resolve_account_file(account_file)
-    Path(account_file).parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(Path(account_file).parent)
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=headless))

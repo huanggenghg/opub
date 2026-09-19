@@ -3,6 +3,19 @@
 > 环境：macOS (darwin, x86_64)，opub 0.8.10（68de10d），WorkBuddy 沙箱内运行（patchright Chromium + Chrome channel）。
 > 当轮结果：抖音/小红书/百家号/微博 ✅ 成功；视频号/快手/B站 ❌ 失败。以下为逐平台复现与根因。
 
+## 0. 处理结果（2026-09-19 修复，v0.8.11）
+
+实测复现后修正了部分推断，修复内容：
+
+1. **视频号**：登录检查（`check_upload_page`）对 login.html 跳转的识别其实已生效（实测返回 False 并进入扫码环节）。真正的卡点是 **qrconnect iframe 握手失败**：外层登录页显示"加载失败，点击重试"并把 iframe 隐藏（或 iframe 进入本机微信快捷登录视图），二维码 img 已生成但不可见，`_find_tencent_qrcode_element` 等可见 30s 必超时 → 异常被归类为 PAGE-001，扫码永远出不来。
+   修复：可见等待改为轮询 + 恢复尝试（点外层"加载失败，点击重试"、frame 内 `js_switchToNormal` 切回二维码视图）；仍不可见时走新兜底 `_download_tencent_qrcode_fallback`，直接在 qrconnect frame 内 fetch 隐藏二维码 img 的 src 下载成图（实测可解码出有效 confirm uuid）。"加载失败，点击重试"同时纳入 `_is_tencent_qrcode_expired` / `_refresh_tencent_qrcode`。
+2. **快手**：与原推断不同，旧选择器 `button[class^="_upload-btn"]` 在新页面仍匹配（`_upload-btn_1j3uy_87`）；真正问题是页面加载初期先弹 element-plus"确定"弹窗（`button.el-button.confirm__btn`），上传按钮延迟约 8-13s 才渲染，而登录检查只等 3s 就单次判定 → PAGE-001。
+   修复：`KSBaseUploader.check_upload_page` 重写为轮询（期限内先判登录失效证据，再关弹窗、等上传按钮）；`_is_ks_auth_page_valid` 按钮检测加文本兜底（`button:has-text("上传视频")`）；`_is_ks_cookie_invalid` 改即时判定避免每轮白等 5s；视频/图文上传流程改用 `_wait_ks_upload_button`（30s 轮询 + 自动关弹窗）。实测单跑由 13s 报 PAGE-001 变为 12s 判定 True（cookie 有效）。
+3. **B站**：直接跑 `biliup renew` 仅 0.46s 成功，NET-001 为沙箱代理（HTTP_PROXY=127.0.0.1）瞬断等偶发网络抖动。修复：`cookie_auth` 的 renew 查询超时后静默重试一次（renew 幂等），仍超时才报 NET-001。
+4. **批跑偶发 ENV-006**：`BaseBrowserUploader._launch_browser` 启动失败静默重试一次（2s 后），仍失败才按原分类抛出。
+
+回归测试：`tests/test_issue_2026_09_19_platform_checks.py`（8 例）。
+
 ## 1. 视频号（tencent）：cookie 已失效，但登录检查误报 PAGE-001，未触发扫码
 
 **现象**：发布报 `PAGE-001 登录检查页面未能识别，尚未确认登录失效`，有头/无头一致，单跑复现。

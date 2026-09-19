@@ -58,10 +58,17 @@ class BilibiliUploader(BaseCliUploader):
     @classmethod
     @login_check
     async def cookie_auth(cls, account_file: str) -> bool:
-        """用 biliup renew 验证 cookie 是否有效。"""
+        """用 biliup renew 验证 cookie 是否有效。
+
+        renew 幂等且查询超时 60s 较短,偶发网络抖动(如代理瞬断)会导致 NET-001
+        误报;查询命令超时后静默重试一次,仍超时才向上抛。
+        """
         if not os.path.exists(account_file):
             return False
-        result = await run_biliup_command_async(["-u", account_file, "renew"])
+        try:
+            result = await run_biliup_command_async(["-u", account_file, "renew"])
+        except subprocess.TimeoutExpired:
+            result = await run_biliup_command_async(["-u", account_file, "renew"])
         if result.returncode == 0:
             bilibili_logger.success("[+] cookie 有效")
             return True

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import re
@@ -99,21 +100,96 @@ async def _find_tencent_qrcode_element(page: Page):
     2026-09-17:登录页默认暗色主题,可见二维码 class 为 'js_qrcode_img
     web_qrcode_img';亮色变体(class 含 'qrcode lightBorder')隐藏,旧选择器
     img.qrcode 会匹配到隐藏元素,wait_for(visible) 必超时。两个变体都有
-    js_qrcode_img,按 :visible 选取当前主题渲染的那张。"""
+    js_qrcode_img,按 :visible 选取当前主题渲染的那张。
+    2026-09-19:实测 qrconnect 握手可能失败——外层显示"加载失败，点击重试"
+    并隐藏 iframe;或 iframe 进入本机微信快捷登录视图,二维码被隐藏。两种
+    情况下二维码 img 其实都已生成。所以可见等待改为轮询,期间反复尝试
+    恢复(点外层重试 + 切回普通二维码视图),仍不可见时由调用方走
+    _download_tencent_qrcode_fallback 直接下载隐藏的二维码图片。"""
     if not hasattr(page, "frame_locator"):
         raise RuntimeError("未获取到视频号登录二维码地址")
     iframe_locator = page.frame_locator('[src*="qrconnect"]')
     qr_code_img = iframe_locator.locator("img.js_qrcode_img:visible").first
-    await qr_code_img.wait_for(state="visible", timeout=30000)
-    return qr_code_img
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            await qr_code_img.wait_for(state="visible", timeout=5000)
+            return qr_code_img
+        except Exception:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("未获取到视频号登录二维码地址") from None
+            await _try_tencent_qr_recovery(page)
+
+
+async def _try_tencent_qr_recovery(page: Page) -> None:
+    """二维码不可见时的两种恢复尝试(失败静默,由轮询继续观察结果):
+    1. 外层页"加载失败，点击重试"(refresh-tip) → 点击重载 qrconnect iframe;
+    2. iframe 内本机微信快捷登录视图 → 点 js_switchToNormal 切回二维码视图。"""
+    try:
+        tip = page.locator('p.refresh-tip:visible').first
+        if await tip.count():
+            wrap = tip.locator("xpath=ancestor::div[contains(@class, 'refresh-wrap')]").first
+            if await wrap.count():
+                await wrap.click(timeout=2000)
+            else:
+                await tip.click(timeout=2000)
+    except Exception:
+        pass
+    try:
+        for frame in page.frames:
+            if "qrconnect" in (frame.url or ""):
+                await frame.evaluate(
+                    "() => { const b = document.querySelector('button.js_switchToNormal, .web_qrcode_switch');"
+                    " if (b) b.click(); }"
+                )
+    except Exception:
+        pass
+
+
+async def _download_tencent_qrcode_fallback(page: Page, qrcode_path: Path) -> bool:
+    """qrconnect 握手失败时二维码 img 已生成但被外层隐藏:绕过可见性要求,
+    在 qrconnect frame 内直接 fetch 其 src 下载为图片。成功返回 True。"""
+    for frame in page.frames:
+        if "qrconnect" not in (frame.url or ""):
+            continue
+        try:
+            data_url = await frame.evaluate(
+                """
+                async () => {
+                    const img = document.querySelector('img.js_qrcode_img');
+                    if (!img || !img.src) return null;
+                    const resp = await fetch(img.src);
+                    if (!resp.ok) return null;
+                    const blob = await resp.blob();
+                    return await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.onerror = () => resolve(null);
+                        reader.readAsDataURL(blob);
+                    });
+                }
+                """
+            )
+        except Exception:
+            continue
+        if data_url and "," in data_url:
+            qrcode_path.write_bytes(base64.b64decode(data_url.split(",", 1)[1]))
+            return True
+    return False
 
 
 async def _save_tencent_qrcode(page: Page, account_file: str, previous_qrcode_path: Path | None = None, qrcode_callback=None) -> dict:
     qrcode_utils = _get_qrcode_utils()
-    qr_code_img = await _find_tencent_qrcode_element(page)
     qrcode_path = qrcode_utils["build_login_qrcode_path"](account_file, suffix="tencent_login_qrcode")
     ensure_dir(qrcode_path.parent)
-    await qr_code_img.screenshot(path=qrcode_path)
+    try:
+        qr_code_img = await _find_tencent_qrcode_element(page)
+        await qr_code_img.screenshot(path=qrcode_path)
+    except Exception:
+        # 二维码始终不可见(qrconnect 握手失败被外层隐藏/快捷登录视图)时,
+        # 直接下载 iframe 内已生成的二维码图片;再失败才向上抛。
+        if not await _download_tencent_qrcode_fallback(page, qrcode_path):
+            raise
     if previous_qrcode_path and previous_qrcode_path != qrcode_path:
         if qrcode_utils["remove_qrcode_file"](previous_qrcode_path):
             tencent_logger.info(_msg("🧹", f"临时二维码文件已清理: {previous_qrcode_path}"))
@@ -190,6 +266,7 @@ async def _is_tencent_qrcode_expired(page: Page) -> bool:
         'div.mask.show p.refresh-tip:has-text("网络不可用，点击刷新")',
         'p.refresh-tip:has-text("二维码已过期，点击刷新")',
         'p.refresh-tip:has-text("网络不可用，点击刷新")',
+        'p.refresh-tip:has-text("加载失败，点击重试")',
     ]
     for scope in _tencent_qrcode_scopes(page):
         for selector in tip_selectors:
@@ -239,6 +316,7 @@ async def _refresh_tencent_qrcode(page: Page) -> None:
         'div.mask.show p.refresh-tip:has-text("网络不可用，点击刷新")',
         'p.refresh-tip:has-text("二维码已过期，点击刷新")',
         'p.refresh-tip:has-text("网络不可用，点击刷新")',
+        'p.refresh-tip:has-text("加载失败，点击重试")',
     ]
     for scope in scopes:
         for selector in tip_selectors:

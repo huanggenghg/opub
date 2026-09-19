@@ -222,7 +222,17 @@ class BaseBrowserUploader(BasePlatformUploader):
 
     @classmethod
     async def _launch_browser(cls, playwright: Playwright, headless: bool):
-        return await playwright.chromium.launch(**_build_launch_kwargs(headless))
+        """启动 Chromium;失败静默重试一次。
+
+        Why: 多素材批跑时偶发启动竞态/资源瞬时不足(2026-09-19 实测抖音/百家号
+        批跑随机 ENV-006、单跑即成功),单次启动失败不代表环境损坏;重试一次
+        失败才向上抛,由 classify_login_exception 归类。
+        """
+        try:
+            return await playwright.chromium.launch(**_build_launch_kwargs(headless))
+        except Exception:
+            await asyncio.sleep(2)
+            return await playwright.chromium.launch(**_build_launch_kwargs(headless))
 
     @classmethod
     async def _init_context(cls, browser, account_file: Optional[str]):

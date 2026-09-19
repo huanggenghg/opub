@@ -41,6 +41,15 @@ KUAISHOU_PUBLISH_WAIT_TIMEOUT = 600
 KUAISHOU_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 KUAISHOU_VIDEO_ITEM_SELECTOR = "div.video-item__cover"
 KUAISHOU_LOGIN_MARKERS = ["passport.kuaishou.com"]
+# 2026-09-19 页面改版:上传页加载初期会弹一个 element-plus 弹窗(button.el-button
+# .confirm__btn,文本"确定"),上传按钮要等弹窗消失/页面继续渲染后才出现;
+# 旧类名体系(_upload-btn_*)仍是主选择器,文本/角色定位作兜底。
+KUAISHOU_CONFIRM_DIALOG_SELECTOR = "button.el-button.confirm__btn"
+KUAISHOU_UPLOAD_BUTTON_SELECTORS = (
+    'button[class^="_upload-btn"]',
+    'button[class*="_upload-btn"]',
+    'button:has-text("上传视频")',
+)
 
 
 def _print_ks_qrcode(qrcode_content: str, qrcode_path: Path) -> None:
@@ -61,6 +70,51 @@ async def _is_ks_cookie_invalid(page: Page, timeout: int = 5000) -> bool:
         return False
 
 
+async def _is_ks_cookie_invalid_instant(page: Page) -> bool:
+    """机构服务标记的即时可见性检查(不等待);轮询场景用,避免每轮白等 5s。"""
+    return await _is_ks_locator_visible(page.locator(KUAISHOU_COOKIE_INVALID_SELECTOR).first)
+
+
+async def _dismiss_ks_confirm_dialog(page: Page) -> None:
+    """关闭 2026-09-19 改版后加载初期出现的 element-plus"确定"弹窗。"""
+    confirm_btn = page.locator(KUAISHOU_CONFIRM_DIALOG_SELECTOR).first
+    try:
+        if await _is_ks_locator_visible(confirm_btn):
+            await confirm_btn.click(timeout=3000)
+            await asyncio.sleep(1)
+    except Exception:
+        pass
+
+
+async def _find_ks_upload_button(page: Page, text: str | None = None):
+    """按选择器优先级找可见的上传按钮;找不到返回 None(由轮询调用方重试)。"""
+    for selector in KUAISHOU_UPLOAD_BUTTON_SELECTORS:
+        locator = page.locator(selector)
+        if text:
+            locator = locator.filter(has_text=text)
+        candidate = locator.first
+        if await _is_ks_locator_visible(candidate):
+            return candidate
+    if text:
+        candidate = page.locator(f'button:has-text("{text}")').first
+        if await _is_ks_locator_visible(candidate):
+            return candidate
+    return None
+
+
+async def _wait_ks_upload_button(page: Page, timeout_ms: int = 30000, text: str | None = None):
+    """轮询等待上传按钮出现,期间顺带关闭"确定"弹窗;超时抛 RuntimeError。"""
+    deadline = time.monotonic() + timeout_ms / 1000
+    while True:
+        button = await _find_ks_upload_button(page, text=text)
+        if button is not None:
+            return button
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"未找到快手上传按钮(等待 {timeout_ms}ms){'，文本=' + text if text else ''}")
+        await _dismiss_ks_confirm_dialog(page)
+        await asyncio.sleep(0.5)
+
+
 async def _is_ks_locator_visible(locator) -> bool:
     try:
         if not await locator.count():
@@ -73,7 +127,7 @@ async def _is_ks_locator_visible(locator) -> bool:
 async def _is_ks_auth_page_valid(page: Page) -> bool:
     if not (page.url or "").startswith(KUAISHOU_UPLOAD_URL):
         return False
-    if await _is_ks_cookie_invalid(page):
+    if await _is_ks_cookie_invalid_instant(page):
         return False
 
     login_markers = [
@@ -84,8 +138,8 @@ async def _is_ks_auth_page_valid(page: Page) -> bool:
         if await _is_ks_locator_visible(marker):
             return False
 
-    upload_button = page.locator('button[class^="_upload-btn"]').first
-    return await _is_ks_locator_visible(upload_button)
+    upload_button = await _find_ks_upload_button(page)
+    return upload_button is not None
 
 
 async def _extract_ks_qrcode_src(page: Page) -> str:
@@ -429,6 +483,33 @@ class KSBaseUploader(BaseBrowserUploader):
         """快手登录完成判断:页面在发布页且没有登录表单/QR码,上传按钮可见。"""
         return await _is_ks_auth_page_valid(page)
 
+    @classmethod
+    async def check_upload_page(cls, page: Page, timeout: float = 30.0) -> bool:
+        """Override hook: 轮询等待上传页就绪。
+
+        Why: 2026-09-19 页面改版后,上传按钮在加载初期不渲染(先弹 element-plus
+        "确定"弹窗),基类的单次判定会误报 PAGE-001。这里在期限内轮询:先判定
+        确定性的登录失效证据(passport 域/登录表单),再关弹窗、等上传按钮;
+        超时仍不就绪才报 PAGE-001。
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            if "passport.kuaishou.com" in (page.url or ""):
+                return False
+            login_markers = [
+                page.locator("main#login-form").first,
+                page.locator('div.qr-login img[alt="qrcode"]').first,
+            ]
+            for marker in login_markers:
+                if await _is_ks_locator_visible(marker):
+                    return False
+            await _dismiss_ks_confirm_dialog(page)
+            if await _is_ks_auth_page_valid(page):
+                return True
+            if time.monotonic() >= deadline:
+                raise LoginCheckError('page')
+            await page.wait_for_timeout(1000)
+
     def _session_login_interaction(self, page):
         return session_qrcode(page, self.account_file, _save_ks_qrcode, _refresh_session_qrcode)
 
@@ -568,8 +649,7 @@ class KSVideo(KSBaseUploader):
 
         await self.close_guide_overlay(page)
 
-        upload_button = page.locator("button[class^='_upload-btn']")
-        await upload_button.wait_for(state="visible", timeout=10000)
+        upload_button = await _wait_ks_upload_button(page)
 
         async with page.expect_file_chooser() as fc_info:
             await upload_button.click()
@@ -755,8 +835,7 @@ class KSNote(KSBaseUploader):
         await self.close_guide_overlay(page)
 
         kuaishou_logger.info(_msg("📤", "小人正在上传图片"))
-        upload_button = page.locator("button[class^='_upload-btn']").filter(has_text="上传图片")
-        await upload_button.wait_for(state="visible", timeout=10000)
+        upload_button = await _wait_ks_upload_button(page, text="上传图片")
 
         async with page.expect_file_chooser() as fc_info:
             await upload_button.click()

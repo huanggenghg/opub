@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from publish.auth import LoginCheckError
@@ -20,6 +21,7 @@ from uploader.ks_uploader.main import KSBaseUploader
 from uploader.tencent_uploader.main import (
     _download_tencent_qrcode_fallback,
     _save_tencent_qrcode,
+    _refresh_session_qrcode,
 )
 
 _PNG_DATA_URL = (
@@ -60,6 +62,38 @@ class _FakeLocator:
 
 
 class TencentQrFallbackTests(unittest.TestCase):
+    def test_fallback_qr_is_not_refreshed_for_outer_load_failure(self):
+        # The outer loading error can remain visible after a valid hidden QR
+        # was saved. It is not evidence that that QR has expired.
+        def locator(selector):
+            tip = SimpleNamespace(
+                count=AsyncMock(return_value=int('加载失败，点击重试' in selector)),
+                is_visible=AsyncMock(return_value=True),
+            )
+            tip.first = tip
+            return tip
+
+        page = SimpleNamespace(locator=locator, wait_for_timeout=AsyncMock())
+        with patch("uploader.tencent_uploader.main._refresh_tencent_qrcode", AsyncMock()) as refresh:
+            result = asyncio.run(_refresh_session_qrcode(page))
+        self.assertFalse(result)
+        refresh.assert_not_awaited()
+
+    def test_expired_qr_still_refreshes(self):
+        def locator(selector):
+            tip = SimpleNamespace(
+                count=AsyncMock(return_value=int('二维码已过期，点击刷新' in selector)),
+                is_visible=AsyncMock(return_value=True),
+            )
+            tip.first = tip
+            return tip
+
+        page = SimpleNamespace(locator=locator, wait_for_timeout=AsyncMock())
+        with patch("uploader.tencent_uploader.main._refresh_tencent_qrcode", AsyncMock()) as refresh:
+            result = asyncio.run(_refresh_session_qrcode(page))
+        self.assertTrue(result)
+        refresh.assert_awaited_once_with(page)
+
     def test_download_fallback_writes_qrcode_from_hidden_frame(self):
         frame = _FakeFrame("https://open.weixin.qq.com/connect/qrconnect?appid=x",
                            evaluate_result=_PNG_DATA_URL)

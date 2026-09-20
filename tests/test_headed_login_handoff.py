@@ -227,14 +227,13 @@ def test_headed_login_close_timeout_does_not_block(tmp_path, monkeypatch):
         storage_state=AsyncMock(),
     )
     page.context = context
-    never = asyncio.Event()
     launches = []
 
     async def launch(playwright, headless):
         launches.append(headless)
 
         async def hanging_close():
-            await never.wait()
+            await asyncio.Event().wait()
 
         return SimpleNamespace(close=hanging_close)
 
@@ -298,7 +297,6 @@ def test_headless_relaunch_not_blocked_by_hanging_headed_close(tmp_path, monkeyp
     uploader = HandoffUploader(tmp_path / "cookie.json", headless=True)
     # 顺序:无头探测(未登录) → 有头扫码页(完成登录) → 无头重启(已登录)
     pages = [FakePage(login=True), FakePage(login=True), FakePage(login=False)]
-    never = asyncio.Event()
     launches = []
     browsers = []
 
@@ -311,7 +309,7 @@ def test_headless_relaunch_not_blocked_by_hanging_headed_close(tmp_path, monkeyp
         if not headless:
 
             async def hanging_close():
-                await never.wait()
+                await asyncio.Event().wait()
 
             browser = SimpleNamespace(close=hanging_close)
         else:

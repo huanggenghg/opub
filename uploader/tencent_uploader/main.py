@@ -261,12 +261,14 @@ def _tencent_qrcode_scopes(page: Page):
 
 
 async def _is_tencent_qrcode_expired(page: Page) -> bool:
+    # 外层“加载失败”并不表示 iframe 内的二维码过期；隐藏图片兜底
+    # 成功后该提示仍可能保留。加载失败由取码阶段的恢复逻辑处理，
+    # 扫码等待阶段不能因此立即换码。
     tip_selectors = [
         'div.mask.show p.refresh-tip:has-text("二维码已过期，点击刷新")',
         'div.mask.show p.refresh-tip:has-text("网络不可用，点击刷新")',
         'p.refresh-tip:has-text("二维码已过期，点击刷新")',
         'p.refresh-tip:has-text("网络不可用，点击刷新")',
-        'p.refresh-tip:has-text("加载失败，点击重试")',
     ]
     for scope in _tencent_qrcode_scopes(page):
         for selector in tip_selectors:

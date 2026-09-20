@@ -426,6 +426,7 @@ class WeiboVideo(WeiboBaseUploader):
             }""")
             if upload_started == 'auto':
                 weibo_logger.success(_msg("🥳", "视频秒传成功，已自动发布"))
+                self._publish_confirmed = True
                 return
             if upload_started:
                 weibo_logger.info(_msg("✅", "视频上传已开始"))
@@ -552,6 +553,7 @@ class WeiboVideo(WeiboBaseUploader):
             }""")
             if upload_done == 'auto_published':
                 weibo_logger.success(_msg("🥳", "视频已上传成功，自动发布"))
+                self._publish_confirmed = True
                 return None  # 自动发布时无法获取视频链接
             if upload_done == 'done':
                 weibo_logger.success(_msg("🥳", "视频上传完成"))
@@ -575,6 +577,7 @@ class WeiboVideo(WeiboBaseUploader):
             body_text = await page.evaluate("() => document.body.innerText || ''")
             if "视频已上传成功" in body_text:
                 weibo_logger.success(_msg("🥳", "视频发布成功"))
+                self._publish_confirmed = True
 
                 # === 跳转到视频管理页，轮询检查审核状态并获取视频链接 ===
                 weibo_logger.info(_msg("🧭", "正在跳转到视频管理页..."))
@@ -641,6 +644,7 @@ class WeiboVideo(WeiboBaseUploader):
         """主入口，返回 PlatformResultExtras"""
         weibo_logger.info(_msg("🧍", "检查 cookie 和视频文件..."))
         result: PlatformResultExtras = {"success": False, "message": ""}
+        self._publish_confirmed = False
 
         try:
             try:
@@ -649,7 +653,13 @@ class WeiboVideo(WeiboBaseUploader):
                 raise _WeiboPreMediaLoginExpired(str(exc)) from exc
             weibo_logger.info(_msg("🥳", "上传前检查通过"))
             async with self._browser_session(save_on_success_only=True) as page:
-                video_link = await self.upload_video_content(page)
+                try:
+                    video_link = await self.upload_video_content(page)
+                except Exception as exc:
+                    if not self._publish_confirmed:
+                        raise
+                    weibo_logger.warning(_msg("⚠️", f"发布已确认，但获取视频链接失败: {exc}"))
+                    video_link = None
                 result["success"] = True
                 if video_link:
                     result["result_url"] = video_link

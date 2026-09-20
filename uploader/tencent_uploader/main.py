@@ -588,10 +588,14 @@ class TencentBaseUploader(BaseBrowserUploader):
                 # SPA navigation: reloading the upload URL can send it back home.
                 current = url.split('?', 1)[0].rstrip('/')
                 remaining_ms = max(1, (deadline - time.monotonic()) * 1000)
-                if current == 'https://channels.weixin.qq.com/platform' and not opened_video:
+                if current == 'https://channels.weixin.qq.com/platform' and not opened_video and not opened_publish:
+                    publish_button = page.get_by_role('button', name='发表视频', exact=True).first
                     video_link = page.get_by_role('link', name='视频', exact=True).first
                     content_link = page.get_by_role('link', name='内容管理', exact=True).first
-                    if await video_link.is_visible():
+                    if await publish_button.is_visible():
+                        await publish_button.click(timeout=remaining_ms)
+                        opened_publish = True
+                    elif await video_link.is_visible():
                         await video_link.click(timeout=remaining_ms)
                         opened_video = True
                     elif not opened_menu and await content_link.is_visible():

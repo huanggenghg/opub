@@ -102,7 +102,16 @@ class CookieAuthPageTests(unittest.TestCase):
         page = FakePage(xhs_main.XHS_PUBLISH_VIDEO_URL)
 
         with self.assertRaises(LoginCheckError):
-            asyncio.run(xhs_main.XiaoHongShuBaseUploader.check_upload_page(page))
+            asyncio.run(xhs_main.XiaoHongShuBaseUploader.check_upload_page(page, timeout=0))
+
+    def test_xhs_upload_page_waits_for_delayed_login_redirect(self):
+        page = FakePage(xhs_main.XHS_PUBLISH_VIDEO_URL)
+
+        async def redirect_during_wait(*args, **kwargs):
+            page.url = "https://creator.xiaohongshu.com/login?redirectReason=401"
+
+        page.wait_for_timeout = redirect_during_wait
+        self.assertFalse(asyncio.run(xhs_main.XiaoHongShuBaseUploader.check_upload_page(page)))
 
     def test_xhs_upload_page_accepts_attached_upload_control(self):
         selector = "div[class^='upload-content'] input[class='upload-input'], input.upload-input"

@@ -496,6 +496,8 @@ class KSBaseUploader(BaseBrowserUploader):
         while True:
             if "passport.kuaishou.com" in (page.url or ""):
                 return False
+            if await _is_ks_cookie_invalid_instant(page):
+                return False
             login_markers = [
                 page.locator("main#login-form").first,
                 page.locator('div.qr-login img[alt="qrcode"]').first,

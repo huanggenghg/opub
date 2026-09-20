@@ -130,6 +130,16 @@ class TencentQrFallbackTests(unittest.TestCase):
 
 
 class KuaishouPollingCheckTests(unittest.TestCase):
+    def test_check_upload_page_returns_false_on_cookie_invalid_marker(self):
+        """无登录状态时上传页仍可停留原 URL，但机构服务标记表明需要登录。"""
+        page = _FakePage(url="https://cp.kuaishou.com/article/publish/video")
+        with patch("uploader.ks_uploader.main._is_ks_cookie_invalid_instant",
+                   AsyncMock(return_value=True)), \
+             patch("uploader.ks_uploader.main._is_ks_locator_visible",
+                   AsyncMock(return_value=False)):
+            result = asyncio.run(KSBaseUploader.check_upload_page(page, timeout=0.01))
+        self.assertFalse(result)
+
     def test_check_upload_page_polls_until_button_appears(self):
         """改版后按钮延迟渲染:单次判定失败不再立刻报 PAGE-001,轮询到就绪为止。"""
         page = _FakePage(url="https://cp.kuaishou.com/article/publish/video")

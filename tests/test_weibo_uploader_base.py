@@ -34,6 +34,29 @@ class WeiboBaseUploaderInheritanceTests(unittest.TestCase):
 
 
 class WeiboVideoUploadTests(unittest.TestCase):
+    def test_confirmed_publish_survives_share_link_navigation_timeout(self):
+        uploader = WeiboVideo(
+            title="t", file_path="/fake.mp4", tags=[], publish_date=0,
+            account_file="/fake.json", desc="", publish_strategy=PublishStrategy.IMMEDIATE,
+        )
+
+        @asynccontextmanager
+        async def fake_session(**kwargs):
+            yield object()
+
+        async def confirmed_then_link_timeout(page):
+            uploader._publish_confirmed = True
+            raise TimeoutError('Page.goto: Timeout 30000ms exceeded')
+
+        with patch.object(uploader, "validate_upload_args", AsyncMock()), \
+             patch.object(uploader, "_browser_session", fake_session), \
+             patch.object(uploader, "upload_video_content", side_effect=confirmed_then_link_timeout):
+            result = asyncio.run(uploader.upload())
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["message"], "发布成功，但未获取到视频链接")
+        self.assertNotIn("result_url", result)
+
     def test_upload_does_not_open_a_separate_cookie_auth_browser(self):
         import asyncio
         from contextlib import asynccontextmanager
@@ -310,6 +333,7 @@ class WeiboVideoFileSelectionTests(unittest.TestCase):
         asyncio.run(uploader.upload_video_content(page))
         page.file_chooser.set_files.assert_awaited_once_with("/fake.mp4")
         file_input.set_input_files.assert_not_awaited()
+        self.assertTrue(uploader._publish_confirmed)
 
     def test_video_upload_falls_back_to_file_input_when_button_missing(self):
         from uploader.weibo_uploader.main import _select_weibo_video_file

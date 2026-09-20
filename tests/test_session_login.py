@@ -471,10 +471,37 @@ def test_tencent_check_navigates_dashboard_to_ready_upload_page(start_url, expec
         locator.first = locator
         return locator
 
-    page.get_by_role = lambda role, name, exact: navigation(name)
+    hidden_button = SimpleNamespace(is_visible=AsyncMock(return_value=False))
+    hidden_button.first = hidden_button
+    page.get_by_role = lambda role, name, exact: hidden_button if role == 'button' else navigation(name)
     page.get_by_text = lambda text, exact: navigation(text)
     assert asyncio.run(TencentBaseUploader.check_upload_page(page, timeout=0.1)) is True
     assert actions == expected_actions
+
+
+def test_tencent_check_uses_visible_publish_button_on_dashboard():
+    """扫码后实际首页直接显示“发表视频”按钮，不再有可访问的导航链接。"""
+    from uploader.tencent_uploader.main import TencentBaseUploader
+    page = TencentLateEvidencePage(url='https://channels.weixin.qq.com/platform')
+    clicked = []
+
+    async def is_visible():
+        return True
+
+    async def click(**kwargs):
+        clicked.append('发表视频')
+        page.url = TencentBaseUploader.UPLOAD_URL
+        page.input_locator.after = 0
+
+    publish = SimpleNamespace(is_visible=is_visible, click=click)
+    publish.first = publish
+    missing = SimpleNamespace(is_visible=AsyncMock(return_value=False))
+    missing.first = missing
+    page.get_by_role = lambda role, name, exact: publish if (role, name) == ('button', '发表视频') else missing
+    page.get_by_text = lambda text, exact: missing
+
+    assert asyncio.run(TencentBaseUploader.check_upload_page(page, timeout=0.1)) is True
+    assert clicked == ['发表视频']
 
 
 def test_tencent_upload_reuses_ready_page_without_reload():

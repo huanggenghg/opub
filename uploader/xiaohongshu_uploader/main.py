@@ -456,21 +456,26 @@ class XiaoHongShuBaseUploader(BaseBrowserUploader):
         return await _is_xhs_login_completed(page)
 
     @classmethod
-    async def check_upload_page(cls, page: Page) -> bool:
-        if await cls.is_login_required(page):
-            return False
+    async def check_upload_page(cls, page: Page, timeout: float = 15.0) -> bool:
+        deadline = time.monotonic() + timeout
         expected = cls.UPLOAD_URL.split("?", 1)[0].rstrip("/")
-        current = (page.url or "").split("?", 1)[0].rstrip("/")
-        if current != expected:
-            raise LoginCheckError('page')
         upload_input = page.locator(
             "div[class^='upload-content'] input[class='upload-input'], input.upload-input"
         ).first
-        try:
-            await upload_input.wait_for(state="attached", timeout=15000)
-        except Exception:
-            raise LoginCheckError('page') from None
-        return True
+        while True:
+            try:
+                if await cls.is_login_required(page):
+                    return False
+                current = (page.url or "").split("?", 1)[0].rstrip("/")
+                if current == expected and await upload_input.count():
+                    return True
+            except Exception as exc:
+                # 401 重定向瞬间旧 document 被销毁；下一轮读取新登录页。
+                if "execution context was destroyed" not in str(exc).lower():
+                    raise
+            if time.monotonic() >= deadline:
+                raise LoginCheckError('page')
+            await page.wait_for_timeout(500)
 
     @classmethod
     async def extract_qrcode_src(cls, page):

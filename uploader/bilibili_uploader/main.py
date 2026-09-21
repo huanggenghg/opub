@@ -29,6 +29,10 @@ _IS_WINDOWS = platform.system().lower() == "windows"
 # cookie renew 通过但上传 token 已失效的特征(2026-09-18 定因):
 # 旧登录态下 biliup 上传对 upos 全部重试失败,报 Request failed after N retries
 _STALE_LOGIN_UPLOAD_FAILURE = re.compile(r"request failed after \d+ retries", re.IGNORECASE)
+_TLS_UPLOAD_FAILURE = re.compile(
+    r"tls handshake|invalid peer certificate|certificate (?:is )?expired|certificate verify failed",
+    re.IGNORECASE,
+)
 _SENSITIVE_URL_PARAMETER = re.compile(
     r"(?i)(\b(?:access_key|access_token|refresh_token|token|sign|sessdata|bili_jct)=)"
     r"[^&\s)\x1b]+"
@@ -201,6 +205,10 @@ class BilibiliUploader(BaseCliUploader):
         """cookie renew 通过但上传 token 已失效的特征(2026-09-18 定因)。"""
         return bool(_STALE_LOGIN_UPLOAD_FAILURE.search(detail))
 
+    @staticmethod
+    def _is_tls_upload_failure(detail: str) -> bool:
+        return bool(_TLS_UPLOAD_FAILURE.search(detail))
+
     async def _recover_stale_login(self) -> PlatformResultExtras:
         """上传 token 失效:重新扫码登录后整体重试一次;只恢复一次。"""
         if getattr(self, "_stale_login_recovered", False):
@@ -262,11 +270,58 @@ class BilibiliUploader(BaseCliUploader):
         stderr = result.stderr or ""
 
         if result.returncode != 0:
-            if self._is_stale_login_upload_failure(f"{stderr or ''}\n{stdout or ''}"):
+            detail = f"{stderr}\n{stdout}"
+            if self._is_tls_upload_failure(detail):
+                # 只在上传尚未完成且前后稿件快照可信时切换线路，避免重复投稿。
+                if not list_ok or "Upload completed" in detail or "All files uploaded successfully" in detail:
+                    return {
+                        "success": False,
+                        "safe_to_retry": False,
+                        "message": "B站上传线路 TLS 失败，投稿结果无法安全确认，请到创作中心核实",
+                    }
+                after_bvs, after_ok = await self._list_bvs_with_status()
+                if not after_ok:
+                    return {
+                        "success": False,
+                        "safe_to_retry": False,
+                        "message": "B站上传线路 TLS 失败，稿件列表无法核实，请到创作中心确认",
+                    }
+                new_bvs = after_bvs - before_bvs
+                if len(new_bvs) == 1:
+                    new_bv = next(iter(new_bvs))
+                    if await self._match_bv_by_title() == new_bv:
+                        return {
+                            "success": True,
+                            "message": "发布成功，已在稿件列表核实",
+                            "result_url": f"https://www.bilibili.com/video/{new_bv}",
+                        }
+                if new_bvs:
+                    return {
+                        "success": False,
+                        "safe_to_retry": False,
+                        "message": "B站上传线路 TLS 失败，稿件列表出现新内容，请人工核实后再决定是否重试",
+                    }
+                bilibili_logger.warning("B站上传线路 TLS 失败且无新增稿件，改用 bda2 线路重试一次")
+                try:
+                    result = await run_biliup_command_async([*args, "--line", "bda2"])
+                except subprocess.TimeoutExpired:
+                    return {
+                        "success": False,
+                        "safe_to_retry": False,
+                        "message": "B站备用上传线路超时，结果不明，请到创作中心核实",
+                    }
+                stdout = result.stdout or ""
+                stderr = result.stderr or ""
+                if result.returncode != 0:
+                    safe_error = _redact_biliup_error(stderr.strip())
+                    bilibili_logger.error(f"B站备用上传线路失败: {safe_error[:300]}")
+                    return {"success": False, "safe_to_retry": False, "message": f"B站备用上传线路失败: {safe_error[:200]}"}
+            elif self._is_stale_login_upload_failure(detail):
                 return await self._recover_stale_login()
-            safe_error = _redact_biliup_error(stderr.strip())
-            bilibili_logger.error(f"biliup 上传失败: {safe_error[:300]}")
-            return {"success": False, "message": f"biliup 上传失败: {safe_error[:200]}"}
+            else:
+                safe_error = _redact_biliup_error(stderr.strip())
+                bilibili_logger.error(f"biliup 上传失败: {safe_error[:300]}")
+                return {"success": False, "message": f"biliup 上传失败: {safe_error[:200]}"}
 
         bilibili_logger.success(f"biliup 上传成功: {stdout.strip()[:300]}")
         result_dict: PlatformResultExtras = {"success": True, "message": "发布成功"}

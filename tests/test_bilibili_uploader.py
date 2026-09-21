@@ -139,6 +139,74 @@ class CaptureBvAfterUploadTests(unittest.TestCase):
 
 
 class UploadWireTests(unittest.TestCase):
+    def test_tls_line_failure_retries_bda2_only_after_no_new_submission(self):
+        uploader = _make_uploader()
+        failure = _make_completed(1, stderr="client error (Connect): tls handshake eof")
+        success = _make_completed(0, stdout="Upload completed: demo.mp4")
+        with patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs_with_status", side_effect=[({"BVOLD"}, True), ({"BVOLD"}, True)]) as list_bvs, \
+             patch.object(uploader, "_capture_bv_after_upload", return_value="BVNEW") as capture, \
+             patch("uploader.bilibili_uploader.main.run_biliup_command_async", side_effect=[failure, success]) as command:
+            result = asyncio.run(uploader.upload())
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["result_url"], "https://www.bilibili.com/video/BVNEW")
+        self.assertEqual(command.await_count, 2)
+        self.assertEqual(command.await_args_list[1].args[0][-2:], ["--line", "bda2"])
+        self.assertEqual(list_bvs.await_count, 2)
+        capture.assert_awaited_once_with({"BVOLD"})
+
+    def test_tls_line_failure_never_retries_when_submission_check_fails(self):
+        uploader = _make_uploader()
+        failure = _make_completed(1, stderr="invalid peer certificate: certificate is expired")
+        with patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs_with_status", side_effect=[({"BVOLD"}, True), (set(), False)]), \
+             patch("uploader.bilibili_uploader.main.run_biliup_command_async", return_value=failure) as command:
+            result = asyncio.run(uploader.upload())
+
+        self.assertFalse(result["success"])
+        self.assertFalse(result["safe_to_retry"])
+        self.assertEqual(command.await_count, 1)
+
+    def test_tls_line_failure_recognizes_submitted_video_without_retry(self):
+        uploader = _make_uploader()
+        failure = _make_completed(1, stderr="tls handshake eof")
+        with patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs_with_status", side_effect=[({"BVOLD"}, True), ({"BVOLD", "BVNEW"}, True)]), \
+             patch.object(uploader, "_match_bv_by_title", return_value="BVNEW"), \
+             patch("uploader.bilibili_uploader.main.run_biliup_command_async", return_value=failure) as command:
+            result = asyncio.run(uploader.upload())
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["result_url"], "https://www.bilibili.com/video/BVNEW")
+        self.assertEqual(command.await_count, 1)
+
+    def test_tls_line_failure_after_file_upload_never_retries(self):
+        uploader = _make_uploader()
+        failure = _make_completed(1, stderr="Upload completed: demo.mp4\ntls handshake eof")
+        with patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs_with_status", return_value=({"BVOLD"}, True)) as list_bvs, \
+             patch("uploader.bilibili_uploader.main.run_biliup_command_async", return_value=failure) as command:
+            result = asyncio.run(uploader.upload())
+
+        self.assertFalse(result["success"])
+        self.assertFalse(result["safe_to_retry"])
+        self.assertEqual(list_bvs.await_count, 1)
+        self.assertEqual(command.await_count, 1)
+
+    def test_tls_line_failure_does_not_attribute_someone_elses_video(self):
+        uploader = _make_uploader()
+        failure = _make_completed(1, stderr="tls handshake eof")
+        with patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs_with_status", side_effect=[({"BVOLD"}, True), ({"BVOLD", "BVOTHER"}, True)]), \
+             patch.object(uploader, "_match_bv_by_title", return_value=None), \
+             patch("uploader.bilibili_uploader.main.run_biliup_command_async", return_value=failure) as command:
+            result = asyncio.run(uploader.upload())
+
+        self.assertFalse(result["success"])
+        self.assertFalse(result["safe_to_retry"])
+        self.assertEqual(command.await_count, 1)
+
     def test_missing_video_does_not_start_any_command(self):
         uploader = _make_uploader()
         with patch("os.path.exists", return_value=False), \

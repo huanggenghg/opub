@@ -160,6 +160,35 @@ class FakePlaywright:
 
 
 class XiaohongshuUploaderTests(unittest.TestCase):
+    def test_qrcode_panel_waits_for_late_login_container(self):
+        class DelayedLoginBox(FakeLocator):
+            def __init__(self):
+                super().__init__("late-login-box", count=0, children={
+                    "div:has-text('扫一扫')": FakeLocator("scan-text", count=1),
+                })
+                self.waited = False
+
+            async def wait_for(self, **kwargs):
+                self.waited = True
+                self._count = 1
+
+        class MissingBox(FakeLocator):
+            async def wait_for(self, **kwargs):
+                raise AssertionError("should wait for the appearing login container")
+
+        late_box = DelayedLoginBox()
+        missing = MissingBox("missing")
+        page = FakeLocator("page", children={
+            ".login-container": late_box,
+            ".login-box-container": missing,
+            "div[class*='login-box']": missing,
+            ".login-container:visible, .login-box-container:visible, "
+            "div[class*='login-box']:visible": late_box,
+        })
+
+        asyncio.run(xhs_main._open_xhs_qrcode_panel(page))
+        self.assertTrue(late_box.waited)
+
     def test_find_xhs_qrcode_locator_prefers_scan_sibling_inside_login_box(self):
         qrcode_locator = FakeLocator("qrcode", count=1, src="data:image/png;base64,abc")
         scan_text_locator = FakeLocator(

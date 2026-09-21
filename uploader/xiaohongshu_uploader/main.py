@@ -75,12 +75,10 @@ def _resolve_account_file(account_file: str | Path) -> str:
 
 async def _open_xhs_qrcode_panel(page: Page) -> None:
     # 主站登录页面的选择器，兼容新旧登录框结构。
-    login_box = page.locator(".login-container").first
-    if not await login_box.count():
-        login_box = page.locator(".login-box-container").first
-    if not await login_box.count():
-        login_box = page.locator("div[class*='login-box']").first
-
+    login_box = page.locator(
+        ".login-container:visible, .login-box-container:visible, "
+        "div[class*='login-box']:visible"
+    ).first
     await login_box.wait_for(state="visible", timeout=30000)
 
     # 检查是否已经是扫码模式

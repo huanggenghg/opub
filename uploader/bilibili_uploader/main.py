@@ -29,6 +29,15 @@ _IS_WINDOWS = platform.system().lower() == "windows"
 # cookie renew 通过但上传 token 已失效的特征(2026-09-18 定因):
 # 旧登录态下 biliup 上传对 upos 全部重试失败,报 Request failed after N retries
 _STALE_LOGIN_UPLOAD_FAILURE = re.compile(r"request failed after \d+ retries", re.IGNORECASE)
+_SENSITIVE_URL_PARAMETER = re.compile(
+    r"(?i)(\b(?:access_key|access_token|refresh_token|token|sign|sessdata|bili_jct)=)"
+    r"[^&\s)\x1b]+"
+)
+
+
+def _redact_biliup_error(detail: str) -> str:
+    """Keep upstream diagnostics without exposing credentials embedded in URLs."""
+    return _SENSITIVE_URL_PARAMETER.sub(r"\1[REDACTED]", detail)
 
 
 class _BiliupListCommandError(RuntimeError):
@@ -132,9 +141,9 @@ class BilibiliUploader(BaseCliUploader):
         """
         result = await run_biliup_command_async(["-u", self.account_file, "list"])
         if result.returncode != 0:
-            bilibili_logger.warning(f"biliup list 失败,返回空集: {(result.stderr or '').strip()[:200]}")
+            bilibili_logger.warning(f"biliup list 失败,返回空集: {_redact_biliup_error((result.stderr or '').strip())[:200]}")
             if strict:
-                raise _BiliupListCommandError((result.stderr or "").strip()[:200])
+                raise _BiliupListCommandError(_redact_biliup_error((result.stderr or "").strip())[:200])
             return set()
         bvs: set[str] = set()
         for line in (result.stdout or "").splitlines():
@@ -255,8 +264,9 @@ class BilibiliUploader(BaseCliUploader):
         if result.returncode != 0:
             if self._is_stale_login_upload_failure(f"{stderr or ''}\n{stdout or ''}"):
                 return await self._recover_stale_login()
-            bilibili_logger.error(f"biliup 上传失败: {stderr.strip()[:300]}")
-            return {"success": False, "message": f"biliup 上传失败: {stderr.strip()[:200]}"}
+            safe_error = _redact_biliup_error(stderr.strip())
+            bilibili_logger.error(f"biliup 上传失败: {safe_error[:300]}")
+            return {"success": False, "message": f"biliup 上传失败: {safe_error[:200]}"}
 
         bilibili_logger.success(f"biliup 上传成功: {stdout.strip()[:300]}")
         result_dict: PlatformResultExtras = {"success": True, "message": "发布成功"}

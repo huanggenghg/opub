@@ -23,6 +23,27 @@ def _make_uploader() -> BilibiliUploader:
 
 
 class ListBvsTests(unittest.TestCase):
+    def test_upload_failure_redacts_credentials_from_result_and_log(self):
+        uploader = _make_uploader()
+        stderr = (
+            "error sending request for url "
+            "(https://passport.bilibili.com/x/passport-login/oauth2/info"
+            "?access_key=private-access-key&sign=private-signature)"
+        )
+        with patch("os.path.exists", return_value=True), \
+             patch.object(uploader, "_list_bvs_with_status", return_value=(set(), True)), \
+             patch("uploader.bilibili_uploader.main.run_biliup_command_async", return_value=_make_completed(1, stderr=stderr)), \
+             patch("uploader.bilibili_uploader.main.bilibili_logger.error") as log_error:
+            result = asyncio.run(uploader.upload())
+
+        self.assertFalse(result["success"])
+        self.assertIn("passport.bilibili.com", result["message"])
+        self.assertNotIn("private-access-key", result["message"])
+        self.assertNotIn("private-signature", result["message"])
+        logged = " ".join(str(call) for call in log_error.call_args_list)
+        self.assertNotIn("private-access-key", logged)
+        self.assertNotIn("private-signature", logged)
+
     def test_parses_bv_lines_into_set(self):
         stdout = "BV15r3q6FEYZ\t无小丑\t开放浏览\nBV1QQgy6rEaA\t西南\t开放浏览\nBV1PmMg68ERX\tWHO\t开放浏览\n"
         uploader = _make_uploader()

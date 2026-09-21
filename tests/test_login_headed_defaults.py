@@ -46,9 +46,13 @@ class LoginHeadedDefaultTests(unittest.TestCase):
     def test_login_entry_points_stay_headed_even_with_chrome_headless_config(self):
         """chrome_headless=true 时登录入口仍必须有头(扫码需要可见窗口)。"""
         with tempfile.TemporaryDirectory() as tmp_dir:
-            (Path(tmp_dir) / "config.json").write_text('{"chrome_headless": true}', encoding="utf-8")
+            home = Path(tmp_dir) / "home"
+            data_dir = home / ".opub"
+            data_dir.mkdir(parents=True)
+            (data_dir / "config.json").write_text('{"chrome_headless": true}', encoding="utf-8")
             env = os.environ.copy()
-            env["SAU_HOME"] = tmp_dir
+            env["HOME"] = str(home)
+            env["USERPROFILE"] = str(home)
             result = subprocess.run(
                 [sys.executable, "-c", _CHECK_CODE],
                 env=env, capture_output=True, text=True,

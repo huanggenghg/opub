@@ -67,4 +67,4 @@ main#login-form: 0
 
 ## 5. 沙箱环境注意（非 opub bug）
 
-WorkBuddy 沙箱会拦截 Chrome channel 启动时的 `code_sign_clone`、`GoogleUpdater` 写入（stderr 告警，不致命，抖音/百家号仍成功）。sqlite 在 `~/.opub` 下会被沙箱代理破坏（disk I/O error），需用 `SAU_HOME` 指到可写工作区。
+当时的 WorkBuddy 沙箱会拦截 Chrome channel 启动时的 `code_sign_clone`、`GoogleUpdater` 写入（stderr 告警，不致命，抖音/百家号仍成功），并曾在 `~/.opub` 的 SQLite 操作中出现 `disk I/O error`。2026-09-21 使用当前 WorkBuddy 沙箱重新验证了同一目录的文件读写、原子替换以及 SQLite DELETE/WAL 模式，均成功；当前版本固定直接使用 `~/.opub`，不再通过 `SAU_HOME` 创建工作区快照。

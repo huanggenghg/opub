@@ -7,8 +7,12 @@ from utils.fs import ensure_dir
 
 
 def data_dir(home: Optional[Path] = None, environ: Optional[Mapping[str, str]] = None) -> Path:
-    env = os.environ if environ is None else environ
-    return Path(env["SAU_HOME"]) if env.get("SAU_HOME") else (home or Path.home()) / ".opub"
+    """Return the single per-user data directory.
+
+    ``environ`` remains accepted for callers compiled against older 0.x
+    releases, but environment variables no longer select a second data root.
+    """
+    return (home or Path.home()) / ".opub"
 
 
 def license_path(base: Optional[Path] = None) -> Path:
@@ -20,7 +24,8 @@ def atomic_write_json(path: Path, value: Any) -> None:
     ensure_dir(path.parent)
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     try:
-        os.fchmod(fd, 0o600)
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(value, handle, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
             handle.flush()

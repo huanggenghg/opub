@@ -1,7 +1,7 @@
 ---
 name: opub-cli
 description: Use when 用户要用 opub 发布/上传视频或图文、配置多平台发布、发布到抖音/小红书/快手/微博/B站/视频号/百家号，或排查 opub、账号登录校验、浏览器驱动环境问题
-version: "0.8.16"
+version: "0.8.17"
 ---
 
 # opub CLI 使用指南
@@ -30,7 +30,7 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 # Ubuntu/Debian: sudo apt-get install ffmpeg
 ```
 
-首次运行会自动在 `~/.opub/` 创建数据目录（cookies 等），无需手动初始化。可用环境变量 `SAU_HOME` 指定其他数据目录。
+首次运行会自动在当前系统用户的 `~/.opub/` 创建数据目录（cookies、许可证和发布记录等），无需手动初始化。同一系统用户下的所有 Agent 固定使用这一目录；不要设置 `SAU_HOME`，也不要复制登录快照到工作区。
 
 发布预检只检查环境，不安装或更新依赖。需要修复时运行 `opub --repair-env`；图文转视频使用 `opub --repair-env --with-video` 安装可选依赖，也可安装 `pip install "opub[video]"`。修复命令使用 opub 当前解释器，不需要许可，也不会发布内容；不能和发布参数或激活命令混用。修复可能包含多个安装步骤，每步最多 600 秒，调用时应允许总计至少 1800 秒。
 

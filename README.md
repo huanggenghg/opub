@@ -40,7 +40,7 @@ PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="https://cdn.playwright.dev" patchright instal
 opub --repair-env --with-bilibili
 ```
 
-首次运行会自动在 `~/.opub/` 创建数据目录（cookies 等）。可用环境变量 `SAU_HOME` 指定其他数据目录。
+首次运行会自动在当前系统用户的 `~/.opub/` 创建数据目录（cookies、许可证和发布记录等）。同一系统用户下的所有 Agent 固定使用这一目录；源码目录和环境变量不会改变数据位置。
 
 发布时只检查环境，不再自动安装或更新依赖。需要图文转视频时，运行 `opub --repair-env --with-video`，或安装 `pip install "opub[video]"`。发布到 B站需要本地 biliup 程序：发布与 `--dry-run` 只做只读检查，缺失时返回 `ENV-007`，用 `opub --repair-env --with-bilibili` 显式安装。修复命令使用 opub 当前解释器，不需要付费激活，也不会发布内容。
 

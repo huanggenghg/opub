@@ -8,26 +8,32 @@ from pathlib import Path
 
 
 class ConfPipModeTests(unittest.TestCase):
-    def test_sau_home_overrides_base_dir_even_in_dev_checkout(self):
+    def test_all_agents_use_user_opub_even_when_sau_home_is_set(self):
         with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
             env = os.environ.copy()
-            env["SAU_HOME"] = tmp
+            env["HOME"] = str(home)
+            env["USERPROFILE"] = str(home)
+            env["SAU_HOME"] = str(Path(tmp) / "stale-snapshot")
             result = subprocess.run(
                 [sys.executable, "-c", "import conf; print(conf.BASE_DIR)"],
                 env=env, capture_output=True, text=True, check=True,
             )
-            self.assertEqual(result.stdout.strip(), str(Path(tmp).resolve()))
+            self.assertEqual(result.stdout.strip(), str((home / ".opub").resolve()))
+            self.assertFalse((Path(tmp) / "stale-snapshot" / "cookies").exists())
 
-    def test_sau_home_dir_auto_created_with_cookies(self):
+    def test_source_checkout_does_not_become_data_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / "data"
+            home = Path(tmp) / "home"
             env = os.environ.copy()
-            env["SAU_HOME"] = str(target)
-            subprocess.run(
-                [sys.executable, "-c", "import conf"],
+            env["HOME"] = str(home)
+            env["USERPROFILE"] = str(home)
+            env.pop("SAU_HOME", None)
+            result = subprocess.run(
+                [sys.executable, "-c", "import conf; print(conf.BASE_DIR)"],
                 env=env, capture_output=True, text=True, check=True,
             )
-            self.assertTrue((target / "cookies").is_dir())
+            self.assertEqual(result.stdout.strip(), str((home / ".opub").resolve()))
 
 
 if __name__ == "__main__":

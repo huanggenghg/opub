@@ -12,8 +12,9 @@ from publish.licensing.storage import (
 )
 
 
-def test_paths_prefer_sau_home(tmp_path):
-    assert data_dir(tmp_path / "home", {"SAU_HOME": str(tmp_path / "sau")}) == tmp_path / "sau"
+def test_paths_use_user_opub_and_ignore_sau_home(tmp_path):
+    home = tmp_path / "home"
+    assert data_dir(home, {"SAU_HOME": str(tmp_path / "sau")}) == home / ".opub"
     assert license_path(tmp_path) == tmp_path / "license.json"
 
 
@@ -22,6 +23,15 @@ def test_atomic_json_write_is_mode_0600_and_readable(tmp_path):
     atomic_write_json(target, {"z": "é", "ok": True})
     assert read_json(target) == {"z": "é", "ok": True}
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_atomic_json_write_works_without_fchmod_on_windows_python(tmp_path, monkeypatch):
+    target = tmp_path / "license.json"
+    monkeypatch.delattr("publish.licensing.storage.os.fchmod", raising=False)
+
+    atomic_write_json(target, {"ok": True})
+
+    assert read_json(target) == {"ok": True}
 
 
 def test_failed_replace_keeps_old_file_and_removes_temp(tmp_path, monkeypatch):

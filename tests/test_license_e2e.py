@@ -188,7 +188,7 @@ def test_code_activation_installs_device_bound_offline_license(tmp_path, caplog,
 
 
 def test_unlicensed_cli_exits_before_cookies_assets_runtime_or_network(tmp_path, capsys):
-    with patch.dict("os.environ", {"SAU_HOME": str(tmp_path / "unlicensed")}), patch(
+    with patch("publish.licensing.license_path", return_value=tmp_path / "unlicensed" / "license.json"), patch(
         "publish.licensing.build_device_hash", return_value=DEVICE_HASH
     ), patch("publish.orchestrator._build_overrides") as overrides, patch(
         "publish.orchestrator.default_params_from_overrides"

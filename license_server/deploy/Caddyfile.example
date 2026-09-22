@@ -1,6 +1,6 @@
-# Merge these handlers into the existing dachitech.xyz site block. Do not add a
-# second dachitech.xyz block if that site is already declared elsewhere.
-dachitech.xyz {
+# Merge these handlers into the existing opub.cn site block. Do not add a
+# second opub.cn block if that site is already declared elsewhere.
+opub.cn {
     @opub_license_activation {
         method POST
         path /license/v1/code-activations
@@ -18,5 +18,5 @@ dachitech.xyz {
         respond 404
     }
 
-    # Keep the existing dachitech.xyz handlers below this line.
+    # Keep the existing opub.cn handlers below this line.
 }

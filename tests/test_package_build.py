@@ -392,10 +392,22 @@ class PackageBuildTest(unittest.TestCase):
         skill_text = (repo_root / "skills/opub-cli/SKILL.md").read_text(encoding="utf-8")
         lock_text = (repo_root / "uv.lock").read_text(encoding="utf-8")
 
-        self.assertIn('version = "0.8.17"', pyproject_text)
-        self.assertIn('version: "0.8.17"', skill_text)
-        self.assertIn('name = "opub"\nversion = "0.8.17"', lock_text)
+        self.assertIn('version = "0.8.18"', pyproject_text)
+        self.assertIn('version: "0.8.18"', skill_text)
+        self.assertIn('name = "opub"\nversion = "0.8.18"', lock_text)
         self.assertNotIn('{ name = "qrcode"', lock_text)
+
+    def test_license_client_uses_opub_domain(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        deployment_text = (
+            repo_root / "publish/licensing/deployment.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "LICENSE_API_BASE_URL = 'https://opub.cn/license'",
+            deployment_text,
+        )
+        self.assertNotIn("dachitech.xyz", deployment_text)
 
     def test_manifest_explicitly_excludes_activation_code_inventories(self):
         repo_root = Path(__file__).resolve().parents[1]

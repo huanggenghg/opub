@@ -1,7 +1,7 @@
 # opub 许可服务部署手册
 
 `license_server/` 是只部署在服务器上的私有激活服务，不会进入 opub 的 wheel 或
-sdist。生产地址使用现有阿里云服务器上的 `https://dachitech.xyz/license`。
+sdist。生产地址使用阿里云服务器上的 `https://opub.cn/license`。
 
 公网只开放一个接口：
 
@@ -17,7 +17,7 @@ sdist。生产地址使用现有阿里云服务器上的 `https://dachitech.xyz/
 `opub-license:opub-license`，权限设为 `0600`：
 
 ```bash
-OPUB_PUBLIC_BASE_URL=https://dachitech.xyz/license
+OPUB_PUBLIC_BASE_URL=https://opub.cn/license
 OPUB_LICENSE_PRIVATE_KEY=<base64 编码的 32 字节 Ed25519 私钥种子>
 OPUB_LICENSE_KEY_ID=opub-license-2026-09
 OPUB_LICENSE_DB_PATH=/opt/opub/license_server/data/license.sqlite3
@@ -49,7 +49,7 @@ sudo install -o opub-license -g opub-license -m 600 /dev/null /etc/opub-license.
 .venv/bin/python -m license_server.keygen \
   --private-file .secrets/license-ed25519-private.b64 \
   --client-file publish/licensing/deployment.py \
-  --base-url https://dachitech.xyz/license \
+  --base-url https://opub.cn/license \
   --purchase-url https://afdian.com/item/69bf71f0a9f511f1bc065254001e7c00 \
   --key-id opub-license-2026-09
 ```
@@ -72,7 +72,7 @@ sudo systemctl status opub-license
 必须保持一个 worker。兑换的一致性由 SQLite 事务保障，但限流窗口保存在进程内；
 增加 worker 会把限流拆成多份。服务仅监听 `127.0.0.1:8013`，公网入口由 Caddy
 提供。将 `license_server/deploy/Caddyfile.example` 中的两个许可路由合并到现有
-`dachitech.xyz` 站点块后，先检查再重载：
+`opub.cn` 站点块后，先检查再重载：
 
 ```bash
 sudo caddy validate --config /etc/caddy/Caddyfile
@@ -202,7 +202,7 @@ sudo systemctl start opub-license
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' \
-  -X POST https://dachitech.xyz/license/v1/code-activations \
+  -X POST https://opub.cn/license/v1/code-activations \
   -H 'content-type: application/json' \
   --data '{}'
 ```

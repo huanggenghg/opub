@@ -331,6 +331,7 @@ class DouYinBaseUploader(BaseBrowserUploader):
     """抖音上传器基类 - hook layer for BaseBrowserUploader."""
 
     PLATFORM_NAME = "douyin"
+    RESULT_KIND = "video"
     UPLOAD_URL = DOUYIN_UPLOAD_URL
     LOGIN_URL = DOUYIN_LOGIN_URL
     LOGIN_MARKERS = list(DOUYIN_LOGIN_URL_MARKERS)
@@ -425,6 +426,85 @@ class DouYinBaseUploader(BaseBrowserUploader):
         await page.keyboard.type(str(publish_date_hour))
         await page.keyboard.press("Enter")
         await asyncio.sleep(1)
+
+    def _matches_published_content(self, post: dict) -> bool:
+        is_note = bool(post.get("images")) or post.get("is_pic_word") is True
+        if self.RESULT_KIND == "video":
+            return not is_note and post.get("item_title") == self.title[:30]
+        if not is_note:
+            return False
+        # 图文后台可能无 item_title，实际标题会截断至 20 字并并入 desc。
+        title = self.title[:20]
+        desc = post.get("desc")
+        if not title or not isinstance(desc, str):
+            return False
+        item_title = post.get("item_title")
+        if item_title:
+            title_matches = item_title in (title, self.title[:30])
+        else:
+            title_matches = desc.startswith(title)
+            suffix = desc[len(title):]
+            title_matches = title_matches and (
+                not suffix or suffix[0].isspace() or suffix[0] in "。.!！?？#"
+            )
+        note = self.note.strip()
+        return title_matches and (not note or note in desc)
+
+    async def _get_existing_content_ids(self, page: Page) -> set[str] | None:
+        for _ in range(2):
+            try:
+                posts = await asyncio.wait_for(_read_douyin_work_list(page), timeout=30)
+                if posts is not None:
+                    ids = [post.get("aweme_id") for post in posts]
+                    if all(isinstance(video_id, str) and re.fullmatch(r"[0-9]+", video_id) for video_id in ids):
+                        return set(ids)
+            except Exception as exc:
+                douyin_logger.debug(_msg("⚠️", f"读取发布前作品列表失败: {type(exc).__name__}"))
+        return None
+
+    async def _get_content_link(
+        self, page: Page, *, published_after: float, previous_ids: set[str] | None,
+    ) -> str | None:
+        """读取后台作品列表，匹配本次标题和提交时间；失败不改变发布结果。"""
+        if previous_ids is None:
+            return None
+        published_before = time.time() + 5
+
+        async def lookup():
+            for attempt in range(12):
+                try:
+                    posts = await _read_douyin_work_list(page)
+                    if posts is not None:
+                        matches = set()
+                        for post in posts:
+                            if not self._matches_published_content(post):
+                                continue
+                            created = post.get("create_time")
+                            if not isinstance(created, (int, float)) or not published_after <= created <= published_before:
+                                continue
+                            status = post.get("status")
+                            if isinstance(status, dict) and status.get("is_delete"):
+                                continue
+                            # item_id 数字在浏览器 JSON 解码时可能丢失精度，必须用字符串 aweme_id。
+                            video_id = post.get("aweme_id")
+                            if (isinstance(video_id, str) and re.fullmatch(r"[0-9]+", video_id)
+                                    and video_id not in previous_ids):
+                                matches.add(video_id)
+                        if len(matches) == 1:
+                            return f"https://www.douyin.com/{self.RESULT_KIND}/{matches.pop()}"
+                        if len(matches) > 1:
+                            return None  # 同名且同时发布时不猜测。
+                except Exception as exc:
+                    douyin_logger.debug(_msg("⚠️", f"后台作品链接查询暂不可用: {type(exc).__name__}"))
+                if attempt < 11:
+                    await asyncio.sleep(5)
+            return None
+
+        try:
+            return await asyncio.wait_for(lookup(), timeout=DOUYIN_RESULT_WAIT_TIMEOUT)
+        except Exception as exc:
+            douyin_logger.warning(_msg("⚠️", f"后台作品链接查询未完成: {type(exc).__name__}"))
+            return None
 
     async def fill_title_and_description(self, page: Page, title: str, description: str, tags: list[str] | None = None):
         description_section = (
@@ -633,7 +713,7 @@ class DouYinVideo(DouYinBaseUploader):
     async def upload_video_content(self, page: Page) -> str | None:
         """上传视频内容(页面已通过 _browser_session 打开)。返回视频链接或 None。"""
         # 在填写上传表单前读取基线，查询失败也不妨碍正常发布。
-        previous_ids = await self._get_existing_video_ids(page)
+        previous_ids = await self._get_existing_content_ids(page)
         douyin_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
         douyin_logger.info(_msg("🧭", "小人正在赶往上传主页"))
         await page.goto(DOUYIN_UPLOAD_URL)
@@ -729,7 +809,7 @@ class DouYinVideo(DouYinBaseUploader):
             raise TimeoutError(f"发布视频超时({DOUYIN_PUBLISH_WAIT_TIMEOUT}秒)，页面一直未跳转到管理页")
 
         # 链接查询在提交循环之外；查询异常绝不能导致重复点击发布。
-        video_link = await self._get_video_link(
+        video_link = await self._get_content_link(
             page, published_after=published_after, previous_ids=previous_ids,
         )
         if video_link:
@@ -769,64 +849,9 @@ class DouYinVideo(DouYinBaseUploader):
 
         return result
 
-    async def _get_existing_video_ids(self, page: Page) -> set[str] | None:
-        for _ in range(2):
-            try:
-                posts = await asyncio.wait_for(_read_douyin_work_list(page), timeout=30)
-                if posts is not None:
-                    ids = [post.get("aweme_id") for post in posts]
-                    if all(isinstance(video_id, str) and re.fullmatch(r"[0-9]+", video_id) for video_id in ids):
-                        return set(ids)
-            except Exception as exc:
-                douyin_logger.debug(_msg("⚠️", f"读取发布前作品列表失败: {type(exc).__name__}"))
-        return None
-
-    async def _get_video_link(
-        self, page: Page, *, published_after: float, previous_ids: set[str] | None,
-    ) -> str | None:
-        """读取后台作品列表，匹配本次标题和提交时间；失败不改变发布结果。"""
-        if previous_ids is None:
-            return None
-        published_before = time.time() + 5
-
-        async def lookup():
-            for attempt in range(12):
-                try:
-                    posts = await _read_douyin_work_list(page)
-                    if posts is not None:
-                        matches = set()
-                        for post in posts:
-                            if post.get("item_title") != self.title[:30]:
-                                continue
-                            created = post.get("create_time")
-                            if not isinstance(created, (int, float)) or not published_after <= created <= published_before:
-                                continue
-                            status = post.get("status")
-                            if isinstance(status, dict) and status.get("is_delete"):
-                                continue
-                            # item_id 数字在浏览器 JSON 解码时可能丢失精度，必须用字符串 aweme_id。
-                            video_id = post.get("aweme_id")
-                            if (isinstance(video_id, str) and re.fullmatch(r"[0-9]+", video_id)
-                                    and video_id not in previous_ids):
-                                matches.add(video_id)
-                        if len(matches) == 1:
-                            return build_video_link(matches.pop())
-                        if len(matches) > 1:
-                            return None  # 同名且同时发布时不猜测。
-                except Exception as exc:
-                    douyin_logger.debug(_msg("⚠️", f"后台作品链接查询暂不可用: {type(exc).__name__}"))
-                if attempt < 11:
-                    await asyncio.sleep(5)
-            return None
-
-        try:
-            return await asyncio.wait_for(lookup(), timeout=DOUYIN_RESULT_WAIT_TIMEOUT)
-        except Exception as exc:
-            douyin_logger.warning(_msg("⚠️", f"后台作品链接查询未完成: {type(exc).__name__}"))
-            return None
-
-
 class DouYinNote(DouYinBaseUploader):
+    RESULT_KIND = "note"
+
     def __init__(
         self,
         image_paths,
@@ -869,7 +894,10 @@ class DouYinNote(DouYinBaseUploader):
             normalized_image_paths.append(str(self.validate_image_file(image_path)))
         self.image_paths = normalized_image_paths
 
-    async def upload_note_content(self, page: Page) -> None:
+    async def upload_note_content(self, page: Page) -> str | None:
+        previous_ids = await self._get_existing_content_ids(page)
+        await page.goto(DOUYIN_UPLOAD_URL)
+        await page.wait_for_url(DOUYIN_UPLOAD_URL)
         douyin_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
         douyin_logger.info(_msg("🔀", "小人正在切换到图文发布"))
         await page.get_by_text("发布图文", exact=True).click()
@@ -905,6 +933,7 @@ class DouYinNote(DouYinBaseUploader):
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
 
+        published_after = time.time() - 5
         deadline = time.monotonic() + DOUYIN_PUBLISH_WAIT_TIMEOUT
         while time.monotonic() < deadline:
             try:
@@ -923,6 +952,10 @@ class DouYinNote(DouYinBaseUploader):
         else:
             raise TimeoutError(f"发布图文超时({DOUYIN_PUBLISH_WAIT_TIMEOUT}秒)，页面一直未跳转到管理页")
 
+        return await self._get_content_link(
+            page, published_after=published_after, previous_ids=previous_ids,
+        )
+
     async def upload(self) -> PlatformResultExtras:
         """主入口，返回 PlatformResultExtras。捕获 DouyinPublishRestrictedError 映射为 account_issue。"""
         douyin_logger.info(_msg("🧍", "小人先检查 cookie、图片和发布时间"))
@@ -933,13 +966,12 @@ class DouYinNote(DouYinBaseUploader):
 
         try:
             async with self._browser_session(save_on_success_only=True) as page:
-                await page.goto(DOUYIN_UPLOAD_URL)
-                douyin_logger.info(_msg("🧭", "小人正在赶往图文发布页"))
-                await page.wait_for_url(DOUYIN_UPLOAD_URL)
-
-                await self.upload_note_content(page)
+                content_link = await self.upload_note_content(page)
                 result["success"] = True
                 result["message"] = "发布成功"
+                if content_link:
+                    result["result_url"] = content_link
+                    result["message"] = f"发布成功，图文链接: {content_link}"
             douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
         except (LoginCheckError, LoginTimeoutError):
             raise

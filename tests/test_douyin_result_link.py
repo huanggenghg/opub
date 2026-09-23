@@ -52,7 +52,7 @@ def resolve(payloads):
     app = uploader()
     with patch('uploader.douyin_uploader.main.asyncio.sleep', AsyncMock()), \
          patch('uploader.douyin_uploader.main.time.time', return_value=NOW + 4):
-        result = asyncio.run(app._get_video_link(page, published_after=NOW - 1, previous_ids=set()))
+        result = asyncio.run(app._get_content_link(page, published_after=NOW - 1, previous_ids=set()))
     return result, page
 
 
@@ -93,7 +93,7 @@ def test_network_failure_returns_no_link_without_public_profile_navigation():
     page = Page([])
     page.expect_response = Mock(side_effect=TimeoutError('offline'))
     with patch('uploader.douyin_uploader.main.asyncio.sleep', AsyncMock()):
-        result = asyncio.run(uploader()._get_video_link(page, published_after=NOW, previous_ids=set()))
+        result = asyncio.run(uploader()._get_content_link(page, published_after=NOW, previous_ids=set()))
     assert result is None
     page.locator.assert_not_called()
 
@@ -105,7 +105,7 @@ def test_result_lookup_has_total_timeout():
     page.goto = never_ready
     page.payloads = iter([{'status_code': 0, 'aweme_list': []}])
     with patch('uploader.douyin_uploader.main.DOUYIN_RESULT_WAIT_TIMEOUT', 0.01):
-        result = asyncio.run(uploader()._get_video_link(page, published_after=NOW, previous_ids=set()))
+        result = asyncio.run(uploader()._get_content_link(page, published_after=NOW, previous_ids=set()))
     assert result is None
 
 
@@ -125,10 +125,10 @@ def test_successful_submission_with_missing_link_clicks_publish_only_once():
                            locator=locator, get_by_role=Mock(return_value=publish_button))
     with patch('uploader.douyin_uploader.main._check_douyin_publish_restriction', AsyncMock(return_value=None)), \
          patch('uploader.douyin_uploader.main.asyncio.sleep', AsyncMock()), \
-         patch.object(app, '_get_existing_video_ids', AsyncMock(return_value=set())), \
+         patch.object(app, '_get_existing_content_ids', AsyncMock(return_value=set())), \
          patch.object(app, 'fill_title_and_description', AsyncMock()), \
          patch.object(app, 'set_thumbnail', AsyncMock()), \
-         patch.object(app, '_get_video_link', AsyncMock(return_value=None)) as lookup:
+         patch.object(app, '_get_content_link', AsyncMock(return_value=None)) as lookup:
         assert asyncio.run(app.upload_video_content(page)) is None
     publish_button.click.assert_awaited_once()
     lookup.assert_awaited_once()
@@ -162,27 +162,27 @@ def test_excludes_recent_same_title_post_present_before_submission():
                  {'status_code': 0, 'aweme_list': [old, post()]}])
     with patch('uploader.douyin_uploader.main.asyncio.sleep', AsyncMock()), \
          patch('uploader.douyin_uploader.main.time.time', return_value=NOW+4):
-        result = asyncio.run(uploader()._get_video_link(
+        result = asyncio.run(uploader()._get_content_link(
             page, published_after=NOW-5, previous_ids={old['aweme_id']}))
     assert result == f'https://www.douyin.com/video/{VIDEO_ID}'
 
 
 def test_missing_baseline_does_not_guess_content_identity():
     page = Page([{'status_code': 0, 'aweme_list': [post()]}])
-    assert asyncio.run(uploader()._get_video_link(
+    assert asyncio.run(uploader()._get_content_link(
         page, published_after=NOW-5, previous_ids=None)) is None
     page.goto.assert_not_awaited()
 
 
 def test_reads_existing_ids_before_submission():
     page = Page([{'status_code': 0, 'aweme_list': [post()]}])
-    assert asyncio.run(uploader()._get_existing_video_ids(page)) == {VIDEO_ID}
+    assert asyncio.run(uploader()._get_existing_content_ids(page)) == {VIDEO_ID}
 
 
 @pytest.mark.parametrize('payload', [None, {'status_code': 1},
     {'status_code': 0, 'aweme_list': None}, {'status_code': 0, 'aweme_list': [None]}])
 def test_invalid_baseline_is_not_an_empty_account(payload):
-    assert asyncio.run(uploader()._get_existing_video_ids(Page([payload]))) is None
+    assert asyncio.run(uploader()._get_existing_content_ids(Page([payload]))) is None
 
 
 def test_baseline_retries_transient_failure():
@@ -190,4 +190,4 @@ def test_baseline_retries_transient_failure():
     with patch('uploader.douyin_uploader.main._read_douyin_work_list',
                AsyncMock(side_effect=[TimeoutError(), [post()]])), \
          patch('uploader.douyin_uploader.main.asyncio.sleep', AsyncMock()):
-        assert asyncio.run(uploader()._get_existing_video_ids(page)) == {VIDEO_ID}
+        assert asyncio.run(uploader()._get_existing_content_ids(page)) == {VIDEO_ID}

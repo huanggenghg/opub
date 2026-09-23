@@ -120,7 +120,7 @@ def _run_upload(uploader):
 class TestStaleLoginUploadRecovery:
     def test_stale_upload_failure_relogins_and_retries_once(self, tmp_path):
         uploader = _make_uploader(tmp_path)
-        list_outputs = iter(["", "", "BV1\tt"])
+        list_outputs = iter(["", "", "BV1\tt", "BV1\tt"])
         upload_outputs = iter([
             subprocess.CompletedProcess([], 1, stderr="Error: Request failed after 5 retries"),
             subprocess.CompletedProcess([], 0, stdout="上传成功"),

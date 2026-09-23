@@ -392,9 +392,9 @@ class PackageBuildTest(unittest.TestCase):
         skill_text = (repo_root / "skills/opub-cli/SKILL.md").read_text(encoding="utf-8")
         lock_text = (repo_root / "uv.lock").read_text(encoding="utf-8")
 
-        self.assertIn('version = "0.8.20"', pyproject_text)
-        self.assertIn('version: "0.8.20"', skill_text)
-        self.assertIn('name = "opub"\nversion = "0.8.20"', lock_text)
+        self.assertIn('version = "0.8.21"', pyproject_text)
+        self.assertIn('version: "0.8.21"', skill_text)
+        self.assertIn('name = "opub"\nversion = "0.8.21"', lock_text)
         self.assertNotIn('{ name = "qrcode"', lock_text)
 
     def test_license_client_uses_opub_domain(self):

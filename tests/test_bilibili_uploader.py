@@ -23,6 +23,25 @@ def _make_uploader() -> BilibiliUploader:
 
 
 class ListBvsTests(unittest.TestCase):
+    def test_limits_lookup_to_first_page_when_full_pagination_is_unstable(self):
+        uploader = _make_uploader()
+
+        def fake_command(args):
+            if args[-2:] == ["--max-pages", "1"]:
+                return _make_completed(0, stdout="BVNEW\t测试标题\t开放浏览\n")
+            return _make_completed(
+                1,
+                stderr="archive API pagination metadata changed between pages",
+            )
+
+        with patch(
+            "uploader.bilibili_uploader.main.run_biliup_command_async",
+            side_effect=fake_command,
+        ):
+            bvs = asyncio.run(uploader._list_bvs())
+
+        self.assertEqual(bvs, {"BVNEW"})
+
     def test_upload_failure_redacts_credentials_from_result_and_log(self):
         uploader = _make_uploader()
         stderr = (
@@ -72,6 +91,25 @@ class ListBvsTests(unittest.TestCase):
 
 
 class MatchBvByTitleTests(unittest.TestCase):
+    def test_limits_title_fallback_to_first_page_when_full_pagination_is_unstable(self):
+        uploader = _make_uploader()
+
+        def fake_command(args):
+            if args[-2:] == ["--max-pages", "1"]:
+                return _make_completed(0, stdout="BVNEW\t测试标题\t开放浏览\n")
+            return _make_completed(
+                1,
+                stderr="archive API pagination metadata changed between pages",
+            )
+
+        with patch(
+            "uploader.bilibili_uploader.main.run_biliup_command_async",
+            side_effect=fake_command,
+        ):
+            bv = asyncio.run(uploader._match_bv_by_title())
+
+        self.assertEqual(bv, "BVNEW")
+
     def test_returns_bv_when_title_matches(self):
         stdout = "BV15r3q6FEYZ\t无小丑\t开放浏览\nBV1QQgy6rEaA\t测试标题\t开放浏览\n"
         uploader = _make_uploader()
@@ -86,12 +124,19 @@ class MatchBvByTitleTests(unittest.TestCase):
             bv = asyncio.run(uploader._match_bv_by_title())
         self.assertIsNone(bv)
 
-    def test_returns_first_bv_when_multiple_matches(self):
+    def test_returns_none_when_multiple_matches_are_ambiguous(self):
         stdout = "BV1111111111\t测试标题\t开放浏览\nBV2222222222\t测试标题\t开放浏览\n"
         uploader = _make_uploader()
         with patch("uploader.bilibili_uploader.main.run_biliup_command_async", return_value=_make_completed(0, stdout=stdout)):
             bv = asyncio.run(uploader._match_bv_by_title())
-        self.assertEqual(bv, "BV1111111111")
+        self.assertIsNone(bv)
+
+    def test_excludes_preexisting_same_title_bv(self):
+        stdout = "BVOLD\t测试标题\t开放浏览\n"
+        uploader = _make_uploader()
+        with patch("uploader.bilibili_uploader.main.run_biliup_command_async", return_value=_make_completed(0, stdout=stdout)):
+            bv = asyncio.run(uploader._match_bv_by_title({"BVOLD"}))
+        self.assertIsNone(bv)
 
     def test_returns_none_when_command_fails(self):
         uploader = _make_uploader()
@@ -105,10 +150,26 @@ class CaptureBvAfterUploadTests(unittest.TestCase):
         uploader = _make_uploader()
         before = {"BV1111111111"}
         with patch.object(uploader, "_list_bvs", return_value={"BV1111111111", "BV2222222222"}), \
-             patch.object(uploader, "_match_bv_by_title") as match_mock:
+             patch.object(uploader, "_match_bv_by_title", return_value="BV2222222222") as match_mock:
             bv = asyncio.run(uploader._capture_bv_after_upload(before, max_retries=3, delay=0))
         self.assertEqual(bv, "BV2222222222")
-        match_mock.assert_not_called()
+        match_mock.assert_awaited_once_with(before)
+
+    def test_does_not_attribute_unrelated_unique_new_bv(self):
+        uploader = _make_uploader()
+        before = {"BV1111111111"}
+        with patch.object(uploader, "_list_bvs", return_value={"BV1111111111", "BVOTHER"}), \
+             patch.object(uploader, "_match_bv_by_title", return_value=None):
+            bv = asyncio.run(uploader._capture_bv_after_upload(before, max_retries=2, delay=0))
+        self.assertIsNone(bv)
+
+    def test_does_not_return_title_match_different_from_unique_diff_candidate(self):
+        uploader = _make_uploader()
+        before = {"BV1111111111"}
+        with patch.object(uploader, "_list_bvs", return_value={"BV1111111111", "BVUNRELATED"}), \
+             patch.object(uploader, "_match_bv_by_title", return_value="BVOTHER"):
+            bv = asyncio.run(uploader._capture_bv_after_upload(before, max_retries=1, delay=0))
+        self.assertIsNone(bv)
 
     def test_falls_back_to_title_match_after_retries_exhausted(self):
         uploader = _make_uploader()
@@ -117,7 +178,7 @@ class CaptureBvAfterUploadTests(unittest.TestCase):
              patch.object(uploader, "_match_bv_by_title", return_value="BV3333333333") as match_mock:
             bv = asyncio.run(uploader._capture_bv_after_upload(before, max_retries=2, delay=0))
         self.assertEqual(bv, "BV3333333333")
-        self.assertEqual(match_mock.call_count, 1)
+        match_mock.assert_awaited_once_with(before)
 
     def test_falls_back_to_title_match_when_multiple_new_bvs(self):
         uploader = _make_uploader()
@@ -127,7 +188,7 @@ class CaptureBvAfterUploadTests(unittest.TestCase):
              patch.object(uploader, "_match_bv_by_title", return_value="BV2222222222") as match_mock:
             bv = asyncio.run(uploader._capture_bv_after_upload(before, max_retries=3, delay=0))
         self.assertEqual(bv, "BV2222222222")
-        self.assertEqual(match_mock.call_count, 1)
+        match_mock.assert_awaited_once_with(before)
 
     def test_returns_none_when_all_paths_fail(self):
         uploader = _make_uploader()

@@ -138,12 +138,17 @@ class BilibiliUploader(BaseCliUploader):
         return True
 
     async def _list_bvs(self, *, strict: bool = False) -> set[str]:
-        """跑 biliup list,返回当前账号所有 BV 集合。命令失败返回空集,不抛异常。
+        """查询最新一页稿件,返回其中的 BV 集合。命令失败返回空集,不抛异常。
+
+        抓取刚发布的稿件只需要第一页。限制为一页还能避开新稿入列期间
+        biliup 全量分页的 metadata changed between pages 错误。
 
         strict=True 时命令失败改为抛 _BiliupListCommandError,
         供 _list_bvs_with_status 感知 list 成败。
         """
-        result = await run_biliup_command_async(["-u", self.account_file, "list"])
+        result = await run_biliup_command_async(
+            ["-u", self.account_file, "list", "--max-pages", "1"]
+        )
         if result.returncode != 0:
             bilibili_logger.warning(f"biliup list 失败,返回空集: {_redact_biliup_error((result.stderr or '').strip())[:200]}")
             if strict:
@@ -163,20 +168,29 @@ class BilibiliUploader(BaseCliUploader):
         except (subprocess.TimeoutExpired, _BiliupListCommandError):
             return set(), False
 
-    async def _match_bv_by_title(self) -> str | None:
-        """fallback: 在 biliup list 里找 title 等于 self.title 的行,返回 BV。"""
-        result = await run_biliup_command_async(["-u", self.account_file, "list"])
+    async def _match_bv_by_title(self, exclude_bvs: set[str] | None = None) -> str | None:
+        """在最新一页按标题匹配唯一的新 BV；歧义时不猜测。"""
+        result = await run_biliup_command_async(
+            ["-u", self.account_file, "list", "--max-pages", "1"]
+        )
         if result.returncode != 0:
             return None
+        excluded = exclude_bvs or set()
         matches: list[str] = []
         for line in (result.stdout or "").splitlines():
             parts = line.split("\t", 2)
-            if len(parts) >= 2 and parts[0].startswith("BV") and parts[1] == self.title:
+            if (
+                len(parts) >= 2
+                and parts[0].startswith("BV")
+                and parts[0] not in excluded
+                and parts[1] == self.title
+            ):
                 matches.append(parts[0])
         if not matches:
             return None
         if len(matches) > 1:
-            bilibili_logger.warning(f"title 匹配到多个 BV: {matches},取第一个")
+            bilibili_logger.warning(f"title 匹配到多个新 BV,无法安全归因: {matches}")
+            return None
         return matches[0]
 
     async def _capture_bv_after_upload(self, before_bvs: set[str], max_retries: int = 3, delay: float = 2.0) -> str | None:
@@ -187,18 +201,26 @@ class BilibiliUploader(BaseCliUploader):
         - >1 个新 BV: 立刻 fallback 到 title 匹配
         - 重试耗尽: fallback 到 title 匹配
         """
+        saw_mismatched_candidate = False
         for attempt in range(max_retries):
             after_bvs = await self._list_bvs()
             new_bvs = after_bvs - before_bvs
             if len(new_bvs) == 1:
-                return next(iter(new_bvs))
+                candidate_bv = next(iter(new_bvs))
+                matched_bv = await self._match_bv_by_title(before_bvs)
+                if matched_bv == candidate_bv:
+                    return matched_bv
+                saw_mismatched_candidate = True
             if len(new_bvs) > 1:
                 bilibili_logger.warning(f"diff 出 {len(new_bvs)} 个新 BV,fallback 到 title 匹配: {new_bvs}")
-                return await self._match_bv_by_title()
+                return await self._match_bv_by_title(before_bvs)
             if attempt < max_retries - 1:
                 await asyncio.sleep(delay)
+        if saw_mismatched_candidate:
+            bilibili_logger.warning("新 BV 与标题匹配结果不一致,跳过链接归因")
+            return None
         bilibili_logger.warning(f"重试 {max_retries} 次仍未拿到新 BV,fallback 到 title 匹配")
-        return await self._match_bv_by_title()
+        return await self._match_bv_by_title(before_bvs)
 
     @staticmethod
     def _is_stale_login_upload_failure(detail: str) -> bool:

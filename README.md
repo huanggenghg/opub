@@ -1,5 +1,7 @@
 # opub
 
+> **历史开源版本说明**：本仓库保留 opub 0.8.21 及更早版本的源码与 MIT 权利，不再承载 0.9.0 之后的核心运行时开发。当前产品入口、Agent Skill、安装说明和问题反馈请前往 [huanggenghg/opub-skill](https://github.com/huanggenghg/opub-skill)。0.9.0 继续通过 `pip install opub` 分发经过编译的 wheel；本次迁移不会撤销任何人已经取得的历史 MIT 权利。
+
 `opub` 是一个 Python 工具包，把视频/图文一键发布到国内主流社交媒体平台，支持定时发布。
 
 已支持 `抖音`、`小红书`、`快手`、Bilibili、`视频号`、`百家号`、`微博` 共 7 个平台。
